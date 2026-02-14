@@ -349,16 +349,6 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 
 	cmdLower := strings.ToLower(cmdName)
 
-	// Helper to make an eval context with correct executor/cause
-	makeCtx := func() *eval.EvalContext {
-		ctx := MakeEvalContextWithGame(g, player, func(c *eval.EvalContext) {
-			functions.RegisterAll(c)
-		})
-		ctx.Cause = cause
-		ctx.Caller = cause
-		return ctx
-	}
-
 	// Handle /switches on @commands
 	if slashIdx := strings.IndexByte(cmdLower, '/'); slashIdx >= 0 {
 		cmdLower = cmdLower[:slashIdx]
@@ -367,19 +357,15 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	// Handle key commands that objects can execute
 	switch cmdLower {
 	case "think":
-		// Think just evaluates - output goes to owner
-		ctx := makeCtx()
-		result := ctx.Exec(args, eval.EvFCheck|eval.EvEval, nil)
+		// Args arrive already evaluated from queue — send directly to owner
 		if obj, ok := g.DB.Objects[player]; ok {
-			g.Conns.SendToPlayer(obj.Owner, result)
+			g.Conns.SendToPlayer(obj.Owner, args)
 		}
 	case "@pemit":
+		// Commands arrive already evaluated from ExecuteQueueEntry — do NOT re-evaluate.
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(args[eqIdx+1:])
-			ctx := makeCtx()
-			targetStr = ctx.Exec(targetStr, eval.EvFCheck|eval.EvEval, nil)
-			message = ctx.Exec(message, eval.EvFCheck|eval.EvEval, nil)
+			message := args[eqIdx+1:]
 			target := g.ResolveRef(player, targetStr)
 			if target != gamedb.Nothing {
 				g.SendMarkedToPlayer(target, "EMIT", message)
@@ -388,17 +374,12 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@emit":
 		loc := g.PlayerLocation(player)
 		if loc != gamedb.Nothing {
-			ctx := makeCtx()
-			msg := ctx.Exec(args, eval.EvFCheck|eval.EvEval, nil)
-			g.SendMarkedToRoom(loc, "EMIT", msg)
+			g.SendMarkedToRoom(loc, "EMIT", args)
 		}
 	case "@oemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(args[eqIdx+1:])
-			ctx := makeCtx()
-			targetStr = ctx.Exec(targetStr, eval.EvFCheck|eval.EvEval, nil)
-			message = ctx.Exec(message, eval.EvFCheck|eval.EvEval, nil)
+			message := args[eqIdx+1:]
 			target := g.ResolveRef(player, targetStr)
 			if target != gamedb.Nothing {
 				if tObj, ok := g.DB.Objects[target]; ok {
@@ -409,10 +390,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@remit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			roomStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(args[eqIdx+1:])
-			ctx := makeCtx()
-			roomStr = ctx.Exec(roomStr, eval.EvFCheck|eval.EvEval, nil)
-			message = ctx.Exec(message, eval.EvFCheck|eval.EvEval, nil)
+			message := args[eqIdx+1:]
 			room := g.ResolveRef(player, roomStr)
 			if room != gamedb.Nothing {
 				g.SendMarkedToRoom(room, "EMIT", message)
