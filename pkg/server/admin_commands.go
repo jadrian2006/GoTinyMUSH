@@ -867,13 +867,13 @@ func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
 // parseEditArgs splits "search,replace" respecting brace quoting.
 // Returns (from, to). If only one part, to is empty.
 func parseEditArgs(s string) (string, string) {
-	s = strings.TrimSpace(s)
-	// Strip outer braces from each part
+	// Only trim leading space before the search term, preserve the replacement as-is
+	// This matches TinyMUSH behavior: @edit obj/attr=$, text  -> append " text"
 	parts := splitEditComma(s)
 	from := stripBraces(strings.TrimSpace(parts[0]))
 	to := ""
 	if len(parts) > 1 {
-		to = stripBraces(strings.TrimSpace(parts[1]))
+		to = stripBraces(parts[1])
 	}
 	return from, to
 }

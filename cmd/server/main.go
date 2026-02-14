@@ -277,7 +277,7 @@ func main() {
 	// Apply game config
 	srv.Game.ApplyGameConf(gc)
 
-	// Handle -godpass: set God password and exit
+	// Handle -godpass: set God password on startup (continues booting)
 	if *godPass != "" {
 		godRef := srv.Game.GodPlayer()
 		if _, ok := srv.Game.DB.Objects[godRef]; !ok {
@@ -285,11 +285,7 @@ func main() {
 		}
 		hash := mushcrypt.Crypt(*godPass, "XX")
 		srv.Game.SetAttr(godRef, 5, hash) // A_PASS = 5
-		log.Printf("God (#%d) password updated.", godRef)
-		if store != nil {
-			store.Close()
-		}
-		os.Exit(0)
+		log.Printf("God (#%d) password set at startup.", godRef)
 	}
 
 	// Load text files if directory specified

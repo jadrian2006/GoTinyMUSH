@@ -121,7 +121,7 @@ func InitCommands() map[string]*Command {
 	register("qhelp", cmdQhelp)
 	register("wizhelp", cmdWizhelp)
 	register("news", cmdNews)
-	register("+help", cmdPlusHelp)
+	// +help intentionally NOT registered as built-in — handled by softcode $+help on #25
 
 	// Player object commands
 	register("get", cmdGet)
@@ -1245,8 +1245,9 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	}
 
 	// Build list of visible exit dbrefs
-	// TinyMUSH visibility: Can_See_Exit checks Darkened (DARK + optional dark-lock),
-	// and in a DARK room only LIGHT exits are shown.
+	// TinyMUSH Can_See_Exit(p,x,l): !Darkened(p,x) && (!(l) || Light(x))
+	// DARK exits are ALWAYS hidden (even from wizards) — no SeeAll bypass.
+	// In a DARK room, only LIGHT exits are visible.
 	roomIsDark := roomObj.HasFlag(gamedb.FlagDark)
 	var exitRefs []gamedb.DBRef
 	exitRef := roomObj.Exits
@@ -1255,17 +1256,13 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		if !ok {
 			break
 		}
-		canSee := false
-		if SeeAll(g, d.Player) || Controls(g, d.Player, exitRef) {
-			canSee = true
-		} else if exitObj.HasFlag(gamedb.FlagDark) {
-			// DARK exits are hidden from non-privileged viewers
+		canSee := true
+		if exitObj.HasFlag(gamedb.FlagDark) {
+			// DARK exits are always hidden (Can_See_Exit: !Darkened)
 			canSee = false
 		} else if roomIsDark && !exitObj.HasFlag2(gamedb.Flag2Light) {
 			// In a DARK room, only LIGHT exits are visible
 			canSee = false
-		} else {
-			canSee = true
 		}
 		if canSee {
 			exitRefs = append(exitRefs, exitRef)

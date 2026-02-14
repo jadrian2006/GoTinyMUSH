@@ -90,7 +90,7 @@ MUSH_GODPASS=mynewpassword ./gotinymush -bolt data/game.bolt -conf data/game.yam
 $env:MUSH_GODPASS="mynewpassword"; .\gotinymush.exe -bolt data\game.bolt -conf data\game.yaml
 ```
 
-The `-godpass` flag also works but **environment variables are recommended** since command-line arguments are visible in process listings (`ps`, Task Manager). The `MUSH_GODPASS` env var sets the password and exits without starting the server.
+The `-godpass` flag also works but **environment variables are recommended** since command-line arguments are visible in process listings (`ps`, Task Manager). When `MUSH_GODPASS` is set, the password is applied at startup and the server continues booting normally — useful in `docker-compose.yml` for automatic password management.
 
 ### 5. First steps once connected
 
@@ -246,6 +246,11 @@ TinyMUSH used Unix `crypt(3)`. GoTinyMUSH uses the same DES-based crypt for back
 - **Docker deployment** with docker-compose
 - **SQLite3 SQL module** with sql(), sqlescape(), @sql, @sqlinit, @sqldisconnect
 - **SSL/TLS** with dual cleartext/TLS listeners on independent ports
+- **Web interface** with HTTPS server, WebSocket transport, REST API, and Preact web client
+- **OOB protocols** (GMCP, MSDP, MCP) for structured data to MUD clients
+- **Event bus** decoupling game output from transport encoding
+- **Channel scrollback** with SQLite storage and configurable retention
+- **Encrypted personal scrollback** with client-side AES-256-GCM encryption
 
 For detailed documentation on new features, see [docs/FEATURES.md](docs/FEATURES.md). For the flight/navigation system, see [docs/FLIGHT.md](docs/FLIGHT.md).
 
@@ -301,7 +306,7 @@ gotinymush -conf <config.yaml> -db <flatfile> -bolt <database.bolt> [options]
 | `-bolt` | `MUSH_BOLT` | Path to bbolt database (enables persistence) |
 | `-import` | `MUSH_IMPORT=true` | Force reimport from flatfile into bbolt |
 | `-restore` | `MUSH_RESTORE` | Restore from archive before boot |
-| `-godpass` | `MUSH_GODPASS` | Set God (#1) password and exit (use env var for security) |
+| `-godpass` | `MUSH_GODPASS` | Set God (#1) password at startup (use env var for security) |
 | `-port` | `MUSH_PORT` | Override listen port |
 | `-textdir` | `MUSH_TEXTDIR` | Path to text files directory |
 | `-aliasconf` | `MUSH_ALIASCONF` | Path to alias config file(s), comma-separated |
@@ -372,6 +377,78 @@ MUSH_TLS=true MUSH_TLS_CERT=cert.pem MUSH_TLS_KEY=key.pem ./gotinymush -conf dat
 
 Both cleartext (port 6250) and TLS (port 6251) listeners run simultaneously by default. Set `cleartext: false` in config to disable the plaintext listener.
 
+## Web Interface
+
+GoTinyMUSH includes a built-in HTTPS server with a WebSocket transport, REST API, and a browser-based web client.
+
+### Enabling the Web Server
+
+Add to `game.yaml`:
+
+```yaml
+web_enabled: true
+web_port: 8443
+web_static_dir: web/dist       # Path to built web client
+web_cors_origins: []            # Allowed CORS origins (empty = same-origin only)
+web_rate_limit: 60              # Max requests per minute per IP
+jwt_expiry: 86400               # JWT token lifetime in seconds (default 24h)
+scrollback_retention: 86400     # Public channel scrollback retention in seconds
+```
+
+Or via Docker:
+
+```yaml
+# docker-compose.yml
+ports:
+  - "8443:8443"
+```
+
+The web server generates a self-signed TLS certificate automatically for development. For production, set `web_domain` to your domain name to enable automatic Let's Encrypt certificates, or provide your own cert/key files via the TLS settings.
+
+### Web Client
+
+The included Preact-based web client provides:
+
+- Full game interaction over WebSocket with JSON-structured events
+- Command input with history (up/down arrow keys)
+- ANSI color rendering
+- Channel panel with scrollback
+- Connected player list (WHO)
+- JWT-authenticated sessions
+
+**Public mode** (no login): View WHO list and public channel scrollback.
+**Authenticated mode**: Full game access over WebSocket.
+
+Access the web client at `https://your-server:8443/` after enabling the web server.
+
+### REST API
+
+All endpoints use JSON. Authentication uses JWT Bearer tokens.
+
+| Endpoint | Method | Auth | Description |
+|---|---|---|---|
+| `/api/v1/auth/login` | POST | No | Login with `{"username","password"}`, returns JWT |
+| `/api/v1/auth/refresh` | POST | Yes | Refresh an expiring JWT token |
+| `/api/v1/who` | GET | No | Connected player list |
+| `/api/v1/command` | POST | Yes | Execute a command, returns captured output |
+| `/api/v1/objects/{dbref}` | GET | Yes | Object info (permission-gated via Examinable) |
+| `/api/v1/objects/{dbref}/attrs/{name}` | GET | Yes | Attribute value (permission-gated via CanReadAttr) |
+| `/api/v1/channels` | GET | Yes | Channel list |
+| `/api/v1/channels/{name}/history` | GET | Yes | Public channel scrollback |
+| `/api/v1/scrollback` | GET/POST | Yes | Personal encrypted scrollback |
+
+**WebSocket**: Connect to `wss://your-server:8443/ws` for real-time game interaction. Send JSON commands, receive structured game events.
+
+### OOB Protocol Support
+
+GoTinyMUSH supports out-of-band protocols for enhanced MUD client integration:
+
+- **GMCP** (Generic MUD Communication Protocol) — JSON-structured data via telnet subnegotiation (opt 201)
+- **MSDP** (MUD Server Data Protocol) — Key-value data via telnet subnegotiation (opt 69)
+- **MCP** (MUD Client Protocol) — In-band `#$#` message protocol
+
+OOB protocols are negotiated automatically when a telnet client connects. Clients like Mudlet and MUSHclient that support GMCP will receive structured room info, channel messages, and player data alongside normal text output.
+
 ## Testing
 
 ```bash
@@ -399,11 +476,14 @@ cmd/
 pkg/
   archive/      Archive/backup/restore system
   eval/         Softcode evaluation engine (exec, %-subs, functions)
+  events/       Event bus (per-player pub/sub, global subscribers)
   flatfile/     TinyMUSH flatfile parser
   boltstore/    bbolt persistence layer
   gamedb/       Database types (Object, DBRef, flags, attributes)
-  server/       TCP server, commands, help system, softcode queue
+  oob/          OOB protocols (GMCP, MSDP, MCP, telnet negotiation)
+  server/       TCP/WebSocket server, commands, REST API, softcode queue
   crypt/        DES password hashing (TinyMUSH compat)
+web/            Preact web client (Vite + Tailwind CSS)
 data/
   game.yaml             Example game configuration
   goTinyAlias.conf      Command/flag/function/attribute aliases
