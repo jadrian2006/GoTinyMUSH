@@ -519,9 +519,11 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 			break
 		}
 		// Exit names can have aliases separated by ;
+		// TinyMUSH uses prefix matching: "o" matches "Out", "ou" matches "Out", etc.
 		exitNames := strings.Split(exitObj.Name, ";")
 		for _, ename := range exitNames {
-			if strings.EqualFold(strings.TrimSpace(ename), name) {
+			ename = strings.TrimSpace(ename)
+			if len(name) > 0 && len(ename) >= len(name) && strings.EqualFold(ename[:len(name)], name) {
 				// Found matching exit - move player
 				dest := exitObj.Link
 				if dest == gamedb.Nothing || dest == gamedb.Home {
@@ -1071,6 +1073,9 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	}
 
 	// Build list of visible exit dbrefs
+	// TinyMUSH visibility: Can_See_Exit checks Darkened (DARK + optional dark-lock),
+	// and in a DARK room only LIGHT exits are shown.
+	roomIsDark := roomObj.HasFlag(gamedb.FlagDark)
 	var exitRefs []gamedb.DBRef
 	exitRef := roomObj.Exits
 	for exitRef != gamedb.Nothing {
@@ -1078,7 +1083,19 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		if !ok {
 			break
 		}
-		if !exitObj.HasFlag(gamedb.FlagDark) || SeeAll(g, d.Player) || Controls(g, d.Player, exitRef) {
+		canSee := false
+		if SeeAll(g, d.Player) || Controls(g, d.Player, exitRef) {
+			canSee = true
+		} else if exitObj.HasFlag(gamedb.FlagDark) {
+			// DARK exits are hidden from non-privileged viewers
+			canSee = false
+		} else if roomIsDark && !exitObj.HasFlag2(gamedb.Flag2Light) {
+			// In a DARK room, only LIGHT exits are visible
+			canSee = false
+		} else {
+			canSee = true
+		}
+		if canSee {
 			exitRefs = append(exitRefs, exitRef)
 		}
 		exitRef = exitObj.Next
@@ -1136,7 +1153,7 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		d.Send("I don't see that here.")
 		return
 	}
-	d.Send(fmt.Sprintf("%s(#%d%s)", obj.Name, target, typeChar(obj.ObjType())))
+	d.Send(fmt.Sprintf("%s(#%d%s)", obj.Name, target, flagString(obj)))
 	d.Send(fmt.Sprintf("Type: %s  Flags: %s  Owner: %s(#%d)",
 		obj.ObjType().String(), flagString(obj), g.PlayerName(obj.Owner), obj.Owner))
 	if obj.Location != gamedb.Nothing {
@@ -1176,8 +1193,116 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		if truncLen > 0 && len(text) > truncLen {
 			text = text[:truncLen] + "..."
 		}
-		d.Send(fmt.Sprintf("  %s: %s", name, text))
+		// Build attribute flag/owner annotation like TinyMUSH: [#owner] [$D]
+		annotation := attrAnnotation(g, d.Player, info, def)
+		if annotation != "" {
+			d.Send(fmt.Sprintf("  %s %s: %s", name, annotation, text))
+		} else {
+			d.Send(fmt.Sprintf("  %s: %s", name, text))
+		}
 	}
+
+	// Contents section
+	if obj.Contents != gamedb.Nothing {
+		d.Send("Contents:")
+		next := obj.Contents
+		for next != gamedb.Nothing {
+			if cObj, ok := g.DB.Objects[next]; ok {
+				d.Send(fmt.Sprintf("%s(#%d%s)", cObj.Name, next, flagString(cObj)))
+				next = cObj.Next
+			} else {
+				break
+			}
+		}
+	}
+
+	// Exits section
+	if obj.Exits != gamedb.Nothing {
+		d.Send("Exits:")
+		exitRef := obj.Exits
+		for exitRef != gamedb.Nothing {
+			if eObj, ok := g.DB.Objects[exitRef]; ok {
+				d.Send(fmt.Sprintf("%s(#%d%s)", eObj.Name, exitRef, flagString(eObj)))
+				exitRef = eObj.Next
+			} else {
+				break
+			}
+		}
+	}
+}
+
+// attrAnnotation builds a TinyMUSH-style annotation string for an attribute.
+// Shows owner override as [#dbref] and per-instance flags as [$flags].
+func attrAnnotation(g *Game, player gamedb.DBRef, info AttrInfo, def *gamedb.AttrDef) string {
+	var parts []string
+	// Show owner if different from object owner (non-default)
+	if info.Owner != gamedb.Nothing && info.Owner != gamedb.DBRef(0) {
+		parts = append(parts, fmt.Sprintf("#%d", info.Owner))
+	}
+	// Show per-instance attribute flags
+	flags := info.Flags
+	if def != nil {
+		flags |= def.Flags
+	}
+	flagStr := attrFlagString(flags)
+	if flagStr != "" {
+		parts = append(parts, flagStr)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// attrFlagString converts attribute flags to a compact display string.
+func attrFlagString(flags int) string {
+	var buf strings.Builder
+	if flags&gamedb.AFDark != 0 {
+		buf.WriteByte('D')
+	}
+	if flags&gamedb.AFWizard != 0 {
+		buf.WriteByte('W')
+	}
+	if flags&gamedb.AFMDark != 0 {
+		buf.WriteByte('M')
+	}
+	if flags&gamedb.AFVisual != 0 {
+		buf.WriteByte('V')
+	}
+	if flags&gamedb.AFNoCMD != 0 {
+		buf.WriteByte('$')
+	}
+	if flags&gamedb.AFNoClone != 0 {
+		buf.WriteByte('c')
+	}
+	if flags&gamedb.AFPrivate != 0 {
+		buf.WriteByte('i')
+	}
+	if flags&gamedb.AFRegexp != 0 {
+		buf.WriteByte('R')
+	}
+	if flags&gamedb.AFCase != 0 {
+		buf.WriteByte('C')
+	}
+	if flags&gamedb.AFNoParse != 0 {
+		buf.WriteByte('P')
+	}
+	if flags&gamedb.AFGod != 0 {
+		buf.WriteByte('G')
+	}
+	if flags&gamedb.AFNoProg != 0 {
+		buf.WriteByte('N')
+	}
+	if flags&gamedb.AFODark != 0 {
+		buf.WriteByte('o')
+	}
+	if flags&gamedb.AFHTML != 0 {
+		buf.WriteByte('H')
+	}
+	if flags&gamedb.AFLock != 0 {
+		buf.WriteByte('+')
+	}
+	return buf.String()
 }
 
 func typeChar(t gamedb.ObjectType) string {
@@ -1188,9 +1313,72 @@ func typeChar(t gamedb.ObjectType) string {
 		return "E"
 	case gamedb.TypePlayer:
 		return "P"
+	case gamedb.TypeThing:
+		return ""
 	default:
 		return ""
 	}
+}
+
+// flagLetters maps flag word/bit pairs to their TinyMUSH display character.
+// Ordered to produce consistent output matching TinyMUSH examine.
+var flagLetters = []struct {
+	Word   int
+	Bit    int
+	Letter byte
+}{
+	// Flag word 0 — uppercase letters
+	{0, gamedb.FlagDark, 'D'},
+	{0, gamedb.FlagHaven, 'H'},
+	{0, gamedb.FlagInherit, 'I'},
+	{0, gamedb.FlagJumpOK, 'J'},
+	{0, gamedb.FlagLinkOK, 'L'},
+	{0, gamedb.FlagMonitor, 'M'},
+	{0, gamedb.FlagNoSpoof, 'N'},
+	{0, gamedb.FlagOpaque, 'O'},
+	{0, gamedb.FlagQuiet, 'Q'},
+	{0, gamedb.FlagSticky, 'S'},
+	{0, gamedb.FlagTrace, 'T'},
+	{0, gamedb.FlagVisual, 'V'},
+	{0, gamedb.FlagWizard, 'W'},
+	{0, gamedb.FlagRoyalty, 'Z'},
+	{0, gamedb.FlagVerbose, 'v'},
+	{0, gamedb.FlagGoing, 'G'},
+	{0, gamedb.FlagChownOK, 'C'},
+	{0, gamedb.FlagEnterOK, 'e'},
+	{0, gamedb.FlagImmortal, 'i'},
+	{0, gamedb.FlagMyopic, 'm'},
+	{0, gamedb.FlagPuppet, 'p'},
+	{0, gamedb.FlagRobot, 'r'},
+	{0, gamedb.FlagSafe, 's'},
+	{0, gamedb.FlagHalt, 'h'},
+	{0, gamedb.FlagDestroyOK, 'd'},
+	{0, gamedb.FlagSeeThru, 't'},
+	{0, gamedb.FlagHearThru, 'a'},
+	{0, gamedb.FlagHasStartup, '='},
+	// Flag word 1 — lowercase letters and symbols
+	{1, gamedb.Flag2Abode, 'A'},
+	{1, gamedb.Flag2Unfindable, 'U'},
+	{1, gamedb.Flag2ParentOK, 'Y'},
+	{1, gamedb.Flag2Light, 'l'},
+	{1, gamedb.Flag2Connected, 'c'},
+	{1, gamedb.Flag2Slave, 'x'},
+	{1, gamedb.Flag2Ansi, 'X'},
+	{1, gamedb.Flag2Bounce, 'b'},
+	{1, gamedb.Flag2ControlOK, 'z'},
+	{1, gamedb.Flag2StopMatch, '!'},
+	{1, gamedb.Flag2NoBLeed, '-'},
+	{1, gamedb.Flag2Gagged, 'j'},
+	{1, gamedb.Flag2Fixed, 'f'},
+	{1, gamedb.Flag2Staff, 'w'},
+	{1, gamedb.Flag2Watcher, '+'},
+	{1, gamedb.Flag2HasCommands, '$'},
+	{1, gamedb.Flag2HasDaily, '*'},
+	{1, gamedb.Flag2HasListen, '@'},
+	{1, gamedb.Flag2HTML, '~'},
+	{1, gamedb.Flag2ZoneParent, 'o'},
+	{1, gamedb.Flag2Blind, 'B'},
+	{1, gamedb.Flag2Floating, 'F'},
 }
 
 func flagString(obj *gamedb.Object) string {
@@ -1203,11 +1391,12 @@ func flagString(obj *gamedb.Object) string {
 	case gamedb.TypePlayer:
 		buf.WriteByte('P')
 	}
-	if obj.HasFlag(gamedb.FlagWizard) {
-		buf.WriteByte('W')
-	}
-	if obj.HasFlag(gamedb.FlagDark) {
-		buf.WriteByte('D')
+	for _, fl := range flagLetters {
+		if fl.Word == 0 && obj.HasFlag(fl.Bit) {
+			buf.WriteByte(fl.Letter)
+		} else if fl.Word == 1 && obj.HasFlag2(fl.Bit) {
+			buf.WriteByte(fl.Letter)
+		}
 	}
 	return buf.String()
 }
