@@ -1,0 +1,275 @@
+# Basic math
+[add(1,2)] | 3
+[sub(10,3)] | 7
+[mul(4,5)] | 20
+[div(10,3)] | 3
+[fdiv(10,3)] | 3.333333
+[modulo(10,3)] | 1
+[abs(-5)] | 5
+[sign(-3)] | -1
+[inc(5)] | 6
+[dec(5)] | 4
+[max(1,5,3)] | 5
+[min(1,5,3)] | 1
+[sqrt(16)] | 4
+[power(2,8)] | 256
+
+# Math - previously untested
+[round(3.456,2)] | 3.46
+[round(3.456,0)] | 3
+[round(2.5,0)] | 3
+[trunc(3.7)] | 3
+[trunc(-3.7)] | -3
+[floor(3.7)] | 3
+[floor(-3.2)] | -4
+[ceil(3.2)] | 4
+[ceil(-3.7)] | -3
+[pi()] | 3.141593
+[e()] | 2.718282
+[remainder(10,3)] | 1
+[div(10,0)] | #-1 DIVIDE BY ZERO
+[fdiv(10,0)] | #-1 DIVIDE BY ZERO
+[modulo(10,0)] | #-1 DIVIDE BY ZERO
+[sqrt(-1)] | #-1 SQUARE ROOT OF NEGATIVE
+[sign(0)] | 0
+[sign(5)] | 1
+
+# Comparison - previously untested
+[gt(5,3)] | 1
+[gt(3,5)] | 0
+[gte(5,5)] | 1
+[gte(5,6)] | 0
+[gte(6,5)] | 1
+[lt(3,5)] | 1
+[lte(5,5)] | 1
+[lte(6,5)] | 0
+[lte(4,5)] | 1
+[eq(5,5)] | 1
+[neq(5,3)] | 1
+[comp(a,b)] | -1
+[comp(b,a)] | 1
+[comp(abc,abc)] | 0
+[streq(Hello,hello)] | 1
+[streq(Hello,world)] | 0
+[ncomp(3,5)] | -1
+[ncomp(5,3)] | 1
+[ncomp(5,5)] | 0
+
+# Logic - previously untested
+[and(1,1)] | 1
+[and(1,0)] | 0
+[or(0,1)] | 1
+[or(0,0)] | 0
+[not(0)] | 1
+[not(1)] | 0
+[xor(1,0)] | 1
+[xor(1,1)] | 0
+[xor(0,0)] | 0
+[xor(1,0,1)] | 0
+[xor(1,0,0)] | 1
+[notbool(0)] | 1
+[notbool()] | 1
+[notbool(hello)] | 0
+[notbool(1)] | 0
+[t(hello)] | 1
+[t(0)] | 0
+[t()] | 0
+
+# String functions
+[strlen(hello)] | 5
+[mid(abcdef,2,3)] | cde
+[left(abcdef,3)] | abc
+[right(abcdef,3)] | def
+[lcstr(HELLO)] | hello
+[ucstr(hello)] | HELLO
+[capstr(hello world)] | Hello world
+[cat(a,b,c)] | a b c
+[strcat(a,b,c)] | abc
+[repeat(ab,3)] | ababab
+# space test - output is 5 spaces which gets trimmed in comparison
+[strlen([space(5)])] | 5
+[reverse(hello)] | olleh
+[edit(hello world,world,earth)] | hello earth
+[pos(ello,hello)] | 1
+[before(hello world)] | hello
+[after(hello world)] | world
+[trim(  hello  )] | hello
+[squish(  hello   world  )] | hello world
+[chomp(hello)] | hello
+
+# String - previously untested
+[strtrunc(abcdef,3)] | abc
+# lpos(search, string) - finds all positions of search in string
+[lpos(a,abcabc)] | 0 3
+[lpos(l,hello world)] | 2 3 9
+[replace(a b c d,2 4,X Y)] | a X c Y
+[delete(abcdef,2,3)] | abf
+[delete(abcdef,0,2)] | cdef
+[strlen([ljust(hi,6)])] | 6
+[strlen([rjust(hi,6)])] | 6
+[strlen([center(hi,8)])] | 8
+[matchall(apple banana berry cherry,b*)] | 2 3
+[translate(hello)] | hello
+
+# String comparison/matching
+[strmatch(hello,h*)] | 1
+[strmatch(hello,world)] | 0
+[match(apple banana cherry,b*)] | 2
+[strmatch(test,t?st)] | 1
+[strmatch(test,t??t)] | 1
+[strmatch(test,????)] | 1
+[strmatch(test,???)] | 0
+
+# Escape/secure functions
+[strlen([escape(hello)])] | 6
+[strlen([secure(hello)])] | 5
+
+# Type checking
+[isnum(42)] | 1
+[isnum(hello)] | 0
+[isnum(3.14)] | 1
+[isnum(-5)] | 1
+[isnum()] | 0
+[isdbref(#1)] | 1
+[isdbref(hello)] | 0
+[isdbref(#-1)] | 1
+[isword(hello)] | 1
+[isword(he11o)] | 0
+[isword()] | 0
+
+# List functions
+[words(a b c d)] | 4
+[first(a b c)] | a
+[rest(a b c)] | b c
+[last(a b c)] | c
+[extract(a b c d e,2,3)] | b c d
+[member(a b c d,c)] | 3
+[remove(a b c d,c)] | a b d
+[sort(c a b d)] | a b c d
+[sort(3|1|2,|,n)] | 1|2|3
+[sort(3 1 2, ,n)] | 1 2 3
+[revwords(a b c)] | c b a
+[setunion(a b c,b c d)] | a b c d
+[setdiff(a b c d,b d)] | a c
+[setinter(a b c,b c d)] | b c
+[insert(a b c,1,x)] | a x b c
+[ldelete(a b c d,2)] | a c d
+[elements(a b c d e,2 4)] | b d
+[grab(apple banana cherry,b*)] | banana
+[graball(apple banana cherry boy,b*)] | banana boy
+
+# List - previously untested
+[lnum(5)] | 0 1 2 3 4
+[lnum(2,6)] | 2 3 4 5
+[lnum(5,2)] | 5 4 3
+[words(a|b|c,|)] | 3
+[first(a|b|c,|)] | a
+[rest(a|b|c,|)] | b|c
+[last(a|b|c,|)] | c
+[member(a|b|c,b,|)] | 2
+[splice(a b c,x y z,b)] | a y c
+[itemize(a)] | a
+[itemize(a b)] | a and b
+[itemize(a b c)] | a, b, and c
+[itemize(a b c d)] | a, b, c, and d
+[itemize(a b c, ,or)] | a, b, or c
+[sort(#3 #1 #2, ,d)] | #1 #2 #3
+
+# Conditionals - previously untested
+[ifelse(1,yes,no)] | yes
+[ifelse(0,yes,no)] | no
+[nonzero(1,yes,no)] | yes
+[nonzero(0,yes,no)] | no
+[switch(a,a,MATCHED,DEFAULT)] | MATCHED
+[switch(x,a,NOPE,DEFAULT)] | DEFAULT
+[switchall(ab,a*,ONE,*b,TWO,NONE)] | ONETWO
+[switchall(x,a,NOPE,DEFAULT)] | DEFAULT
+[case(hello,hello,YES,NO)] | YES
+[case(hello,world,NOPE,DEFAULT)] | DEFAULT
+[case(hello,HELLO,YES,NO)] | YES
+[if(hello,yes,no)] | yes
+[if(,yes,no)] | no
+
+# Iteration
+[iter(a b c,[strlen(##)])] | 1 1 1
+[iter(aa bb cc,[strlen(##)])] | 2 2 2
+[iter(a|b|c,[ucstr(##)],|)] | A|B|C
+# parse is alias for iter
+[parse(a b c,[ucstr(##)])] | A B C
+[iter(a b c,[cat(##,#@)])] | a 0 b 1 c 2
+
+# Registers
+[setq(0,hello)][r(0)] | hello
+[setr(0,world)] | world
+[setq(0,first,1,second)][r(0)]-[r(1)] | first-second
+
+# Math edge cases
+[add()] | 0
+[mul()] | 0
+
+# Nested evaluation
+[add(1,[mul(2,3)])] | 7
+[if([gt(5,3)],big,small)] | big
+[iter(1 2 3,[add(##,10)])] | 11 12 13
+
+# Misc functions - previously untested
+[null(hello)] |
+[lit([add(1,2)])] | [add(1,2)]
+[subeval(hello)] | hello
+[version()] | GoTinyMUSH 0.1.0
+[mudname()] | GoTinyMUSH
+
+# Validation
+[valid(attrname,MY_ATTR)] | 1
+[valid(attrname,bad name)] | 0
+[valid(attrname,test-attr)] | 1
+[valid(objectname,TestObj)] | 1
+[valid(objectname,#123)] | 0
+[valid(playername,Wizard)] | 1
+[valid(playername,bad name)] | 0
+
+# Object functions (with minimal DB)
+[name(#1)] | Wizard
+[num(#1)] | #1
+[loc(#1)] | #0
+[owner(#1)] | #1
+[type(#1)] | PLAYER
+[type(#0)] | ROOM
+[con(#0)] | #1
+[next(#1)] | #-1
+[home(#1)] | #0
+[parent(#1)] | #-1
+[zone(#1)] | #-1
+[hastype(#1,PLAYER)] | 1
+[hastype(#1,ROOM)] | 0
+[hastype(#0,ROOM)] | 1
+[hasflag(#1,WIZARD)] | 1
+[hasflag(#1,DARK)] | 0
+[hasflag(#1,PLAYER)] | 1
+[nattr(#1)] | 0
+[controls(#1,#0)] | 1
+[room(#1)] | #0
+[nearby(#1,#0)] | 1
+[pmatch(me)] | #1
+[pmatch(Wizard)] | #1
+[s(hello)] | hello
+[elock(#0,#1)] | 0
+
+# Side-effect function stubs (just verify no crashes)
+[set()] |
+[create()] | #-1
+[tel()] |
+[link()] |
+[trigger()] |
+[wipe()] |
+[force()] |
+[wait()] |
+
+# Complex nested expressions
+[if([eq([add(1,2)],3)],math works,broken)] | math works
+[setq(0,hello)][ucstr([r(0)])] | HELLO
+[iter(1 2 3,[if([gt(##,1)],big,small)])] | small big big
+[switch([add(1,1)],1,one,2,two,other)] | two
+
+# @@ comment function
+[@@(this is a comment)] |

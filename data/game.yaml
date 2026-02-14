@@ -1,0 +1,89 @@
+# game.yaml - GoTinyMUSH Example Configuration
+#
+# Usage: gotinymush -conf data/game.yaml -db <flatfile> [-bolt <boltfile>]
+
+# --- Identity ---
+mud_name: GoTinyMUSH
+port: 6250
+
+# --- Key Rooms ---
+master_room: 2
+player_starting_room: 0
+player_starting_home: 0
+default_home: 0
+
+# --- Economy ---
+money_name_singular: penny
+money_name_plural: pennies
+starting_money: 150
+paycheck: 50
+earn_limit: 10000
+page_cost: 0
+wait_cost: 10
+link_cost: 1
+
+# --- Idle/Timeout ---
+idle_timeout: 3600       # 1 hour
+idle_wiz_dark: false
+
+# --- Queue/Eval ---
+queue_idle_chunk: 3
+function_invocation_limit: 2500
+machine_command_cost: 64
+
+# --- Output ---
+output_limit: 16384
+
+# --- Permissions ---
+match_own_commands: false
+player_match_own_commands: false
+pemit_far_players: false
+pemit_any_object: false
+examine_public_attrs: true
+public_flags: true
+read_remote_name: false
+require_cmds_flag: true
+switch_default_all: true
+sweep_dark: false
+trace_topdown: true
+trace_output_limit: 200
+
+# --- Guest ---
+guest_char_num: -1
+# guest_prefixes: "Red Blue Green Yellow White"
+# guest_suffixes: "_Guest"
+guest_basename: Guest
+
+# --- Channels ---
+public_channel: Public
+public_calias: pub
+guests_channel: Public
+guests_calias: pub
+
+# --- Spellcheck ---
+spellcheck_enabled: false
+# spellcheck_url: "https://api.languagetool.org/v2/check"
+
+# --- SQL ---
+# sql_enabled: false
+# sql_database: data/game.sqlite3
+# sql_query_limit: 100
+# sql_timeout: 5
+
+# --- Archive/Backup ---
+# archive_dir: backups
+# archive_interval: 0     # minutes, 0 = disabled
+# archive_retain: 0        # 0 = unlimited
+# archive_hook: ""          # shell command, %f = archive path
+
+# --- TLS ---
+# cleartext: true
+# tls: false
+# tls_port: 6251
+# tls_cert: data/cert.pem
+# tls_key: data/key.pem
+
+# --- Alias Configuration Files ---
+# Paths are relative to this config file's directory.
+alias_files:
+  - goTinyAlias.conf

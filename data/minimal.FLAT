@@ -1,0 +1,76 @@
++T3095297
++S3
++N256
+-R1
+!0
+"Room Zero"
+-1
+-1
+1
+-1
+-1
+-1
+1
+-1
+0
+0
+0
+0
+0
+0
+1739577600
+1739577600
+>28
+"Room Zero"
+>27
+"You see nothing special."
+<
+!1
+"Wizard"
+0
+-1
+-1
+-1
+0
+-1
+1
+-1
+1000
+19
+0
+0
+0
+0
+1739577600
+1739577600
+>5
+"potrzebie"
+>28
+"Wizard"
+>27
+"A powerful wizard."
+<
+!2
+"Master Room"
+-1
+-1
+-1
+-1
+-1
+-1
+1
+-1
+0
+0
+0
+0
+0
+0
+1739577600
+1739577600
+>28
+"Master Room"
+>27
+"The master room for global commands."
+<
+***END OF DUMP***

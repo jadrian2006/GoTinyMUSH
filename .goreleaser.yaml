@@ -1,0 +1,62 @@
+version: 2
+
+project_name: gotinymush
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: gotinymush
+    main: ./cmd/server
+    binary: gotinymush
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - CREDITS
+      - data/game.yaml
+      - data/goTinyAlias.conf
+      - data/minimal.FLAT
+      - data/text/*
+      - data/dict/base.txt
+      - docs/*
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: jadrian2006
+    name: GoTinyMUSH
+  draft: false
+  prerelease: auto
+  name_template: "GoTinyMUSH {{.Version}}"

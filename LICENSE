@@ -1,0 +1,61 @@
+GoTinyMUSH License
+==================
+
+GoTinyMUSH is a from-scratch reimplementation of TinyMUSH 3.3 in Go.
+No original C source code remains, but the design, algorithms, softcode
+language semantics, and help file content are derived from the TinyMUSH
+family of servers. Some functions are additionally inspired by RhostMUSH.
+
+GoTinyMUSH is distributed under the same terms as TinyMUSH 3: the
+OSI-standard Artistic License (version 1.0), combined with the revised
+TinyMUD BSD-style copyright below.
+
+The full text of the Artistic License 1.0 is available at:
+https://opensource.org/licenses/Artistic-1.0
+
+Revised TinyMUD Copyright
+-------------------------
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that: (1) source code distributions
+retain the above copyright notice and this paragraph in its entirety,
+and (2) distributions including binary code include the above copyright
+notice and this paragraph in its entirety in the documentation or other
+materials provided with the distribution. The names of the copyright
+holders may not be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+Upstream Copyright Notices
+--------------------------
+
+TinyMUSH 3 Source Code
+  Copyright (c) 1999-2009 Lydia Leong, David Passmore, Robby Griffin,
+  Scott Dorr, and Eddy Beaupre. All rights reserved.
+
+TinyMUX Source Code
+  Copyright (c) 1995-1999 David Passmore.
+
+TinyMUSH 2.2 Source Code
+  Copyright (c) 1995-2002 Lydia Leong, Jean Marie Diaz, and
+  Deborah Wilson-Hooker.
+
+TinyMUSH 2.0 Source Code
+  Copyright (c) 1991 Joseph Traub and Glenn Crocker. All rights reserved.
+
+TinyMUD
+  Copyright (c) 1989, 1990, 1995 David Applegate, James Aspnes,
+  Timothy Freeman, and Bennet Yee. All rights reserved.
+
+RhostMUSH
+  Copyright (c) 1990-2014 Seawolf, Thorin, Ashen-Shugar, Kale, Lensman,
+  Morgan, Odin, Kage, Ambrosia, Rook. All rights reserved.
+  Code modifications Copyright (c) 1992-2003 Mike McDermott, Steve Shivers,
+  Jace Hoppel, Elton Cranfill, Matt Devaney, Lewis Mackenzie.
+
+GoTinyMUSH
+  Copyright (c) 2025-2026 Justin Adrian (jadrian2006). All rights reserved.
+  AI-assisted development by Claude (Anthropic).

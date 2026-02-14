@@ -1,0 +1,145 @@
+GoTinyMUSH Credits
+==================
+
+GoTinyMUSH is a modern reimplementation of TinyMUSH 3.3 in Go, with
+additional functions and features inspired by RhostMUSH. It replaces
+~76,000 lines of C with ~25,000 lines of Go while preserving compatibility
+with existing TinyMUSH databases, softcode, and help files.
+
+
+GoTinyMUSH (2025-present)
+-------------------------
+
+  Justin Adrian (jadrian2006)
+    Project creator and Wizard on CrystalMUSH. Designed the Go architecture,
+    ported the database layer, eval engine, command system, and all server
+    infrastructure.
+
+  Claude (Anthropic, Opus 4.6)
+    AI pair-programming partner. Co-authored significant portions of the
+    codebase including the softcode function library (475+ functions),
+    flight/navigation system, structure/instance system, spellcheck
+    integration, SQL module, TLS support, and documentation.
+
+
+TinyMUSH 3 (1999-2009)
+-----------------------
+
+GoTinyMUSH is derived from the design and semantics of TinyMUSH 3,
+a merger of TinyMUSH 2.2 and TinyMUX 1.6.
+
+  Lydia Leong (Amberyl)          - Lead developer, TinyMUSH 2.2 and 3.x
+  David Passmore (Lauren)         - Lead developer, TinyMUX and 3.x
+  Robby Griffin (Alierak)         - Developer, joined at 3.0 beta 18
+  Scott Dorr (Myrddin)            - Developer, joined at 3.0 beta 23
+  Eddy Beaupre (Tyr)              - Developer, joined at 3.1 patchlevel 1
+
+  Special thanks:
+  - Deborah Wilson-Hooker (Ysabel) for design inspiration
+  - Fred Hicks (Iago) for the TinyMUSH 3 logo
+  - T. Alexander Popiel (Talek) and Andrew Molitor for ongoing contributions
+  - Adam Dray, Brazil, Soruk, and Talek for testing and feedback
+  - Players of From the Ashes, Blood of Amber, and Babylon 5: The Last
+    Best Hope for alpha testing
+
+
+TinyMUX 1.x (1995-1999)
+------------------------
+
+TinyMUX 1.0 was derived from TinyMUSH 2.0.10 patchlevel 6.
+
+  David Passmore (Lauren)         - Creator and maintainer
+
+  Contributors:
+  - Dave Peterson (Evinar) for maintaining TinyMUSH 2.0
+  - James Callahan (Darkenelf) for patches and side-effect functions
+  - Alan Schwartz (Javelin) and Lydia Leong (Amberyl) for the mailer
+  - Brandy (CrystalMUSH) whose +mail system inspired many features
+  - Ethaniel and Kayan Telva (BTech3056) for the comsystem
+  - Kalkin (DarkZone) and Harlock (StarWarsII) for comsystem extensions
+  - Airam (Generations) for stack and @program ideas
+  - Dean Gaudet for the hostname slave process
+  - Andrew Molitor for the radix compression library
+  - Robby Griffin for uncovering obscure bugs
+
+
+TinyMUSH 2.2 (1995-2002)
+-------------------------
+
+A continuation of TinyMUSH 2.0 development.
+
+  Jean Marie Diaz (Ambar)         - Lead developer
+  Deborah Wilson-Hooker (Tyleet)  - Lead developer
+  Lydia Leong (Amberyl)           - Lead developer
+
+  Special thanks:
+  - Andrew Molitor, Russ Smith, Mark Vasoll, Dave McCracken
+  - Alan Schwartz (Javelin) and T. Alexander Popiel (Talek) from PennMUSH
+  - John Batzel and the PernMUSH wizcrew for beta testing
+
+
+TinyMUSH 2.0 (1991)
+--------------------
+
+Derived from Larry Foard's TinyMUSH 1.0, itself derived from TinyMUD.
+
+  Joseph Traub (Moonchilde)       - Co-author
+  Glenn Crocker (Wizard)          - Co-author
+
+  Credits:
+  - Lawrence Foard for the original TinyMUSH 1.0
+  - Jin (MicroMUSH) for many improvements
+  - Robert Hood (virus) for multi-user interface support
+  - Lachesis for introducing property lists (from TinyMUCK)
+  - Russ and Jennifer Smith for ideas and coding help
+  - R'nice (TinyTIM) for @doing, @edit, and many fixes
+
+
+TinyMUD (1989)
+--------------
+
+The original that started it all.
+
+  James Aspnes (Jim)              - Original author
+  David Applegate                 - Contributor
+  Timothy Freeman                 - Contributor
+  Bennet Yee                      - Contributor
+
+
+RhostMUSH (1990-present)
+-------------------------
+
+Some softcode functions in GoTinyMUSH are inspired by RhostMUSH extensions.
+
+  Core developers:
+  - Seawolf, Thorin, Ashen-Shugar, Kale, Lensman
+  - Morgan, Odin, Kage, Ambrosia, Rook
+
+  Code contributors:
+  - Mike McDermott, Steve Shivers, Jace Hoppel
+  - Elton Cranfill, Matt Devaney, Lewis Mackenzie
+
+  Ideas incorporated with permission from MUX2 and PennMUSH.
+  Special thanks to Brazil and Javelin.
+
+
+PennMUSH
+--------
+
+Portions of TinyMUSH 2.2 and 3.x incorporated ideas and code from
+PennMUSH 1.50. GoTinyMUSH inherits these indirectly.
+
+  Alan Schwartz (Javelin)         - Lead developer
+  T. Alexander Popiel (Talek)     - Lead developer
+
+
+Acknowledgments
+---------------
+
+The TinyMU* family of servers has been developed by dozens of people over
+more than 35 years. Many contributors go unnamed here but their work lives
+on in every MUSH that runs today. We thank them all.
+
+The GNU project for GDBM. The Go team for the language and toolchain.
+The bbolt project for the embedded database. The fsnotify project for
+filesystem watching.

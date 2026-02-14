@@ -1,0 +1,26 @@
+& help
+NEWS
+
+Welcome to GoTinyMUSH. Use "news <topic>" to read specific topics.
+
+Topics: changes server
+& changes
+CHANGES
+
+GoTinyMUSH is a modern reimplementation of TinyMUSH 3.3 in Go.
+See the project README for details on what has changed.
+& server
+SERVER
+
+GoTinyMUSH replaces ~76,000 lines of C with ~24,000 lines of Go while
+preserving compatibility with existing TinyMUSH databases, softcode,
+and help files.
+
+Key features:
+  - bbolt persistence (replaces GDBM)
+  - YAML configuration
+  - Hot-reloading text files
+  - Docker deployment
+  - TLS support
+  - SQLite3 SQL module
+  - Archive/backup system

@@ -1,0 +1,22 @@
+services:
+  gotinymush:
+    build: .
+    ports:
+      - "6250:6250"
+      # - "6251:6251"  # TLS port
+    volumes:
+      - ./data/text:/game/data/text
+      - ./data/game.yaml:/game/data/game.yaml
+      - ./data/goTinyAlias.conf:/game/data/goTinyAlias.conf
+      - ./data/dict:/game/data/dict
+    environment:
+      MUSH_CONF: /game/data/game.yaml
+      MUSH_BOLT: /game/data/game.bolt
+      MUSH_TEXTDIR: /game/data/text
+      # MUSH_DB: /game/data/game.flatfile  # Flatfile for initial import
+      # MUSH_PORT: 6250
+      # MUSH_TLS: "true"
+      # MUSH_TLS_PORT: "6251"
+      # MUSH_TLS_CERT: /game/data/cert.pem
+      # MUSH_TLS_KEY: /game/data/key.pem
+    restart: unless-stopped
