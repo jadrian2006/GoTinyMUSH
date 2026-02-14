@@ -815,10 +815,50 @@ func flagCharToName(ch byte) string {
 	}
 }
 
-// fnHasflags — test multiple flags at once (string-based).
-// hasflags(<object>, <flag-string>)
+// fnHasflags — test multiple flags at once using full flag names.
+// hasflags(<object>, <flag-list>)
+// Flag list is space-separated full flag names: "PLAYER CONNECTED"
+// Returns 1 if object has ALL specified flags, 0 otherwise.
 func fnHasflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	// Same as andflags
+	if len(args) < 2 { buf.WriteString("0"); return }
+	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("0"); return }
+	obj, ok := ctx.DB.Objects[ref]
+	if !ok { buf.WriteString("0"); return }
+
+	flagStr := strings.TrimSpace(args[1])
+	if flagStr == "" { buf.WriteString("1"); return }
+
+	// Try full flag name parsing (space-separated): "PLAYER CONNECTED"
+	// If any token is longer than 1 char, use full name mode
+	names := strings.Fields(strings.ToUpper(flagStr))
+	useFullNames := false
+	for _, n := range names {
+		if len(n) > 1 {
+			useFullNames = true
+			break
+		}
+	}
+
+	if useFullNames {
+		for _, name := range names {
+			negate := false
+			if name[0] == '!' {
+				negate = true
+				name = name[1:]
+			}
+			has := objHasFlag(obj, name)
+			if negate {
+				if has { buf.WriteString("0"); return }
+			} else {
+				if !has { buf.WriteString("0"); return }
+			}
+		}
+		buf.WriteString("1")
+		return
+	}
+
+	// Fall back to single-char abbreviation style (andflags behavior)
 	fnAndflags(ctx, args, buf, 0, 0)
 }
 

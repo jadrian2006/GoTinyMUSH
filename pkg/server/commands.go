@@ -103,6 +103,8 @@ func InitCommands() map[string]*Command {
 	// Softcode / Queue management
 	register("@function", cmdFunction)
 	register("@drain", cmdDrain)
+	register("@edit", cmdEdit)
+	register("@admin", cmdAdmin)
 
 	// SQL
 	register("@sql", cmdSQL)
@@ -291,9 +293,7 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 	}
 
 	// Look up command
-	log.Printf("DISPATCH: cmdName=%q lower=%q switches=%v args=%q cmds=%d", cmdName, strings.ToLower(cmdName), switches, args, len(g.Commands))
 	if cmd, ok := g.Commands[strings.ToLower(cmdName)]; ok {
-		log.Printf("DISPATCH: matched command %q", cmd.Name)
 		cmd.Handler(g, d, args, switches)
 		return
 	}
@@ -319,7 +319,6 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 	}
 
 	// Try to match as an exit name
-	log.Printf("DISPATCH: no command match, trying exit")
 	if tryMoveByExit(g, d, input) {
 		return
 	}
@@ -329,7 +328,6 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	}
 
-	log.Printf("DISPATCH: nothing matched for %q", input)
 	d.Send("Huh?  (Type \"help\" for help.)")
 }
 
@@ -505,10 +503,49 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 	}
 }
 
-func cmdEmit(g *Game, d *Descriptor, args string, _ []string) {
+func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		return
 	}
+
+	if HasSwitch(switches, "room") {
+		// @emit/room target=message — emit to the room containing target
+		eqIdx := strings.IndexByte(args, '=')
+		if eqIdx < 0 {
+			d.Send("Usage: @emit/room target = message")
+			return
+		}
+		targetStr := strings.TrimSpace(args[:eqIdx])
+		message := strings.TrimSpace(args[eqIdx+1:])
+		targetStr = evalExpr(g, d.Player, targetStr)
+		message = evalExpr(g, d.Player, message)
+		target := g.ResolveRef(d.Player, targetStr)
+		if target == gamedb.Nothing {
+			target = g.MatchObject(d.Player, targetStr)
+		}
+		if target == gamedb.Nothing {
+			d.Send("I don't see that here.")
+			return
+		}
+		// Emit to the room of the target
+		loc := g.PlayerLocation(target)
+		if loc == gamedb.Nothing {
+			if obj, ok := g.DB.Objects[target]; ok {
+				loc = obj.Location
+			}
+		}
+		if loc != gamedb.Nothing {
+			g.EmitEventToRoom(loc, "EMIT", events.Event{
+				Type:   events.EvEmit,
+				Source: d.Player,
+				Room:   loc,
+				Text:   message,
+			})
+			g.MatchListenPatterns(loc, d.Player, message)
+		}
+		return
+	}
+
 	args = evalExpr(g, d.Player, args)
 	loc := g.PlayerLocation(d.Player)
 	g.EmitEventToRoom(loc, "EMIT", events.Event{
@@ -529,8 +566,10 @@ func cmdThink(g *Game, d *Descriptor, args string, _ []string) {
 	d.Send(result)
 }
 
-func cmdPemit(g *Game, d *Descriptor, args string, _ []string) {
+func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 	// @pemit target=message
+	// @pemit/contents target=message  (send to all contents of target)
+	// @pemit/list targets=message     (targets is space-separated dbrefs)
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		d.Send("@pemit: I need a target and message separated by =.")
@@ -545,20 +584,52 @@ func cmdPemit(g *Game, d *Descriptor, args string, _ []string) {
 	targetStr = ctx.Exec(targetStr, eval.EvFCheck|eval.EvEval, nil)
 	message = ctx.Exec(message, eval.EvFCheck|eval.EvEval, nil)
 
-	// Resolve target
-	target := LookupPlayer(g.DB, targetStr)
-	if target == gamedb.Nothing {
-		// Try dbref
-		targetStr = strings.TrimSpace(targetStr)
-		if len(targetStr) > 1 && targetStr[0] == '#' {
-			n := 0
-			for _, ch := range targetStr[1:] {
-				if ch >= '0' && ch <= '9' {
-					n = n*10 + int(ch-'0')
-				}
-			}
-			target = gamedb.DBRef(n)
+	if HasSwitch(switches, "contents") {
+		// @pemit/contents: send to all contents of the target location
+		target := g.ResolveRef(d.Player, targetStr)
+		if target == gamedb.Nothing {
+			target = g.MatchObject(d.Player, targetStr)
 		}
+		if target == gamedb.Nothing {
+			d.Send("I don't see that here.")
+			return
+		}
+		obj, ok := g.DB.Objects[target]
+		if !ok {
+			d.Send("I don't see that here.")
+			return
+		}
+		cur := obj.Contents
+		for cur != gamedb.Nothing {
+			g.SendMarkedToPlayer(cur, "EMIT", message)
+			if cObj, ok := g.DB.Objects[cur]; ok {
+				cur = cObj.Next
+			} else {
+				break
+			}
+		}
+		return
+	}
+
+	if HasSwitch(switches, "list") {
+		// @pemit/list: send to each dbref in space-separated list
+		targets := strings.Fields(targetStr)
+		for _, ts := range targets {
+			ref := g.ResolveRef(d.Player, strings.TrimSpace(ts))
+			if ref != gamedb.Nothing {
+				g.SendMarkedToPlayer(ref, "EMIT", message)
+			}
+		}
+		return
+	}
+
+	// Default: single target
+	target := g.ResolveRef(d.Player, targetStr)
+	if target == gamedb.Nothing {
+		target = LookupPlayer(g.DB, targetStr)
+	}
+	if target == gamedb.Nothing {
+		target = g.MatchObject(d.Player, targetStr)
 	}
 	if target == gamedb.Nothing {
 		d.Send("I don't see that here.")
@@ -927,6 +998,9 @@ type Game struct {
 	HelpNews    *HelpFile         // news.txt
 	HelpPlus    *HelpFile         // plushelp.txt
 	MOTD        string            // Message of the day (settable by wizards)
+	WizMOTD     string            // Wizard MOTD (@motd/wizard)
+	DownMOTD    string            // Down MOTD (@motd/down)
+	FullMOTD    string            // Full MOTD (@motd/full)
 	Spell       *SpellChecker     // Spellcheck engine (nil if disabled)
 	SQLDB       *SQLStore         // SQLite3 database (nil if disabled)
 	GameFuncs   map[string]*eval.UFunction // @function-defined functions (uppercase name -> def)

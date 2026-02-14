@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -178,12 +179,12 @@ func cmdChown(g *Game, d *Descriptor, args string, _ []string) {
 	}
 }
 
-func cmdClone(g *Game, d *Descriptor, args string, _ []string) {
+func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		d.Send("Clone what?")
 		return
 	}
-	// @clone obj [= newname]
+	// @clone[/parent][/inventory] obj [= newname]
 	parts := strings.SplitN(args, "=", 2)
 	target := g.MatchObject(d.Player, strings.TrimSpace(parts[0]))
 	if target == gamedb.Nothing {
@@ -202,21 +203,29 @@ func cmdClone(g *Game, d *Descriptor, args string, _ []string) {
 
 	ref := g.CreateObject(newName, srcObj.ObjType(), d.Player)
 	newObj := g.DB.Objects[ref]
-	newObj.Parent = srcObj.Parent
+
+	// /parent switch: set parent to the original instead of copying its parent
+	if HasSwitch(switches, "parent") {
+		newObj.Parent = target
+	} else {
+		newObj.Parent = srcObj.Parent
+	}
 	newObj.Link = srcObj.Link
 	if srcObj.ObjType() == gamedb.TypeExit {
 		newObj.Location = srcObj.Location // Copy destination for exits
 	}
 
-	// Copy attributes
-	for _, attr := range srcObj.Attrs {
-		newObj.Attrs = append(newObj.Attrs, gamedb.Attribute{
-			Number: attr.Number,
-			Value:  attr.Value,
-		})
+	// Copy attributes (unless /parent, where we inherit from parent chain)
+	if !HasSwitch(switches, "parent") {
+		for _, attr := range srcObj.Attrs {
+			newObj.Attrs = append(newObj.Attrs, gamedb.Attribute{
+				Number: attr.Number,
+				Value:  attr.Value,
+			})
+		}
 	}
 
-	// Place in player's inventory
+	// Place in player's inventory (default and /inventory behavior)
 	playerObj := g.DB.Objects[d.Player]
 	newObj.Location = d.Player
 	newObj.Next = playerObj.Contents
@@ -291,11 +300,11 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 	lockAttrNum := aLock // 38
-	if HasSwitch(switches, "enter") {
+	if HasSwitch(switches, "enter") || HasSwitch(switches, "enterlock") {
 		lockAttrNum = aLEnter // 55
-	} else if HasSwitch(switches, "leave") {
+	} else if HasSwitch(switches, "leave") || HasSwitch(switches, "leavelock") {
 		lockAttrNum = aLLeave // 56
-	} else if HasSwitch(switches, "use") {
+	} else if HasSwitch(switches, "use") || HasSwitch(switches, "uselock") {
 		lockAttrNum = aLUse // 58
 	}
 	g.SetAttr(target, lockAttrNum, lockStr)
@@ -315,11 +324,11 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 	lockAttrNum := aLock // 38
-	if HasSwitch(switches, "enter") {
+	if HasSwitch(switches, "enter") || HasSwitch(switches, "enterlock") {
 		lockAttrNum = aLEnter // 55
-	} else if HasSwitch(switches, "leave") {
+	} else if HasSwitch(switches, "leave") || HasSwitch(switches, "leavelock") {
 		lockAttrNum = aLLeave // 56
-	} else if HasSwitch(switches, "use") {
+	} else if HasSwitch(switches, "use") || HasSwitch(switches, "uselock") {
 		lockAttrNum = aLUse // 58
 	}
 	g.SetAttr(target, lockAttrNum, "")
@@ -787,6 +796,116 @@ func cmdSetVAttr(g *Game, d *Descriptor, args string, _ []string) {
 	}
 }
 
+// cmdEdit implements @edit obj/attr=search,replace
+// Special search patterns: $ = append to end, ^ = prepend to start
+// Escaped: \$ or \^ searches for literal $ or ^
+func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
+	// Parse obj/attr = search,replace
+	eqIdx := strings.IndexByte(args, '=')
+	if eqIdx < 0 {
+		d.Send("Usage: @edit obj/attr = search, replace")
+		return
+	}
+	objAttr := strings.TrimSpace(args[:eqIdx])
+	rest := args[eqIdx+1:]
+
+	slashIdx := strings.IndexByte(objAttr, '/')
+	if slashIdx < 0 {
+		d.Send("Usage: @edit obj/attr = search, replace")
+		return
+	}
+	objStr := strings.TrimSpace(objAttr[:slashIdx])
+	attrName := strings.TrimSpace(objAttr[slashIdx+1:])
+
+	target := g.MatchObject(d.Player, objStr)
+	if target == gamedb.Nothing {
+		d.Send("I don't see that here.")
+		return
+	}
+	if !Controls(g, d.Player, target) {
+		d.Send("Permission denied.")
+		return
+	}
+
+	// Parse search,replace respecting braces
+	// The format is: search , replace
+	// Braces protect commas: {foo,bar},{baz,qux}
+	from, to := parseEditArgs(rest)
+
+	// Handle escaped ^ and $ (search for literal)
+	if len(from) == 2 && (from[0] == '\\' || from[0] == '%') && (from[1] == '$' || from[1] == '^') {
+		from = from[1:]
+	}
+
+	// Resolve attr
+	attrNum := g.LookupAttrNum(strings.ToUpper(attrName))
+	if attrNum < 0 {
+		d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+		return
+	}
+
+	// Get current value
+	current := g.GetAttrTextDirect(target, attrNum)
+
+	// Perform edit
+	var result string
+	switch from {
+	case "$":
+		result = current + to
+	case "^":
+		result = to + current
+	default:
+		result = strings.ReplaceAll(current, from, to)
+	}
+
+	g.SetAttr(target, attrNum, result)
+
+	obj := g.DB.Objects[target]
+	d.Send(fmt.Sprintf("Set - %s/%s: %s", obj.Name, strings.ToUpper(attrName), result))
+}
+
+// parseEditArgs splits "search,replace" respecting brace quoting.
+// Returns (from, to). If only one part, to is empty.
+func parseEditArgs(s string) (string, string) {
+	s = strings.TrimSpace(s)
+	// Strip outer braces from each part
+	parts := splitEditComma(s)
+	from := stripBraces(strings.TrimSpace(parts[0]))
+	to := ""
+	if len(parts) > 1 {
+		to = stripBraces(strings.TrimSpace(parts[1]))
+	}
+	return from, to
+}
+
+// splitEditComma splits on the first comma not inside braces.
+func splitEditComma(s string) []string {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				return []string{s[:i], s[i+1:]}
+			}
+		}
+	}
+	return []string{s}
+}
+
+// stripBraces removes one level of outer braces if present.
+func stripBraces(s string) string {
+	if len(s) >= 2 && s[0] == '{' && s[len(s)-1] == '}' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
 func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
@@ -1081,8 +1200,20 @@ func cmdBackup(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 	// @dolist <list> = <command>
+	// @dolist/delimit <sep> <list> = <command>
 	// ## in command is replaced with current element
 	// #@ is the iteration number (1-based)
+	delim := "" // empty = split on whitespace
+	if HasSwitch(switches, "delimit") {
+		// First space-delimited token in args is the delimiter
+		spIdx := strings.IndexByte(strings.TrimSpace(args), ' ')
+		if spIdx > 0 {
+			trimmed := strings.TrimSpace(args)
+			delim = trimmed[:spIdx]
+			args = strings.TrimSpace(trimmed[spIdx+1:])
+		}
+	}
+
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		d.Send("Usage: @dolist <list> = <command>")
@@ -1104,7 +1235,12 @@ func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 	listStr = ctx.Exec(listStr, eval.EvFCheck|eval.EvEval, nil)
 
 	// Split into elements
-	elements := strings.Fields(listStr)
+	var elements []string
+	if delim != "" {
+		elements = strings.Split(listStr, delim)
+	} else {
+		elements = strings.Fields(listStr)
+	}
 
 	immediate := HasSwitch(switches, "now")
 
@@ -1213,7 +1349,38 @@ func cmdVersion(g *Game, d *Descriptor, _ string, _ []string) {
 	d.Send("GoTinyMUSH 0.1.0")
 }
 
-func cmdMotd(g *Game, d *Descriptor, args string, _ []string) {
+func cmdMotd(g *Game, d *Descriptor, args string, switches []string) {
+	if HasSwitch(switches, "wizard") {
+		if !Wizard(g, d.Player) { d.Send("Permission denied."); return }
+		if args == "" {
+			if g.WizMOTD != "" { d.Send(g.WizMOTD) } else { d.Send("No wizard MOTD set.") }
+		} else {
+			g.WizMOTD = args
+			d.Send("Wizard MOTD set.")
+		}
+		return
+	}
+	if HasSwitch(switches, "down") {
+		if !Wizard(g, d.Player) { d.Send("Permission denied."); return }
+		if args == "" {
+			if g.DownMOTD != "" { d.Send(g.DownMOTD) } else { d.Send("No down MOTD set.") }
+		} else {
+			g.DownMOTD = args
+			d.Send("Down MOTD set.")
+		}
+		return
+	}
+	if HasSwitch(switches, "full") {
+		if !Wizard(g, d.Player) { d.Send("Permission denied."); return }
+		if args == "" {
+			if g.FullMOTD != "" { d.Send(g.FullMOTD) } else { d.Send("No full MOTD set.") }
+		} else {
+			g.FullMOTD = args
+			d.Send("Full MOTD set.")
+		}
+		return
+	}
+
 	if args == "" {
 		// Show current MOTD
 		if g.MOTD != "" {
@@ -2070,6 +2237,197 @@ func runArchiveHook(command, archivePath string) {
 	} else {
 		log.Printf("Archive hook completed: %s", strings.TrimSpace(string(output)))
 	}
+}
+
+// cmdAdmin implements @admin param=value for runtime configuration.
+// Wizard-only. Maps TinyMUSH config param names to GameConf fields.
+func cmdAdmin(g *Game, d *Descriptor, args string, _ []string) {
+	if !Wizard(g, d.Player) {
+		d.Send("Permission denied.")
+		return
+	}
+	if g.Conf == nil {
+		d.Send("No game configuration loaded.")
+		return
+	}
+
+	eqIdx := strings.IndexByte(args, '=')
+	if eqIdx < 0 {
+		// Show a param value
+		param := strings.TrimSpace(args)
+		if param == "" {
+			d.Send("Usage: @admin param=value")
+			return
+		}
+		val, ok := getAdminParam(g.Conf, param)
+		if !ok {
+			d.Send(fmt.Sprintf("Unknown parameter: %s", param))
+			return
+		}
+		d.Send(fmt.Sprintf("%s = %s", param, val))
+		return
+	}
+
+	param := strings.TrimSpace(args[:eqIdx])
+	value := strings.TrimSpace(args[eqIdx+1:])
+
+	ok := setAdminParam(g.Conf, param, value)
+	if !ok {
+		d.Send(fmt.Sprintf("Unknown parameter: %s", param))
+		return
+	}
+	d.Send(fmt.Sprintf("Set: %s = %s", param, value))
+	log.Printf("@admin: %s set %s = %s", g.DB.Objects[d.Player].Name, param, value)
+}
+
+// adminParamMap maps TinyMUSH @admin parameter names to get/set closures.
+func getAdminParam(c *GameConf, param string) (string, bool) {
+	param = strings.ToLower(strings.TrimSpace(param))
+	switch param {
+	case "paycheck":
+		return strconv.Itoa(c.Paycheck), true
+	case "money_name_singular":
+		return c.MoneyNameSingular, true
+	case "money_name_plural":
+		return c.MoneyNamePlural, true
+	case "starting_money":
+		return strconv.Itoa(c.StartingMoney), true
+	case "earn_limit":
+		return strconv.Itoa(c.EarnLimit), true
+	case "page_cost":
+		return strconv.Itoa(c.PageCost), true
+	case "wait_cost":
+		return strconv.Itoa(c.WaitCost), true
+	case "link_cost":
+		return strconv.Itoa(c.LinkCost), true
+	case "machine_command_cost":
+		return strconv.Itoa(c.MachineCommandCost), true
+	case "trace_topdown":
+		if c.TraceTopdown { return "1", true }
+		return "0", true
+	case "trace_output_limit":
+		return strconv.Itoa(c.TraceOutputLimit), true
+	case "idle_timeout":
+		return strconv.Itoa(c.IdleTimeout), true
+	case "output_limit":
+		return strconv.Itoa(c.OutputLimit), true
+	case "function_invocation_limit":
+		return strconv.Itoa(c.FunctionInvocationLimit), true
+	case "queue_idle_chunk":
+		return strconv.Itoa(c.QueueIdleChunk), true
+	case "mud_name":
+		return c.MudName, true
+	case "master_room":
+		return strconv.Itoa(c.MasterRoom), true
+	case "player_starting_room":
+		return strconv.Itoa(c.PlayerStartingRoom), true
+	case "player_starting_home":
+		return strconv.Itoa(c.PlayerStartingHome), true
+	case "default_home":
+		return strconv.Itoa(c.DefaultHome), true
+	case "switch_default_all":
+		if c.SwitchDefaultAll { return "1", true }
+		return "0", true
+	case "pemit_far_players":
+		if c.PemitFarPlayers { return "1", true }
+		return "0", true
+	case "pemit_any_object":
+		if c.PemitAnyObject { return "1", true }
+		return "0", true
+	case "public_flags":
+		if c.PublicFlags { return "1", true }
+		return "0", true
+	case "examine_public_attrs":
+		if c.ExaminePublicAttrs { return "1", true }
+		return "0", true
+	case "read_remote_name":
+		if c.ReadRemoteName { return "1", true }
+		return "0", true
+	default:
+		return "", false
+	}
+}
+
+func setAdminParam(c *GameConf, param, value string) bool {
+	param = strings.ToLower(strings.TrimSpace(param))
+	// Handle negation: @admin log=!all_commands -> strip ! prefix
+	negate := false
+	if strings.HasPrefix(value, "!") {
+		negate = true
+		value = value[1:]
+	}
+
+	switch param {
+	case "paycheck":
+		c.Paycheck, _ = strconv.Atoi(value); return true
+	case "money_name_singular":
+		c.MoneyNameSingular = value; return true
+	case "money_name_plural":
+		c.MoneyNamePlural = value; return true
+	case "starting_money":
+		c.StartingMoney, _ = strconv.Atoi(value); return true
+	case "earn_limit":
+		c.EarnLimit, _ = strconv.Atoi(value); return true
+	case "page_cost":
+		c.PageCost, _ = strconv.Atoi(value); return true
+	case "wait_cost":
+		c.WaitCost, _ = strconv.Atoi(value); return true
+	case "link_cost":
+		c.LinkCost, _ = strconv.Atoi(value); return true
+	case "machine_command_cost":
+		c.MachineCommandCost, _ = strconv.Atoi(value); return true
+	case "trace_topdown":
+		c.TraceTopdown = parseBoolAdmin(value, negate); return true
+	case "trace_output_limit":
+		c.TraceOutputLimit, _ = strconv.Atoi(value); return true
+	case "idle_timeout":
+		c.IdleTimeout, _ = strconv.Atoi(value); return true
+	case "output_limit":
+		c.OutputLimit, _ = strconv.Atoi(value); return true
+	case "function_invocation_limit":
+		c.FunctionInvocationLimit, _ = strconv.Atoi(value); return true
+	case "queue_idle_chunk":
+		c.QueueIdleChunk, _ = strconv.Atoi(value); return true
+	case "mud_name":
+		c.MudName = value; return true
+	case "master_room":
+		c.MasterRoom, _ = strconv.Atoi(value); return true
+	case "player_starting_room":
+		c.PlayerStartingRoom, _ = strconv.Atoi(value); return true
+	case "player_starting_home":
+		c.PlayerStartingHome, _ = strconv.Atoi(value); return true
+	case "default_home":
+		c.DefaultHome, _ = strconv.Atoi(value); return true
+	case "switch_default_all":
+		c.SwitchDefaultAll = parseBoolAdmin(value, negate); return true
+	case "pemit_far_players":
+		c.PemitFarPlayers = parseBoolAdmin(value, negate); return true
+	case "pemit_any_object":
+		c.PemitAnyObject = parseBoolAdmin(value, negate); return true
+	case "public_flags":
+		c.PublicFlags = parseBoolAdmin(value, negate); return true
+	case "examine_public_attrs":
+		c.ExaminePublicAttrs = parseBoolAdmin(value, negate); return true
+	case "read_remote_name":
+		c.ReadRemoteName = parseBoolAdmin(value, negate); return true
+	case "log":
+		// @admin log=all_commands / @admin log=!all_commands
+		// Currently a no-op placeholder; TinyMUSH uses this for log configuration
+		return true
+	default:
+		return false
+	}
+}
+
+func parseBoolAdmin(value string, negate bool) bool {
+	if negate { return false }
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	return value != ""
 }
 
 // archiveHook returns the configured archive hook command, with env override.
