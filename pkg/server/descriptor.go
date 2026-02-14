@@ -9,7 +9,17 @@ import (
 	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/eval"
+	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
+	"github.com/crystal-mush/gotinymush/pkg/oob"
+)
+
+// TransportType identifies the kind of transport a Descriptor uses.
+type TransportType int
+
+const (
+	TransportTCP       TransportType = iota // Traditional telnet/TCP
+	TransportWebSocket                      // WebSocket (JSON events)
 )
 
 // ConnState tracks the state of a connection.
@@ -21,6 +31,7 @@ const (
 )
 
 // Descriptor represents a single client connection.
+// It implements events.Subscriber so it can receive events from the bus.
 type Descriptor struct {
 	ID        int
 	Conn      net.Conn
@@ -37,6 +48,15 @@ type Descriptor struct {
 	CmdCount  int    // Total commands entered this session
 	BytesSent int    // Total bytes sent to this connection
 	BytesRecv int    // Total bytes received from this connection
+	Transport TransportType // Transport type (TCP, WebSocket)
+	OOB       *oob.Capabilities // Negotiated OOB protocols (nil = none)
+
+	// SendFunc overrides the default Send behavior (used by WebSocket transport).
+	// If nil, the default TCP Send is used.
+	SendFunc    func(msg string)
+	// ReceiveFunc overrides the default Receive behavior (used by WebSocket transport).
+	// If nil, the default event→text→Send path is used.
+	ReceiveFunc func(ev events.Event)
 
 	mu        sync.Mutex
 	closed    bool
@@ -60,6 +80,10 @@ func NewDescriptor(id int, conn net.Conn) *Descriptor {
 
 // Send writes a string to the client connection.
 func (d *Descriptor) Send(msg string) {
+	if d.SendFunc != nil {
+		d.SendFunc(msg)
+		return
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -71,6 +95,19 @@ func (d *Descriptor) Send(msg string) {
 	}
 	d.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	n, _ := d.Conn.Write([]byte(msg))
+	d.BytesSent += n
+}
+
+// SendRaw writes raw bytes to the connection (no newline, no encoding).
+// Used for telnet subnegotiation sequences (GMCP, MSDP).
+func (d *Descriptor) SendRaw(data []byte) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return
+	}
+	d.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	n, _ := d.Conn.Write(data)
 	d.BytesSent += n
 }
 
@@ -102,6 +139,42 @@ func (d *Descriptor) IsClosed() bool {
 	defer d.mu.Unlock()
 	return d.closed
 }
+
+// Receive implements events.Subscriber. It delivers an event to the client
+// using the appropriate encoding for this transport.
+func (d *Descriptor) Receive(ev events.Event) {
+	if d.ReceiveFunc != nil {
+		d.ReceiveFunc(ev)
+		return
+	}
+
+	// Send text form (universal)
+	if ev.Text != "" {
+		d.Send(ev.Text)
+	}
+
+	// Send OOB side-channel data if negotiated
+	if d.OOB != nil && ev.Data != nil {
+		if d.OOB.GMCP {
+			if gmcpBuf := oob.EncodeGMCP(ev); gmcpBuf != nil {
+				d.SendRaw(gmcpBuf)
+			}
+		}
+		if d.OOB.MSDP {
+			if msdpBuf := oob.EncodeMSDPEvent(ev); msdpBuf != nil {
+				d.SendRaw(msdpBuf)
+			}
+		}
+	}
+}
+
+// Closed implements events.Subscriber.
+func (d *Descriptor) Closed() bool {
+	return d.IsClosed()
+}
+
+// Compile-time check that Descriptor implements events.Subscriber.
+var _ events.Subscriber = (*Descriptor)(nil)
 
 // nullConn is a no-op net.Conn used for synthetic descriptors (non-connected objects).
 type nullConn struct{}
@@ -135,6 +208,7 @@ type ConnManager struct {
 	descriptors map[int]*Descriptor
 	nextID      int
 	byPlayer    map[gamedb.DBRef][]*Descriptor // player -> connections (multi-login)
+	EventBus    *events.Bus                    // Event bus for pub/sub (nil = disabled)
 }
 
 // NewConnManager creates a new connection manager.
@@ -153,8 +227,12 @@ func (cm *ConnManager) Add(d *Descriptor) {
 	cm.descriptors[d.ID] = d
 }
 
-// Remove unregisters a descriptor.
+// Remove unregisters a descriptor and unsubscribes it from the event bus.
 func (cm *ConnManager) Remove(d *Descriptor) {
+	if cm.EventBus != nil && d.Player != gamedb.Nothing {
+		cm.EventBus.Unsubscribe(d.Player, d)
+	}
+
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	delete(cm.descriptors, d.ID)
@@ -172,13 +250,17 @@ func (cm *ConnManager) Remove(d *Descriptor) {
 	}
 }
 
-// Login associates a descriptor with a player.
+// Login associates a descriptor with a player and subscribes it to the event bus.
 func (cm *ConnManager) Login(d *Descriptor, player gamedb.DBRef) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	d.State = ConnConnected
 	d.Player = player
 	cm.byPlayer[player] = append(cm.byPlayer[player], d)
+
+	if cm.EventBus != nil {
+		cm.EventBus.Subscribe(player, d)
+	}
 }
 
 // NextID returns the next descriptor ID.

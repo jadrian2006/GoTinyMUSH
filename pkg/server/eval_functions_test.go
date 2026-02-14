@@ -97,10 +97,11 @@ func newEvalTestEnv(t *testing.T) *evalTestEnv {
 	}
 
 	// North Exit #7 - from Room Zero to Other Room
+	// TinyMUSH exit semantics: Location = destination, Exits = source room
 	db.Objects[7] = &gamedb.Object{
 		DBRef: 7, Name: "North;n",
-		Location: 0, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
-		Link: 4, Next: gamedb.Nothing,
+		Location: 4, Contents: gamedb.Nothing, Exits: 0,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
 		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
 		Flags: [3]int{int(gamedb.TypeExit), 0, 0},
 	}

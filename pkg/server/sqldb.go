@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 	_ "modernc.org/sqlite"
 )
 
@@ -147,6 +149,187 @@ func (s *SQLStore) Query(query, rowDelim, fieldDelim string) (string, error) {
 // Escape doubles single quotes in the input string for safe SQL interpolation.
 func (s *SQLStore) Escape(input string) string {
 	return strings.ReplaceAll(input, "'", "''")
+}
+
+// --- Scrollback Storage ---
+
+// InitScrollbackTables creates the scrollback tables if they don't exist.
+func (s *SQLStore) InitScrollbackTables() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("SQL NOT CONFIGURED")
+	}
+
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS channel_scrollback (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			channel TEXT NOT NULL,
+			sender_ref INTEGER,
+			sender_name TEXT,
+			message TEXT,
+			timestamp INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_scrollback_time ON channel_scrollback(channel, timestamp);
+
+		CREATE TABLE IF NOT EXISTS personal_scrollback (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			player_ref INTEGER NOT NULL,
+			encrypted_data BLOB NOT NULL,
+			iv BLOB NOT NULL,
+			timestamp INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_personal_time ON personal_scrollback(player_ref, timestamp);
+	`)
+	if err != nil {
+		return fmt.Errorf("creating scrollback tables: %w", err)
+	}
+	log.Printf("sqldb: scrollback tables initialized")
+	return nil
+}
+
+// ScrollbackMessage represents a stored channel message.
+type ScrollbackMessage struct {
+	ID         int64  `json:"id"`
+	Channel    string `json:"channel"`
+	SenderRef  int    `json:"sender_ref"`
+	SenderName string `json:"sender_name"`
+	Message    string `json:"message"`
+	Timestamp  int64  `json:"timestamp"`
+}
+
+// InsertScrollback stores a channel message.
+func (s *SQLStore) InsertScrollback(channel string, senderRef gamedb.DBRef, senderName, message string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("SQL NOT CONFIGURED")
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO channel_scrollback (channel, sender_ref, sender_name, message, timestamp)
+		 VALUES (?, ?, ?, ?, ?)`,
+		channel, int(senderRef), senderName, message, time.Now().Unix(),
+	)
+	return err
+}
+
+// GetScrollback retrieves channel messages since a given time.
+func (s *SQLStore) GetScrollback(channel string, since time.Time, limit int) ([]ScrollbackMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, fmt.Errorf("SQL NOT CONFIGURED")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, channel, sender_ref, sender_name, message, timestamp
+		 FROM channel_scrollback WHERE channel = ? AND timestamp >= ?
+		 ORDER BY timestamp ASC LIMIT ?`,
+		channel, since.Unix(), limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []ScrollbackMessage
+	for rows.Next() {
+		var m ScrollbackMessage
+		if err := rows.Scan(&m.ID, &m.Channel, &m.SenderRef, &m.SenderName, &m.Message, &m.Timestamp); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// PurgeOldScrollback deletes channel scrollback entries older than the given duration.
+func (s *SQLStore) PurgeOldScrollback(retention time.Duration) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return 0, fmt.Errorf("SQL NOT CONFIGURED")
+	}
+	cutoff := time.Now().Add(-retention).Unix()
+	result, err := s.db.Exec(`DELETE FROM channel_scrollback WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// PersonalScrollbackEntry represents an encrypted personal scrollback blob.
+type PersonalScrollbackEntry struct {
+	ID            int64  `json:"id"`
+	EncryptedData []byte `json:"encrypted_data"`
+	IV            []byte `json:"iv"`
+	Timestamp     int64  `json:"timestamp"`
+}
+
+// InsertPersonalScrollback stores an encrypted scrollback blob for a player.
+func (s *SQLStore) InsertPersonalScrollback(player gamedb.DBRef, encData, iv []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("SQL NOT CONFIGURED")
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO personal_scrollback (player_ref, encrypted_data, iv, timestamp)
+		 VALUES (?, ?, ?, ?)`,
+		int(player), encData, iv, time.Now().Unix(),
+	)
+	return err
+}
+
+// GetPersonalScrollback retrieves encrypted scrollback entries for a player since a given time.
+func (s *SQLStore) GetPersonalScrollback(player gamedb.DBRef, since time.Time, limit int) ([]PersonalScrollbackEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, fmt.Errorf("SQL NOT CONFIGURED")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, encrypted_data, iv, timestamp
+		 FROM personal_scrollback WHERE player_ref = ? AND timestamp >= ?
+		 ORDER BY timestamp ASC LIMIT ?`,
+		int(player), since.Unix(), limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []PersonalScrollbackEntry
+	for rows.Next() {
+		var e PersonalScrollbackEntry
+		if err := rows.Scan(&e.ID, &e.EncryptedData, &e.IV, &e.Timestamp); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// PurgeOldPersonalScrollback deletes personal scrollback entries older than the given duration.
+func (s *SQLStore) PurgeOldPersonalScrollback(retention time.Duration) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return 0, fmt.Errorf("SQL NOT CONFIGURED")
+	}
+	cutoff := time.Now().Add(-retention).Unix()
+	result, err := s.db.Exec(`DELETE FROM personal_scrollback WHERE timestamp < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // Reconnect closes and reopens the database connection.

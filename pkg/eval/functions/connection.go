@@ -184,7 +184,7 @@ func fnEntrances(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, 
 	ref := resolveDBRef(ctx, args[0])
 	var entrances []string
 	for _, obj := range ctx.DB.Objects {
-		if obj.ObjType() == gamedb.TypeExit && obj.Link == ref && !obj.IsGoing() {
+		if obj.ObjType() == gamedb.TypeExit && obj.Location == ref && !obj.IsGoing() {
 			entrances = append(entrances, fmt.Sprintf("#%d", obj.DBRef))
 		}
 	}

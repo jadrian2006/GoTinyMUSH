@@ -11,6 +11,7 @@ import (
 	"github.com/crystal-mush/gotinymush/pkg/boltstore"
 	"github.com/crystal-mush/gotinymush/pkg/eval"
 	"github.com/crystal-mush/gotinymush/pkg/eval/functions"
+	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
@@ -352,9 +353,23 @@ func cmdSay(g *Game, d *Descriptor, args string, _ []string) {
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
 
-	d.Send(g.WrapMarker(d.Player, "SAY", fmt.Sprintf("You say \"%s\"", args)))
+	// Emit structured event to self
+	g.EmitEvent(d.Player, "SAY", events.Event{
+		Type:   events.EvSay,
+		Source: d.Player,
+		Room:   loc,
+		Text:   fmt.Sprintf("You say \"%s\"", args),
+		Data:   map[string]any{"message": args, "speaker": playerName},
+	})
+	// Emit structured event to room (except speaker)
 	msg := fmt.Sprintf("%s says \"%s\"", playerName, args)
-	g.SendMarkedToRoomExcept(loc, d.Player, "SAY", msg)
+	g.EmitEventToRoomExcept(loc, d.Player, "SAY", events.Event{
+		Type:   events.EvSay,
+		Source: d.Player,
+		Room:   loc,
+		Text:   msg,
+		Data:   map[string]any{"message": args, "speaker": playerName},
+	})
 	g.MatchListenPatterns(loc, d.Player, msg)
 }
 
@@ -363,7 +378,13 @@ func cmdPose(g *Game, d *Descriptor, args string, _ []string) {
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
 	msg := fmt.Sprintf("%s %s", playerName, args)
-	g.SendMarkedToRoom(loc, "POSE", msg)
+	g.EmitEventToRoom(loc, "POSE", events.Event{
+		Type:   events.EvPose,
+		Source: d.Player,
+		Room:   loc,
+		Text:   msg,
+		Data:   map[string]any{"pose": args, "player": playerName},
+	})
 	g.MatchListenPatterns(loc, d.Player, msg)
 }
 
@@ -372,7 +393,13 @@ func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
 	msg := fmt.Sprintf("%s%s", playerName, args)
-	g.SendMarkedToRoom(loc, "POSE", msg)
+	g.EmitEventToRoom(loc, "POSE", events.Event{
+		Type:   events.EvPose,
+		Source: d.Player,
+		Room:   loc,
+		Text:   msg,
+		Data:   map[string]any{"pose": args, "player": playerName, "nospace": true},
+	})
 	g.MatchListenPatterns(loc, d.Player, msg)
 }
 
@@ -409,28 +436,61 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 	senderName := g.PlayerName(d.Player)
 	targetObj := g.DB.Objects[target]
 
+	pageData := map[string]any{
+		"sender":  senderName,
+		"target":  targetObj.Name,
+		"message": message,
+	}
+
 	if message == "" {
-		d.Send(g.WrapMarker(d.Player, "PAGE", fmt.Sprintf("You page %s.", targetObj.Name)))
-		g.SendMarkedToPlayer(target, "PAGE",
-			fmt.Sprintf("%s pages you.", senderName))
+		g.EmitEvent(d.Player, "PAGE", events.Event{
+			Type: events.EvPage, Source: d.Player,
+			Text: fmt.Sprintf("You page %s.", targetObj.Name),
+			Data: pageData,
+		})
+		g.EmitEvent(target, "PAGE", events.Event{
+			Type: events.EvPage, Source: d.Player,
+			Text: fmt.Sprintf("%s pages you.", senderName),
+			Data: pageData,
+		})
 	} else {
 		message = evalExpr(g, d.Player, message)
+		pageData["message"] = message
 		if strings.HasPrefix(message, ":") {
-			// Pose: page player=:does something
 			pose := strings.TrimPrefix(message, ":")
-			d.Send(g.WrapMarker(d.Player, "PAGE", fmt.Sprintf("Long distance to %s: %s %s", targetObj.Name, senderName, pose)))
-			g.SendMarkedToPlayer(target, "PAGE",
-				fmt.Sprintf("From afar, %s %s", senderName, pose))
+			g.EmitEvent(d.Player, "PAGE", events.Event{
+				Type: events.EvPage, Source: d.Player,
+				Text: fmt.Sprintf("Long distance to %s: %s %s", targetObj.Name, senderName, pose),
+				Data: pageData,
+			})
+			g.EmitEvent(target, "PAGE", events.Event{
+				Type: events.EvPage, Source: d.Player,
+				Text: fmt.Sprintf("From afar, %s %s", senderName, pose),
+				Data: pageData,
+			})
 		} else if strings.HasPrefix(message, ";") {
-			// Semipose: page player=;'s thing
 			pose := strings.TrimPrefix(message, ";")
-			d.Send(g.WrapMarker(d.Player, "PAGE", fmt.Sprintf("Long distance to %s: %s%s", targetObj.Name, senderName, pose)))
-			g.SendMarkedToPlayer(target, "PAGE",
-				fmt.Sprintf("From afar, %s%s", senderName, pose))
+			g.EmitEvent(d.Player, "PAGE", events.Event{
+				Type: events.EvPage, Source: d.Player,
+				Text: fmt.Sprintf("Long distance to %s: %s%s", targetObj.Name, senderName, pose),
+				Data: pageData,
+			})
+			g.EmitEvent(target, "PAGE", events.Event{
+				Type: events.EvPage, Source: d.Player,
+				Text: fmt.Sprintf("From afar, %s%s", senderName, pose),
+				Data: pageData,
+			})
 		} else {
-			d.Send(g.WrapMarker(d.Player, "PAGE", fmt.Sprintf("You page %s with \"%s\"", targetObj.Name, message)))
-			g.SendMarkedToPlayer(target, "PAGE",
-				fmt.Sprintf("%s pages: %s", senderName, message))
+			g.EmitEvent(d.Player, "PAGE", events.Event{
+				Type: events.EvPage, Source: d.Player,
+				Text: fmt.Sprintf("You page %s with \"%s\"", targetObj.Name, message),
+				Data: pageData,
+			})
+			g.EmitEvent(target, "PAGE", events.Event{
+				Type: events.EvPage, Source: d.Player,
+				Text: fmt.Sprintf("%s pages: %s", senderName, message),
+				Data: pageData,
+			})
 		}
 	}
 }
@@ -441,7 +501,12 @@ func cmdEmit(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	args = evalExpr(g, d.Player, args)
 	loc := g.PlayerLocation(d.Player)
-	g.SendMarkedToRoom(loc, "EMIT", args)
+	g.EmitEventToRoom(loc, "EMIT", events.Event{
+		Type:   events.EvEmit,
+		Source: d.Player,
+		Room:   loc,
+		Text:   args,
+	})
 	g.MatchListenPatterns(loc, d.Player, args)
 }
 
@@ -525,7 +590,8 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 			ename = strings.TrimSpace(ename)
 			if len(name) > 0 && len(ename) >= len(name) && strings.EqualFold(ename[:len(name)], name) {
 				// Found matching exit - move player
-				dest := exitObj.Link
+				// TinyMUSH stores exit destination in Location field
+				dest := exitObj.Location
 				if dest == gamedb.Nothing || dest == gamedb.Home {
 					// Home exit
 					playerObj := g.DB.Objects[d.Player]
@@ -858,6 +924,22 @@ type Game struct {
 	DictDir     string   // Path to dictionary directory (for archive)
 	AliasConfs  []string // Paths to alias config files (for archive)
 	ArchiveDir  string   // Path to archive output directory
+	EventBus    *events.Bus // Structured event bus for multi-transport output
+}
+
+// Emit sends an event to the player specified in ev.Player via the event bus.
+func (g *Game) Emit(ev events.Event) {
+	g.EventBus.Emit(ev)
+}
+
+// EmitRoom sends an event to all players in a room via the event bus.
+func (g *Game) EmitRoom(room gamedb.DBRef, ev events.Event) {
+	g.EventBus.EmitToRoom(g.DB, room, ev)
+}
+
+// EmitRoomExcept sends an event to all players in a room except one.
+func (g *Game) EmitRoomExcept(room gamedb.DBRef, except gamedb.DBRef, ev events.Event) {
+	g.EventBus.EmitToRoomExcept(g.DB, room, except, ev)
 }
 
 // PersistObject writes a single object to the bolt store (no-op if Store is nil).
@@ -889,13 +971,17 @@ func NewGame(db *gamedb.Database) *Game {
 			maxRef = ref
 		}
 	}
+	bus := events.NewBus()
+	cm := NewConnManager()
+	cm.EventBus = bus
 	return &Game{
 		DB:        db,
-		Conns:     NewConnManager(),
+		Conns:     cm,
 		Commands:  InitCommands(),
 		Queue:     NewCommandQueue(),
 		NextRef:   maxRef + 1,
 		GameFuncs: make(map[string]*eval.UFunction),
+		EventBus:  bus,
 	}
 }
 
@@ -1156,11 +1242,21 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 	d.Send(fmt.Sprintf("%s(#%d%s)", obj.Name, target, flagString(obj)))
 	d.Send(fmt.Sprintf("Type: %s  Flags: %s  Owner: %s(#%d)",
 		obj.ObjType().String(), flagString(obj), g.PlayerName(obj.Owner), obj.Owner))
-	if obj.Location != gamedb.Nothing {
-		d.Send(fmt.Sprintf("Location: %s(#%d)", g.ObjName(obj.Location), obj.Location))
-	}
-	if obj.Link != gamedb.Nothing && obj.Link != gamedb.DBRef(-3) {
-		d.Send(fmt.Sprintf("Home/Link: %s(#%d)", g.ObjName(obj.Link), obj.Link))
+	if obj.ObjType() == gamedb.TypeExit {
+		// For exits: Location = destination, Exits = source room
+		if obj.Location != gamedb.Nothing {
+			d.Send(fmt.Sprintf("Destination: %s(#%d)", g.ObjName(obj.Location), obj.Location))
+		}
+		if obj.Exits != gamedb.Nothing {
+			d.Send(fmt.Sprintf("Source: %s(#%d)", g.ObjName(obj.Exits), obj.Exits))
+		}
+	} else {
+		if obj.Location != gamedb.Nothing {
+			d.Send(fmt.Sprintf("Location: %s(#%d)", g.ObjName(obj.Location), obj.Location))
+		}
+		if obj.Link != gamedb.Nothing && obj.Link != gamedb.DBRef(-3) {
+			d.Send(fmt.Sprintf("Home: %s(#%d)", g.ObjName(obj.Link), obj.Link))
+		}
 	}
 	if obj.Zone != gamedb.Nothing {
 		d.Send(fmt.Sprintf("Zone: %s(#%d)", g.ObjName(obj.Zone), obj.Zone))
@@ -1216,8 +1312,8 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		}
 	}
 
-	// Exits section
-	if obj.Exits != gamedb.Nothing {
+	// Exits section (only for rooms — for exits, Exits field is the source room, already shown above)
+	if obj.ObjType() != gamedb.TypeExit && obj.Exits != gamedb.Nothing {
 		d.Send("Exits:")
 		exitRef := obj.Exits
 		for exitRef != gamedb.Nothing {
@@ -1779,8 +1875,9 @@ func (g *Game) CreateObject(name string, objType gamedb.ObjectType, owner gamedb
 func (g *Game) CreateExit(name string, source, dest, owner gamedb.DBRef) gamedb.DBRef {
 	ref := g.CreateObject(name, gamedb.TypeExit, owner)
 	exitObj := g.DB.Objects[ref]
-	exitObj.Link = dest
-	exitObj.Location = source
+	// TinyMUSH exit semantics: Location = destination, Exits = source room
+	exitObj.Location = dest
+	exitObj.Exits = source
 
 	// Add to source room's exit chain
 	if srcObj, ok := g.DB.Objects[source]; ok {

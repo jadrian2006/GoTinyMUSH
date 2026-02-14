@@ -102,6 +102,19 @@ type GameConf struct {
 	ArchiveRetain   int    `yaml:"archive_retain"`    // Keep last N archives, 0 = unlimited
 	ArchiveHook     string `yaml:"archive_hook"`      // Shell command to run after archive, %f = archive path
 
+	// --- Web/Security ---
+	WebEnabled    bool     `yaml:"web_enabled"`     // Enable HTTPS/WSS server
+	WebPort       int      `yaml:"web_port"`        // HTTPS port (default 8443)
+	WebHost       string   `yaml:"web_host"`        // Bind address (empty = all interfaces)
+	WebDomain     string   `yaml:"web_domain"`      // Let's Encrypt domain (empty = self-signed)
+	WebStaticDir  string   `yaml:"web_static_dir"`  // Path to built web client (default "web/dist")
+	WebCORSOrigins []string `yaml:"web_cors_origins"` // Allowed CORS origins
+	WebRateLimit  int      `yaml:"web_rate_limit"`  // Requests per minute per IP (default 60)
+	JWTSecret     string   `yaml:"jwt_secret"`      // JWT signing secret (auto-generated if empty)
+	JWTExpiry     int      `yaml:"jwt_expiry"`      // JWT expiry in seconds (default 86400)
+	CertDir       string   `yaml:"cert_dir"`        // Directory for generated certs (default "certs")
+	ScrollbackRetention int `yaml:"scrollback_retention"` // Public scrollback retention in seconds (default 86400)
+
 	// --- Alias config includes (YAML: list of paths; legacy: from "include" directives) ---
 	AliasFiles []string `yaml:"alias_files"`
 
@@ -155,6 +168,12 @@ func DefaultGameConf() *GameConf {
 		SQLTimeout:              5,
 		SQLReconnect:            true,
 		ArchiveDir:              "backups",
+		WebPort:                 8443,
+		WebStaticDir:            "web/dist",
+		WebRateLimit:            60,
+		JWTExpiry:               86400,
+		CertDir:                 "certs",
+		ScrollbackRetention:     86400,
 	}
 }
 
@@ -396,6 +415,33 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.TLSCert = val
 		case "tls_key":
 			gc.TLSKey = val
+
+		// --- Web/Security ---
+		case "web_enabled":
+			gc.WebEnabled = parseBool(val)
+		case "web_port":
+			gc.WebPort = atoi(val, gc.WebPort)
+		case "web_host":
+			gc.WebHost = val
+		case "web_domain":
+			gc.WebDomain = val
+		case "web_static_dir":
+			gc.WebStaticDir = val
+		case "web_cors_origins":
+			gc.WebCORSOrigins = strings.Split(val, ",")
+			for i := range gc.WebCORSOrigins {
+				gc.WebCORSOrigins[i] = strings.TrimSpace(gc.WebCORSOrigins[i])
+			}
+		case "web_rate_limit":
+			gc.WebRateLimit = atoi(val, gc.WebRateLimit)
+		case "jwt_secret":
+			gc.JWTSecret = val
+		case "jwt_expiry":
+			gc.JWTExpiry = atoi(val, gc.JWTExpiry)
+		case "cert_dir":
+			gc.CertDir = val
+		case "scrollback_retention":
+			gc.ScrollbackRetention = atoi(val, gc.ScrollbackRetention)
 
 		// --- Directives handled elsewhere ---
 		case "alias", "flag_alias", "function_alias", "attr_alias", "power_alias", "bad_name":

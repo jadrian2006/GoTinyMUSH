@@ -358,7 +358,7 @@ func cmdCemit(g *Game, d *Descriptor, args string, _ []string) {
 		header = fmt.Sprintf("[%s]", ch.Name)
 	}
 	msg := fmt.Sprintf("%s %s", header, message)
-	g.SendToChannel(ch.Name, msg)
+	g.SendToChannel(ch.Name, d.Player, msg)
 }
 
 // cmdCset handles "@cset channel=option" — set channel properties.

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
+	"github.com/crystal-mush/gotinymush/pkg/oob"
 )
 
 // Config holds server configuration.
@@ -44,12 +46,12 @@ type Server struct {
 	Game        *Game
 	listener    net.Listener
 	tlsListener net.Listener
+	webServer   *WebServer
 }
 
 // NewServer creates a new server instance.
 func NewServer(db *gamedb.Database, cfg Config) *Server {
 	game := NewGame(db)
-	game.Conns = NewConnManager()
 	return &Server{
 		Config: cfg,
 		Game:   game,
@@ -64,6 +66,18 @@ func (s *Server) Start() error {
 
 	// Start the command queue processor
 	s.Game.StartQueueProcessor()
+
+	// Start scrollback writer if SQL is configured
+	if s.Game.SQLDB != nil {
+		sw := NewScrollbackWriter(s.Game)
+		if sw != nil {
+			retention := 24 * time.Hour
+			if s.Game.Conf != nil && s.Game.Conf.ScrollbackRetention > 0 {
+				retention = time.Duration(s.Game.Conf.ScrollbackRetention) * time.Second
+			}
+			StartRetentionCleanup(s.Game.SQLDB, retention)
+		}
+	}
 
 	// Start periodic auto-save (every 30 minutes)
 	if s.Game.DBPath != "" {
@@ -83,7 +97,7 @@ func (s *Server) Start() error {
 	log.Printf("Players in database: %d", playerCount)
 
 	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 
 	if s.Config.Cleartext {
 		wg.Add(1)
@@ -121,6 +135,31 @@ func (s *Server) Start() error {
 		}()
 	}
 
+	// Start web server if enabled
+	if s.Game.Conf != nil && s.Game.Conf.WebEnabled {
+		cfg := WebConfig{
+			Port:        s.Game.Conf.WebPort,
+			Host:        s.Game.Conf.WebHost,
+			Domain:      s.Game.Conf.WebDomain,
+			CertFile:    s.Game.Conf.TLSCert,
+			KeyFile:     s.Game.Conf.TLSKey,
+			CertDir:     s.Game.Conf.CertDir,
+			StaticDir:   s.Game.Conf.WebStaticDir,
+			CORSOrigins: s.Game.Conf.WebCORSOrigins,
+			RateLimit:   s.Game.Conf.WebRateLimit,
+			JWTSecret:   s.Game.Conf.JWTSecret,
+			JWTExpiry:   s.Game.Conf.JWTExpiry,
+		}
+		s.webServer = NewWebServer(s.Game, cfg)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.webServer.Start(cfg); err != nil {
+				errCh <- fmt.Errorf("web server: %w", err)
+			}
+		}()
+	}
+
 	// Check for early startup errors
 	select {
 	case err := <-errCh:
@@ -155,6 +194,11 @@ func (s *Server) Stop() {
 	if s.tlsListener != nil {
 		s.tlsListener.Close()
 	}
+	if s.webServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.webServer.Stop(ctx)
+	}
 }
 
 // handleConnection manages a single client connection lifecycle.
@@ -164,6 +208,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.Game.Conns.Add(d)
 
 	log.Printf("[%d] New connection from %s", d.ID, d.Addr)
+
+	// OOB protocol negotiation (GMCP/MSDP) with 1-second timeout.
+	// Non-OOB clients simply don't respond and we move on.
+	caps := oob.Negotiate(conn, 1*time.Second)
+	if caps.HasAny() {
+		d.OOB = caps
+		log.Printf("[%d] OOB negotiated: GMCP=%v MSDP=%v", d.ID, caps.GMCP, caps.MSDP)
+	}
 
 	defer func() {
 		s.Game.DisconnectPlayer(d)

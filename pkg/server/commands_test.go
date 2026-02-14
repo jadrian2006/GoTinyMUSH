@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
@@ -150,13 +151,16 @@ func newTestEnv(t *testing.T) *testEnv {
 	// Contents chain: Room #0 -> 1 -> 2 -> 3 -> 5 -> Nothing
 	db.Objects[0].Contents = 1
 
+	bus := events.NewBus()
 	conns := NewConnManager()
+	conns.EventBus = bus
 	g := &Game{
 		DB:       db,
 		Conns:    conns,
 		Commands: InitCommands(),
 		Queue:    NewCommandQueue(),
 		NextRef:  6,
+		EventBus: bus,
 	}
 
 	// Create a piped descriptor for the wizard player

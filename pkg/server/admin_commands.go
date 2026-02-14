@@ -92,7 +92,13 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
-		obj.Link = dest
+		if obj.ObjType() == gamedb.TypeExit {
+			// For exits, destination is stored in Location
+			obj.Location = dest
+		} else {
+			// For players/things, @link sets Home (Link field)
+			obj.Link = dest
+		}
 		g.PersistObject(obj)
 		d.Send(fmt.Sprintf("Linked %s(#%d) to %s(#%d).", obj.Name, target, g.ObjName(dest), dest))
 	}
@@ -105,7 +111,11 @@ func cmdUnlink(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
-		obj.Link = gamedb.Nothing
+		if obj.ObjType() == gamedb.TypeExit {
+			obj.Location = gamedb.Nothing
+		} else {
+			obj.Link = gamedb.Nothing
+		}
 		g.PersistObject(obj)
 		d.Send(fmt.Sprintf("Unlinked %s(#%d).", obj.Name, target))
 	}
@@ -194,6 +204,9 @@ func cmdClone(g *Game, d *Descriptor, args string, _ []string) {
 	newObj := g.DB.Objects[ref]
 	newObj.Parent = srcObj.Parent
 	newObj.Link = srcObj.Link
+	if srcObj.ObjType() == gamedb.TypeExit {
+		newObj.Location = srcObj.Location // Copy destination for exits
+	}
 
 	// Copy attributes
 	for _, attr := range srcObj.Attrs {

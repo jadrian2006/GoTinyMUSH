@@ -496,9 +496,19 @@ func fnNattr(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 func fnHome(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
-	if obj, ok := ctx.DB.Objects[ref]; ok {
+	obj, ok := ctx.DB.Objects[ref]
+	if !ok { buf.WriteString("#-1"); return }
+	switch obj.ObjType() {
+	case gamedb.TypeExit:
+		// For exits, home() returns the source room (Exits field)
+		buf.WriteString(fmt.Sprintf("#%d", obj.Exits))
+	case gamedb.TypeRoom:
+		// For rooms, home() returns the dropto (Location field)
+		buf.WriteString(fmt.Sprintf("#%d", obj.Location))
+	default:
+		// For players/things, home() returns Link
 		buf.WriteString(fmt.Sprintf("#%d", obj.Link))
-	} else { buf.WriteString("#-1") }
+	}
 }
 
 func fnParent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -913,16 +923,20 @@ func fnVisible(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	buf.WriteString("0")
 }
 
-// fnWhere — like loc() but returns room if target is not a room.
+// fnWhere — returns "true" location: Location for players/things, source room for exits, self for rooms.
 func fnWhere(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("#-1"); return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1 NOT FOUND"); return }
-	if obj.ObjType() == gamedb.TypeRoom {
+	switch obj.ObjType() {
+	case gamedb.TypeRoom:
 		buf.WriteString(fmt.Sprintf("#%d", ref))
-	} else {
+	case gamedb.TypeExit:
+		// For exits, where() returns the source room (Exits field)
+		buf.WriteString(fmt.Sprintf("#%d", obj.Exits))
+	default:
 		buf.WriteString(fmt.Sprintf("#%d", obj.Location))
 	}
 }

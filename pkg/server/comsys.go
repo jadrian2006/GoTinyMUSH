@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
@@ -200,14 +201,24 @@ func (cs *Comsys) RemoveChannel(name string) ([]*gamedb.ChanAlias, error) {
 }
 
 // SendToChannel broadcasts a message to all listening, connected players on a channel.
-func (g *Game) SendToChannel(channelName string, msg string) {
+// It emits structured EvChannel events via the event bus.
+func (g *Game) SendToChannel(channelName string, sender gamedb.DBRef, msg string) {
 	if g.Comsys == nil {
 		return
 	}
 	listeners := g.Comsys.ChannelListeners(channelName)
 	for _, ca := range listeners {
 		if g.Conns.IsConnected(ca.Player) {
-			g.SendMarkedToPlayer(ca.Player, channelName, msg)
+			g.EmitEvent(ca.Player, channelName, events.Event{
+				Type:    events.EvChannel,
+				Source:  sender,
+				Channel: channelName,
+				Text:    msg,
+				Data: map[string]any{
+					"channel": channelName,
+					"message": msg,
+				},
+			})
 		}
 	}
 }
@@ -280,7 +291,7 @@ func (g *Game) ComsysProcessAlias(d *Descriptor, ca *gamedb.ChanAlias, args stri
 		msg = fmt.Sprintf("%s %s says, \"%s\"", header, playerName, args)
 	}
 
-	g.SendToChannel(ca.Channel, msg)
+	g.SendToChannel(ca.Channel, d.Player, msg)
 }
 
 // showChannelWho shows who's on a channel.
