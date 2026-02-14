@@ -311,6 +311,11 @@ func (s *Server) handleLoginCommand(d *Descriptor, input string) {
 
 	switch {
 	case strings.HasPrefix(command, "co"): // connect
+		// Detect guest login: "connect guest", "connect guest guest", etc.
+		if strings.EqualFold(user, "guest") {
+			s.handleGuest(d)
+			return
+		}
 		s.handleConnect(d, user, password)
 
 	case strings.HasPrefix(command, "cr"): // create

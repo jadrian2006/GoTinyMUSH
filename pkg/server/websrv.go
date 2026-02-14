@@ -107,16 +107,9 @@ func (ws *WebServer) registerRoutes(cfg WebConfig) {
 	}
 }
 
-// Start begins listening on HTTPS.
+// Start begins listening. Uses HTTPS when TLS certs are available,
+// falls back to plain HTTP otherwise (development mode).
 func (ws *WebServer) Start(cfg WebConfig) error {
-	tlsCfg, err := SetupTLS(cfg.Domain, cfg.CertFile, cfg.KeyFile, cfg.CertDir)
-	if err != nil {
-		return fmt.Errorf("web TLS setup: %w", err)
-	}
-	ws.httpSrv.TLSConfig = tlsCfg
-
-	log.Printf("Web server listening on %s (HTTPS)", ws.httpSrv.Addr)
-
 	// Rate limiter cleanup goroutine
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
@@ -126,8 +119,26 @@ func (ws *WebServer) Start(cfg WebConfig) error {
 		}
 	}()
 
-	// ListenAndServeTLS with empty cert/key since TLSConfig is already set
-	err = ws.httpSrv.ListenAndServeTLS("", "")
+	// Try TLS setup; fall back to HTTP if no certs available
+	hasTLS := cfg.Domain != "" || (cfg.CertFile != "" && cfg.KeyFile != "") || cfg.CertDir != ""
+	if hasTLS {
+		tlsCfg, err := SetupTLS(cfg.Domain, cfg.CertFile, cfg.KeyFile, cfg.CertDir)
+		if err != nil {
+			log.Printf("web: TLS setup failed (%v), falling back to HTTP", err)
+		} else {
+			ws.httpSrv.TLSConfig = tlsCfg
+			log.Printf("Web server listening on %s (HTTPS)", ws.httpSrv.Addr)
+			err = ws.httpSrv.ListenAndServeTLS("", "")
+			if err == http.ErrServerClosed {
+				return nil
+			}
+			return err
+		}
+	}
+
+	// Plain HTTP fallback
+	log.Printf("Web server listening on %s (HTTP)", ws.httpSrv.Addr)
+	err := ws.httpSrv.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil
 	}

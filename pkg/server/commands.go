@@ -119,9 +119,7 @@ func InitCommands() map[string]*Command {
 	register("qhelp", cmdQhelp)
 	register("wizhelp", cmdWizhelp)
 	register("news", cmdNews)
-	// Note: +help is NOT registered as a built-in. In most games it is a
-	// softcode $-command on master room objects. Registering it here would
-	// shadow the softcode handler. If needed, it can be added via alias conf.
+	register("+help", cmdPlusHelp)
 
 	// Player object commands
 	register("get", cmdGet)
@@ -298,6 +296,18 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		log.Printf("DISPATCH: matched command %q", cmd.Name)
 		cmd.Handler(g, d, args, switches)
 		return
+	}
+
+	// Unrecognized @<attr> commands: treat as &<attr> (set variable attribute).
+	// Many MUSHes use @va-@vz and similar as shorthand for setting attributes.
+	lower := strings.ToLower(cmdName)
+	if len(lower) > 1 && lower[0] == '@' && args != "" {
+		attrName := lower[1:]
+		// Only do this if it looks like an attribute set (has obj=value)
+		if strings.Contains(args, "=") {
+			cmdSetVAttr(g, d, attrName+" "+args, nil)
+			return
+		}
 	}
 
 	// Try channel alias matching
@@ -925,6 +935,7 @@ type Game struct {
 	AliasConfs  []string // Paths to alias config files (for archive)
 	ArchiveDir  string   // Path to archive output directory
 	EventBus    *events.Bus // Structured event bus for multi-transport output
+	Guests      *GuestManager // Guest player tracking and cleanup
 }
 
 // Emit sends an event to the player specified in ev.Player via the event bus.
@@ -982,6 +993,7 @@ func NewGame(db *gamedb.Database) *Game {
 		NextRef:   maxRef + 1,
 		GameFuncs: make(map[string]*eval.UFunction),
 		EventBus:  bus,
+		Guests:    NewGuestManager(),
 	}
 }
 
@@ -2325,6 +2337,19 @@ func (g *Game) DisconnectPlayer(d *Descriptor) {
 
 		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
 			fmt.Sprintf("%s has disconnected.", playerName))
+
+		// Guest cleanup: if this was the last connection for a guest,
+		// schedule destruction after a grace period.
+		if g.Guests.IsGuest(d.Player) {
+			player := d.Player
+			go func() {
+				time.Sleep(60 * time.Second)
+				// Check if guest reconnected during grace period
+				if len(g.Conns.GetByPlayer(player)) == 0 {
+					g.DestroyGuest(player)
+				}
+			}()
+		}
 	}
 	d.Close()
 }

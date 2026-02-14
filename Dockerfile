@@ -1,3 +1,11 @@
+FROM node:22-alpine AS webbuilder
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ .
+RUN npm run build
+
 FROM golang:latest AS builder
 
 WORKDIR /src
@@ -11,6 +19,7 @@ RUN adduser -D -h /game mush
 WORKDIR /game
 
 COPY --from=builder /gotinymush /usr/local/bin/gotinymush
+COPY --from=webbuilder /web/dist /game/web/dist
 # Copy text files (connect.txt, motd.txt, etc.)
 COPY data/text /game/data/text
 # Copy game config (YAML)
@@ -23,7 +32,7 @@ COPY data/minimal.FLAT /game/data/minimal.FLAT
 RUN chown -R mush:mush /game
 USER mush
 
-EXPOSE 6250
+EXPOSE 6250 8443
 
 # All paths configurable via environment variables
 ENV MUSH_CONF=/game/data/game.yaml

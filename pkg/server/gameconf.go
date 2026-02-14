@@ -63,10 +63,13 @@ type GameConf struct {
 	TraceOutputLimit       int  `yaml:"trace_output_limit"`
 
 	// --- Guest ---
-	GuestCharNum  int    `yaml:"guest_char_num"`
-	GuestPrefixes string `yaml:"guest_prefixes"`
-	GuestSuffixes string `yaml:"guest_suffixes"`
-	GuestBasename string `yaml:"guest_basename"`
+	GuestCharNum   int    `yaml:"guest_char_num"`
+	GuestPrefixes  string `yaml:"guest_prefixes"`
+	GuestSuffixes  string `yaml:"guest_suffixes"`
+	GuestBasename  string `yaml:"guest_basename"`
+	NumberGuests   int    `yaml:"number_guests"`
+	GuestPassword  string `yaml:"guest_password"`
+	GuestStartRoom int    `yaml:"guest_start_room"`
 
 	// --- Channels (stored for future comsys) ---
 	PublicChannel string `yaml:"public_channel"`
@@ -159,6 +162,9 @@ func DefaultGameConf() *GameConf {
 		TraceOutputLimit:        200,
 		GuestCharNum:            -1,
 		GuestBasename:           "Guest",
+		NumberGuests:            30,
+		GuestPassword:           "guest",
+		GuestStartRoom:          -1,
 		GodDBRef:                1,
 		ZoneNestLimit:           20,
 		SpellcheckEnabled:       false,
