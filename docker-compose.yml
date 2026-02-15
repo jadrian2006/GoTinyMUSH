@@ -11,6 +11,11 @@ services:
     volumes:
       - gamedata:/game/data
     environment:
+      # --- User/Group mapping (match your host user) ---
+      PUID: 1000
+      PGID: 1000
+      TZ: America/New_York
+      # --- Game config ---
       MUSH_CONF: /game/data/game.yaml
       # MUSH_BOLT and MUSH_DB intentionally omitted for setup mode.
       # The server starts in admin-panel-only mode until setup/import is complete.
