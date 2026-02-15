@@ -9,6 +9,7 @@ interface Finding {
   current: string
   proposed: string
   effect: string
+  explanation: string
   fixable: boolean
   fixed: boolean
 }
@@ -58,6 +59,11 @@ export function FindingCard({ finding, onFix }: FindingCardProps) {
           <span class="text-xs text-green-400 shrink-0">Fixed</span>
         )}
       </div>
+      {finding.explanation && (
+        <div class="mt-2 text-xs text-slate-400 bg-slate-800/40 rounded p-2 border-l-2 border-slate-600">
+          {finding.explanation}
+        </div>
+      )}
       {finding.current && (
         <div class="mt-2">
           <div class="text-xs text-slate-400 mb-0.5">Current:</div>
@@ -72,7 +78,7 @@ export function FindingCard({ finding, onFix }: FindingCardProps) {
       )}
       {finding.effect && (
         <div class="mt-1 text-xs text-slate-400">
-          Effect: {finding.effect}
+          <span class="text-slate-500">Changes:</span> {finding.effect}
         </div>
       )}
     </div>

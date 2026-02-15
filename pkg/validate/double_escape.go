@@ -90,6 +90,7 @@ func (c *DoubleEscapeChecker) Check(db *gamedb.Database) []Finding {
 				Current:     truncate(text, 200),
 				Proposed:    truncate(proposed, 200),
 				Effect:      strings.Join(effectParts, "; "),
+				Explanation: `C TinyMUSH evaluates queued commands twice, so game authors wrote \\[text\\] to get [text] after double processing. GoTinyMUSH evaluates correctly in a single pass, so the extra backslashes produce \text\ instead. The fix removes the extra escaping so text displays as originally intended.`,
 				Fixable:     true,
 				fixFunc: func() {
 					prefix, _ := splitAttrPrefix(capturedObj.Attrs[capturedIdx].Value)

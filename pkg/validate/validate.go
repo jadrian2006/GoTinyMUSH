@@ -77,6 +77,7 @@ type Finding struct {
 	Current     string       `json:"current,omitempty"`
 	Proposed    string       `json:"proposed,omitempty"`
 	Effect      string       `json:"effect,omitempty"`
+	Explanation string       `json:"explanation,omitempty"`
 	Fixable     bool         `json:"fixable"`
 	Fixed       bool         `json:"fixed"`
 	fixFunc     func()       // unexported — called via ApplyFix()

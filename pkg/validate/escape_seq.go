@@ -53,6 +53,7 @@ func (c *EscapeSeqChecker) Check(db *gamedb.Database) []Finding {
 				OwnerRef:    obj.Owner,
 				Description: fmt.Sprintf("%d ESC byte(s) in %s on #%d (%s) — ANSI codes, handled natively", escCount, attrName, obj.DBRef, truncate(obj.Name, 30)),
 				Current:     truncate(text, 200),
+				Explanation: "This attribute contains raw ANSI escape codes (ESC bytes) for terminal color and formatting. GoTinyMUSH processes these natively — no action needed.",
 				Fixable:     false,
 			})
 		}

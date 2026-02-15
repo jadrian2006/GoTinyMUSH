@@ -59,6 +59,7 @@ func (c *AttrFlagChecker) Check(db *gamedb.Database) []Finding {
 						OwnerRef:    obj.Owner,
 						Description: fmt.Sprintf("$-command attr without \\x01 prefix has colon in pattern on #%d %s", obj.DBRef, attrName),
 						Current:     truncate(text, 200),
+						Explanation: "This $-command attribute's pattern starts with a number followed by a colon, which could be confused with the internal owner:flags:value metadata prefix. GoTinyMUSH handles this correctly at runtime — informational only, no fix needed.",
 						Fixable:     false,
 					})
 				}

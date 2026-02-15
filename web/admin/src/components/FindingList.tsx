@@ -9,6 +9,15 @@ const categoryNames: Record<number, string> = {
   5: 'Integrity Warnings',
 }
 
+const categoryDescriptions: Record<number, string> = {
+  0: 'C TinyMUSH processes queued commands with an extra evaluation pass. Code written for C used double-escaping (\\\\[text\\\\]) to compensate. GoTinyMUSH evaluates correctly, so these need to be simplified to single-escaping ([text]) to display properly.',
+  1: 'Some $-command attributes have patterns that could be confused with internal metadata formatting. GoTinyMUSH handles these correctly — these are informational only.',
+  2: 'Attributes containing raw ANSI escape codes (ESC bytes) for terminal colors and formatting. GoTinyMUSH supports these natively — no action needed.',
+  3: 'Similar to bracket escaping, backslash-percent patterns (\\\\%) were doubled for C\'s extra evaluation pass. The fix removes the extra backslash so percent-substitutions (%r, %t, %0-%9, etc.) work correctly.',
+  4: 'Objects referencing other objects (locations, parents, zones, links) that don\'t exist in the database. These may indicate objects that were destroyed without cleaning up references.',
+  5: 'Suspicious but non-critical reference issues, such as objects owned by non-player objects.',
+}
+
 const categoryKeys: Record<number, string> = {
   0: 'double-escape',
   1: 'attr-flags',
@@ -60,6 +69,11 @@ export function FindingList({ findings, onFix, onFixAll }: FindingListProps) {
                 </button>
               )}
             </div>
+            {categoryDescriptions[cat] && (
+              <div class="text-xs text-slate-400 bg-slate-800/30 rounded p-2 mb-3 border-l-2 border-indigo-500/40">
+                {categoryDescriptions[cat]}
+              </div>
+            )}
             {items.map(f => (
               <FindingCard key={f.id} finding={f} onFix={onFix} />
             ))}

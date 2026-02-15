@@ -64,6 +64,7 @@ func (c *PercentChecker) Check(db *gamedb.Database) []Finding {
 				Current:     truncate(text, 200),
 				Proposed:    truncate(proposed, 200),
 				Effect:      strings.Join(effectParts, "; "),
+				Explanation: `Similar to bracket escaping, \\% was used in C TinyMUSH to produce a literal % after double-evaluation. GoTinyMUSH's single-pass evaluation means \\% now produces \% instead. The fix removes the extra backslash so percent-substitutions like %r (newline) and %t (tab) work correctly.`,
 				Fixable:     true,
 				fixFunc: func() {
 					prefix, _ := splitAttrPrefix(capturedObj.Attrs[capturedIdx].Value)
