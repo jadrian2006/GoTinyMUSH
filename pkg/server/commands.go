@@ -129,6 +129,9 @@ func InitCommands() map[string]*Command {
 	register("qhelp", cmdQhelp)
 	register("wizhelp", cmdWizhelp)
 	register("news", cmdNews)
+	register("man", cmdMan)
+	register("wiznews", cmdWizNews)
+	register("+jhelp", cmdJhelp)
 	// NOTE: +help is NOT registered here. CrystalMUSH uses softcode $+help
 	// on Global Commands(#123) in the master room. The original crystal.conf
 	// has "helpfile +help text/plushelp" commented out (line 47).
@@ -1025,6 +1028,9 @@ type Game struct {
 	HelpWiz     *HelpFile         // wizhelp.txt
 	HelpNews    *HelpFile         // news.txt
 	HelpPlus    *HelpFile         // plushelp.txt
+	HelpMan     *HelpFile         // mushman.txt
+	HelpWizNews *HelpFile         // wiznews.txt
+	HelpJobs    *HelpFile         // jhelp.txt
 	MOTD        string            // Message of the day (settable by wizards)
 	WizMOTD     string            // Wizard MOTD (@motd/wizard)
 	DownMOTD    string            // Down MOTD (@motd/down)

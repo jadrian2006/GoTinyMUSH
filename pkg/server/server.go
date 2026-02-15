@@ -225,6 +225,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 		log.Printf("[%d] Connection closed from %s", d.ID, d.Addr)
 	}()
 
+	// Send Pueblo version string if enabled (before welcome screen)
+	if s.Game.Conf != nil && s.Game.Conf.PuebloEnabled && s.Game.Conf.PuebloVersion != "" {
+		d.Send(s.Game.Conf.PuebloVersion)
+	}
+
 	// Send welcome screen
 	if s.Game.Texts != nil {
 		if txt := s.Game.Texts.GetConnect(); txt != "" {
@@ -316,6 +321,20 @@ func (s *Server) handleLoginCommand(d *Descriptor, input string) {
 	}
 	if upper == "WHO" {
 		s.Game.ShowWho(d)
+		return
+	}
+	if strings.HasPrefix(upper, "PUEBLOCLIENT") {
+		if s.Game.Conf != nil && s.Game.Conf.PuebloEnabled {
+			d.Pueblo = true
+			// Send HTML mode activation and HTML welcome screen
+			d.Send("</xch_mudtext><img xch_mode=html><tt>")
+			if s.Game.Texts != nil {
+				if txt := s.Game.Texts.GetHTMLConn(); txt != "" {
+					d.SendNoNewline(txt)
+				}
+			}
+			log.Printf("[%d] Pueblo client detected", d.ID)
+		}
 		return
 	}
 

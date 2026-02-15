@@ -292,6 +292,12 @@ func (g *Game) HelpLookup(_ gamedb.DBRef, fileID, topic string) string {
 		hf = g.HelpQuick
 	case "plushelp", "+help":
 		hf = g.HelpPlus
+	case "man", "mushman":
+		hf = g.HelpMan
+	case "wiznews":
+		hf = g.HelpWizNews
+	case "jhelp", "+jhelp":
+		hf = g.HelpJobs
 	default:
 		return ""
 	}

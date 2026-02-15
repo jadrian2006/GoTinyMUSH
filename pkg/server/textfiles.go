@@ -26,6 +26,7 @@ type TextFiles struct {
 	Guest     string // guest.txt — guest connect
 	Register  string // register.txt — registration-only
 	CreateReg string // create_reg.txt — create reg fail
+	HTMLConn  string // htmlconn.txt — Pueblo HTML welcome
 }
 
 // trackedFiles maps filenames to their TextFiles field descriptions.
@@ -44,6 +45,7 @@ var trackedFiles = []struct {
 	{"guest.txt", "guest connect"},
 	{"register.txt", "registration-only"},
 	{"create_reg.txt", "create reg fail"},
+	{"htmlconn.txt", "Pueblo HTML welcome"},
 }
 
 // Get returns a snapshot of a text field by reading under the lock.
@@ -59,6 +61,7 @@ func (tf *TextFiles) GetBadSite() string   { tf.mu.RLock(); defer tf.mu.RUnlock(
 func (tf *TextFiles) GetGuest() string     { tf.mu.RLock(); defer tf.mu.RUnlock(); return tf.Guest }
 func (tf *TextFiles) GetRegister() string  { tf.mu.RLock(); defer tf.mu.RUnlock(); return tf.Register }
 func (tf *TextFiles) GetCreateReg() string { tf.mu.RLock(); defer tf.mu.RUnlock(); return tf.CreateReg }
+func (tf *TextFiles) GetHTMLConn() string  { tf.mu.RLock(); defer tf.mu.RUnlock(); return tf.HTMLConn }
 
 // loadFile reads a single text file, returning empty string on any error.
 func loadFile(dir, name string) string {
@@ -93,11 +96,13 @@ func (tf *TextFiles) loadAll(dir string) {
 	tf.Guest = loadFile(dir, "guest.txt")
 	tf.Register = loadFile(dir, "register.txt")
 	tf.CreateReg = loadFile(dir, "create_reg.txt")
+	tf.HTMLConn = loadFile(dir, "htmlconn.txt")
 
 	count := 0
 	for _, v := range []string{
 		tf.Connect, tf.Motd, tf.WizMotd, tf.Quit, tf.NewUser,
 		tf.Down, tf.Full, tf.BadSite, tf.Guest, tf.Register, tf.CreateReg,
+		tf.HTMLConn,
 	} {
 		if v != "" {
 			count++
@@ -119,6 +124,7 @@ func (g *Game) ReloadTextFiles() int {
 	for _, v := range []string{
 		g.Texts.Connect, g.Texts.Motd, g.Texts.WizMotd, g.Texts.Quit, g.Texts.NewUser,
 		g.Texts.Down, g.Texts.Full, g.Texts.BadSite, g.Texts.Guest, g.Texts.Register, g.Texts.CreateReg,
+		g.Texts.HTMLConn,
 	} {
 		if v != "" {
 			count++

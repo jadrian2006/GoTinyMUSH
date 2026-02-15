@@ -71,6 +71,10 @@ type GameConf struct {
 	GuestPassword  string `yaml:"guest_password"`
 	GuestStartRoom int    `yaml:"guest_start_room"`
 
+	// --- Pueblo ---
+	PuebloEnabled bool   `yaml:"pueblo_enabled"`
+	PuebloVersion string `yaml:"pueblo_version"`
+
 	// --- Module toggles ---
 	MailEnabled   bool `yaml:"mail_enabled"`
 	ComsysEnabled bool `yaml:"comsys_enabled"`
@@ -181,6 +185,8 @@ func DefaultGameConf() *GameConf {
 		MailEnabled:             true,
 		ComsysEnabled:           true,
 		MailExpiration:          14,
+		PuebloEnabled:           false,
+		PuebloVersion:           "This world is Pueblo 1.0 enhanced",
 		SpellcheckEnabled:       false,
 		SpellcheckURL:           "https://api.languagetool.org/v2/check",
 		SQLEnabled:              false,
@@ -389,6 +395,12 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.GuestSuffixes = val
 		case "guest_basename":
 			gc.GuestBasename = val
+
+		// --- Pueblo ---
+		case "have_pueblo", "pueblo_enabled":
+			gc.PuebloEnabled = parseBool(val)
+		case "pueblo_version":
+			gc.PuebloVersion = val
 
 		// --- Module toggles ---
 		case "mail_enabled":

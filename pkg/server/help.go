@@ -116,6 +116,9 @@ func (g *Game) LoadHelpFiles(textDir string) {
 	g.HelpWiz = load("wizhelp.txt")
 	g.HelpNews = load("news.txt")
 	g.HelpPlus = load("plushelp.txt")
+	g.HelpMan = load("mushman.txt")
+	g.HelpWizNews = load("wiznews.txt")
+	g.HelpJobs = load("jhelp.txt")
 }
 
 // --- Help commands ---
@@ -198,6 +201,58 @@ func cmdPlusHelp(g *Game, d *Descriptor, args string, _ []string) {
 		args = "help"
 	}
 	text := g.HelpPlus.Lookup(args)
+	if text == "" {
+		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		return
+	}
+	d.Send(text)
+}
+
+func cmdMan(g *Game, d *Descriptor, args string, _ []string) {
+	if g.HelpMan == nil {
+		d.Send("No manual available.")
+		return
+	}
+	if args == "" {
+		args = "help"
+	}
+	text := g.HelpMan.Lookup(args)
+	if text == "" {
+		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		return
+	}
+	d.Send(text)
+}
+
+func cmdWizNews(g *Game, d *Descriptor, args string, _ []string) {
+	if !Wizard(g, d.Player) {
+		d.Send("Permission denied.")
+		return
+	}
+	if g.HelpWizNews == nil {
+		d.Send("No wizard news available.")
+		return
+	}
+	if args == "" {
+		args = "help"
+	}
+	text := g.HelpWizNews.Lookup(args)
+	if text == "" {
+		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		return
+	}
+	d.Send(text)
+}
+
+func cmdJhelp(g *Game, d *Descriptor, args string, _ []string) {
+	if g.HelpJobs == nil {
+		d.Send("No +jhelp available.")
+		return
+	}
+	if args == "" {
+		args = "help"
+	}
+	text := g.HelpJobs.Lookup(args)
 	if text == "" {
 		d.Send(fmt.Sprintf("No entry for '%s'.", args))
 		return
