@@ -8,6 +8,7 @@ import (
 )
 
 // knownTextFiles are filenames commonly used as MUSH text files.
+// knownTextFiles are filenames commonly used as MUSH text files.
 var knownTextFiles = map[string]bool{
 	"connect.txt":     true,
 	"motd.txt":        true,
@@ -26,6 +27,15 @@ var knownTextFiles = map[string]bool{
 	"plushelp.txt":    true,
 	"staffhelp.txt":  true,
 	"news.txt":        true,
+	"mushman.txt":     true,
+	"wiznews.txt":     true,
+	"jhelp.txt":       true,
+	"qhelp.txt":       true,
+}
+
+// discardedFiles are C TinyMUSH artifacts not needed by GoTinyMUSH.
+var discardedFiles = map[string]bool{
+	"mkindx": true,
 }
 
 // DiscoverFiles scans a directory tree and classifies files by role.
@@ -72,6 +82,20 @@ func classifyFile(relPath, fullPath string, info os.FileInfo) DiscoveredFile {
 	lowerBase := strings.ToLower(baseName)
 	ext := strings.ToLower(filepath.Ext(baseName))
 	dirName := strings.ToLower(filepath.Dir(relPath))
+
+	// Discard C TinyMUSH index files and build artifacts
+	if ext == ".indx" {
+		df.Role = RoleDiscarded
+		df.Confidence = "high"
+		df.Reason = "C TinyMUSH index file (Go parses .txt directly)"
+		return df
+	}
+	if discardedFiles[lowerBase] {
+		df.Role = RoleDiscarded
+		df.Confidence = "high"
+		df.Reason = "C TinyMUSH build artifact (not needed by GoTinyMUSH)"
+		return df
+	}
 
 	// Check for flatfile by extension
 	if ext == ".flat" {

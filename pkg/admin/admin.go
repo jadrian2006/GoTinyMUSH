@@ -60,8 +60,9 @@ const (
 	RoleMainConf  FileRole = "main_config"
 	RoleAliasConf FileRole = "alias_config"
 	RoleTextFile  FileRole = "text"
-	RoleDictFile  FileRole = "dict"
-	RoleUnknown   FileRole = "unknown"
+	RoleDictFile   FileRole = "dict"
+	RoleDiscarded  FileRole = "discarded"
+	RoleUnknown    FileRole = "unknown"
 )
 
 // DiscoveredFile represents a file found during import discovery.

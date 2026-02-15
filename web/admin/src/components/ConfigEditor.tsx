@@ -285,6 +285,7 @@ function groupConfigKeys(config: Record<string, any>): [string, string[]][] {
     number_guests: 'Guests', guest_password: 'Guests', guest_start_room: 'Guests',
     mail_enabled: 'Modules', comsys_enabled: 'Modules', mail_expiration: 'Modules',
     spellcheck_enabled: 'Modules', spellcheck_url: 'Modules',
+    pueblo_enabled: 'Modules', pueblo_version: 'Modules',
     sql_enabled: 'SQL', sql_database: 'SQL', sql_query_limit: 'SQL', sql_timeout: 'SQL',
     archive_dir: 'Backup', archive_interval: 'Backup', archive_retain: 'Backup', archive_hook: 'Backup',
   }

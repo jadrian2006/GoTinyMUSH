@@ -1,4 +1,4 @@
-export type FileRole = 'flatfile' | 'comsys' | 'main_config' | 'alias_config' | 'text' | 'dict' | 'unknown'
+export type FileRole = 'flatfile' | 'comsys' | 'main_config' | 'alias_config' | 'text' | 'dict' | 'discarded' | 'unknown'
 
 export interface DiscoveredFile {
   path: string

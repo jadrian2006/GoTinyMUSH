@@ -19,10 +19,11 @@ const ROLE_LABELS: Record<FileRole, string> = {
   alias_config: 'Alias Config',
   text: 'Text File',
   dict: 'Dictionary',
+  discarded: 'Discarded',
   unknown: 'Unknown',
 }
 
-const ROLE_OPTIONS: FileRole[] = ['flatfile', 'comsys', 'main_config', 'alias_config', 'text', 'dict', 'unknown']
+const ROLE_OPTIONS: FileRole[] = ['flatfile', 'comsys', 'main_config', 'alias_config', 'text', 'dict', 'discarded', 'unknown']
 
 const CONFIDENCE_DOTS: Record<string, string> = {
   high: 'text-green-400',
@@ -452,6 +453,14 @@ function DiscoverStep({ files, loading, onReassign, onConfirm }: {
         ))}
       </div>
 
+      {/* Discarded files notice */}
+      {roleGroups['discarded'] > 0 && (
+        <div class="bg-slate-800/50 border border-slate-700 rounded p-3 mb-4 text-sm text-slate-400">
+          {roleGroups['discarded']} file(s) marked as discarded (C TinyMUSH artifacts not needed by GoTinyMUSH).
+          These will be skipped during import. Your original archive is unchanged.
+        </div>
+      )}
+
       {/* File table */}
       <div class="bg-slate-800 rounded overflow-hidden mb-4">
         <table class="w-full text-sm">
@@ -465,9 +474,9 @@ function DiscoverStep({ files, loading, onReassign, onConfirm }: {
           </thead>
           <tbody>
             {files.map(f => (
-              <tr key={f.path} class="border-b border-slate-700/50 hover:bg-slate-750">
+              <tr key={f.path} class={`border-b border-slate-700/50 hover:bg-slate-750 ${f.role === 'discarded' ? 'opacity-40' : ''}`}>
                 <td class="px-3 py-2">
-                  <div class="font-mono text-slate-300 text-xs">{f.path}</div>
+                  <div class={`font-mono text-xs ${f.role === 'discarded' ? 'text-slate-500 line-through' : 'text-slate-300'}`}>{f.path}</div>
                   <div class="text-xs text-slate-500 mt-0.5">{f.reason}</div>
                 </td>
                 <td class="px-3 py-2">
