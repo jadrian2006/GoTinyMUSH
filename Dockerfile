@@ -19,7 +19,7 @@ COPY . .
 # Copy built admin panel into the embed location
 COPY --from=adminbuilder /build/pkg/admin/dist /src/pkg/admin/dist
 
-ARG VERSION=0.2.0
+ARG VERSION=0.3.0
 RUN CGO_ENABLED=0 go build -ldflags "-X github.com/crystal-mush/gotinymush/pkg/server.Version=${VERSION}" -o /gotinymush ./cmd/server
 
 # Stage 3: Final image

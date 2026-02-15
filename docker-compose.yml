@@ -1,22 +1,37 @@
 services:
   gotinymush:
-    build: .
+    build:
+      context: .
+      args:
+        VERSION: "0.3.0"
     ports:
       - "6250:6250"
+      - "8443:8443"
       # - "6251:6251"  # TLS port
     volumes:
-      - ./data/text:/game/data/text
-      - ./data/game.yaml:/game/data/game.yaml
-      - ./data/goTinyAlias.conf:/game/data/goTinyAlias.conf
-      - ./data/dict:/game/data/dict
+      - gamedata:/game/data
     environment:
       MUSH_CONF: /game/data/game.yaml
-      MUSH_BOLT: /game/data/game.bolt
+      # MUSH_BOLT and MUSH_DB intentionally omitted for setup mode.
+      # The server starts in admin-panel-only mode until setup/import is complete.
+      # MUSH_BOLT: /game/data/game.bolt
+      # MUSH_DB: /game/data/game.flatfile
       MUSH_TEXTDIR: /game/data/text
-      # MUSH_DB: /game/data/game.flatfile  # Flatfile for initial import
+      MUSH_DICTDIR: /game/data/dict
+      MUSH_GODPASS: "goTinyMush"
+      MUSH_ADMIN_PASS: "goTinyMush"
       # MUSH_PORT: 6250
       # MUSH_TLS: "true"
       # MUSH_TLS_PORT: "6251"
       # MUSH_TLS_CERT: /game/data/cert.pem
       # MUSH_TLS_KEY: /game/data/key.pem
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8443/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  gamedata:

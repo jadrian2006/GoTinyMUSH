@@ -76,6 +76,14 @@ spellcheck_enabled: false
 # archive_retain: 0        # 0 = unlimited
 # archive_hook: ""          # shell command, %f = archive path
 
+# --- Web Server ---
+web_enabled: true
+web_port: 8443
+# web_client_url: "http://web-client:80"  # Set if using separate web client container
+# web_cors_origins: []
+# web_rate_limit: 60
+# jwt_expiry: 86400
+
 # --- TLS ---
 # cleartext: true
 # tls: false
