@@ -250,31 +250,40 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		ctx.RData = entry.RData
 	}
 
-	// Evaluate the command string with args as %0-%9
-	evaluated := ctx.Exec(entry.Command, eval.EvFCheck|eval.EvEval|eval.EvStrip, entry.Args)
+	// Split on semicolons FIRST (respecting braces), then evaluate each command.
+	// This mirrors TinyMUSH's process_cmdline which uses parse_to(&cmdline, ';', 0)
+	// to split BEFORE evaluation, preserving brace-protected content for @wait etc.
+	cmds := splitSemicolonRespectingBraces(entry.Command)
 
 	// Snapshot q-registers onto descriptors so @program can capture them.
 	descs := g.Conns.GetByPlayer(entry.Player)
-	rDataSnapshot := ctx.RData.Clone()
-	for _, dd := range descs {
-		dd.LastRData = rDataSnapshot
-	}
 
-	// Split on semicolons (respecting braces/brackets) and execute each command.
-	// This mirrors TinyMUSH's process_cmdline which uses parse_to(&cmdline, ';', 0).
-	cmds := splitSemicolonRespectingBraces(evaluated)
 	for _, cmd := range cmds {
 		cmd = strings.TrimSpace(cmd)
 		if cmd == "" {
 			continue
 		}
+
+		// Evaluate each individual command with args as %0-%9
+		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval|eval.EvStrip, entry.Args)
+		evaluated = strings.TrimSpace(evaluated)
+		if evaluated == "" {
+			continue
+		}
+
 		// Find a descriptor for this player to dispatch through
 		if len(descs) > 0 {
-			DispatchCommand(g, descs[0], cmd)
+			DispatchCommand(g, descs[0], evaluated)
 		} else {
 			// Object executing without a connected player - execute internally
-			g.ExecuteAsObject(entry.Player, entry.Cause, cmd)
+			g.ExecuteAsObject(entry.Player, entry.Cause, evaluated)
 		}
+	}
+
+	// Snapshot final q-registers onto descriptors so @program can capture them.
+	rDataSnapshot := ctx.RData.Clone()
+	for _, dd := range descs {
+		dd.LastRData = rDataSnapshot
 	}
 
 	// Clear q-register snapshot from descriptors
@@ -669,8 +678,8 @@ func (g *Game) ProcessQueue() {
 	}
 }
 
-// safeExecuteQueueEntry wraps ExecuteQueueEntry with panic recovery so that
-// a single bad command cannot kill the queue processor goroutine.
+// safeExecuteQueueEntry wraps ExecuteQueueEntry with panic recovery and a
+// watchdog that logs slow entries (but still blocks until completion).
 func (g *Game) safeExecuteQueueEntry(entry *QueueEntry) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -678,7 +687,17 @@ func (g *Game) safeExecuteQueueEntry(entry *QueueEntry) {
 				entry.Player, entry.Command, r)
 		}
 	}()
+
+	// Watchdog: log if entry takes longer than 5 seconds
+	timer := time.AfterFunc(5*time.Second, func() {
+		cmdSnippet := entry.Command
+		if len(cmdSnippet) > 80 {
+			cmdSnippet = cmdSnippet[:80]
+		}
+		log.Printf("SLOW queue entry >5s (player=#%d cmd=%q)", entry.Player, cmdSnippet)
+	})
 	g.ExecuteQueueEntry(entry)
+	timer.Stop()
 }
 
 // StartQueueProcessor starts the background queue processing loop.
@@ -686,15 +705,25 @@ func (g *Game) StartQueueProcessor() {
 	go func() {
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
-		for range ticker.C {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("PANIC in queue processor: %v", r)
-					}
+		heartbeat := time.NewTicker(60 * time.Second)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("PANIC in queue processor: %v", r)
+						}
+					}()
+					g.ProcessQueue()
 				}()
-				g.ProcessQueue()
-			}()
+			case <-heartbeat.C:
+				imm, wait, sem := g.Queue.Stats()
+				if imm > 0 || wait > 0 || sem > 0 {
+					log.Printf("Queue heartbeat: %d immediate, %d waiting, %d semaphore", imm, wait, sem)
+				}
+			}
 		}
 	}()
 }
