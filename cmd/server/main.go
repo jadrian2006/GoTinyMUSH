@@ -45,6 +45,8 @@ func main() {
 	godPass := flag.String("godpass", envDefault("MUSH_GODPASS", ""), "Set God (#1) password and exit (env: MUSH_GODPASS)")
 	flag.Parse()
 
+	log.Printf("Welcome to %s", server.VersionString())
+
 	// Handle MUSH_PORT env if -port flag not set
 	if *port == 0 {
 		if envPort := os.Getenv("MUSH_PORT"); envPort != "" {
