@@ -7,7 +7,7 @@ import { ImportFlow } from './components/ImportFlow'
 import { ConfigEditor } from './components/ConfigEditor'
 import { SetupWizard } from './components/SetupWizard'
 import { LoginScreen } from './components/LoginScreen'
-import { api } from './api/client'
+import { api, setAuthLostHandler } from './api/client'
 
 type Page = 'dashboard' | 'import' | 'config' | 'setup'
 
@@ -18,6 +18,9 @@ function App() {
   const [showDefaultWarning, setShowDefaultWarning] = useState(false)
 
   useEffect(() => {
+    // Register global 401 handler so any API call triggers re-login
+    setAuthLostHandler(() => setAuthenticated(false))
+
     // Check auth status on load
     api.authStatus()
       .then(status => {

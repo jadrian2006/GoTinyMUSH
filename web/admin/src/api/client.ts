@@ -1,5 +1,11 @@
 const BASE = '/admin/api'
 
+// Global callback for 401 responses — set by App to trigger re-login
+let onAuthLost: (() => void) | null = null
+export function setAuthLostHandler(handler: () => void) {
+  onAuthLost = handler
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = {
     method,
@@ -10,6 +16,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   const res = await fetch(`${BASE}${path}`, opts)
   if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      onAuthLost?.()
+    }
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(err.error || res.statusText)
   }
