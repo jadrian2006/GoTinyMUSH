@@ -116,6 +116,7 @@ type GameConf struct {
 	WebHost       string   `yaml:"web_host"`        // Bind address (empty = all interfaces)
 	WebDomain     string   `yaml:"web_domain"`      // Let's Encrypt domain (empty = self-signed)
 	WebStaticDir  string   `yaml:"web_static_dir"`  // Path to built web client (default "web/dist")
+	WebClientURL  string   `yaml:"web_client_url"`  // URL of external web client container (e.g. "http://web-client:80"); if set, / is reverse-proxied to it
 	WebCORSOrigins []string `yaml:"web_cors_origins"` // Allowed CORS origins
 	WebRateLimit  int      `yaml:"web_rate_limit"`  // Requests per minute per IP (default 60)
 	JWTSecret     string   `yaml:"jwt_secret"`      // JWT signing secret (auto-generated if empty)
@@ -187,6 +188,7 @@ func DefaultGameConf() *GameConf {
 		SQLTimeout:              5,
 		SQLReconnect:            true,
 		ArchiveDir:              "backups",
+		WebEnabled:              true,
 		WebPort:                 8443,
 		WebStaticDir:            "web/dist",
 		WebRateLimit:            60,

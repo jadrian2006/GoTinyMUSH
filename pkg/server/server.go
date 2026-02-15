@@ -145,6 +145,7 @@ func (s *Server) Start() error {
 			KeyFile:     s.Game.Conf.TLSKey,
 			CertDir:     s.Game.Conf.CertDir,
 			StaticDir:   s.Game.Conf.WebStaticDir,
+			ClientURL:   s.Game.Conf.WebClientURL,
 			CORSOrigins: s.Game.Conf.WebCORSOrigins,
 			RateLimit:   s.Game.Conf.WebRateLimit,
 			JWTSecret:   s.Game.Conf.JWTSecret,
@@ -257,6 +258,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if d.State == ConnLogin {
 			s.handleLoginCommand(d, line)
 		} else {
+			// Undo AutoDark on first command input (matches C DS_AUTODARK behavior)
+			if d.AutoDark {
+				d.AutoDark = false
+				if playerObj, ok := s.Game.DB.Objects[d.Player]; ok {
+					playerObj.Flags[0] &^= gamedb.FlagDark
+				}
+			}
 			log.Printf("[%d] CMD state=%d player=#%d input=%q", d.ID, d.State, d.Player, line)
 			if d.ProgData != nil {
 				if strings.HasPrefix(line, "|") {
@@ -314,13 +322,16 @@ func (s *Server) handleLoginCommand(d *Descriptor, input string) {
 	command, user, password := ParseConnect(input)
 
 	switch {
+	case strings.HasPrefix(command, "cd"): // connect dark (cd <name> <password>)
+		s.handleConnect(d, user, password, true)
+
 	case strings.HasPrefix(command, "co"): // connect
 		// Detect guest login: "connect guest", "connect guest guest", etc.
 		if strings.EqualFold(user, "guest") {
 			s.handleGuest(d)
 			return
 		}
-		s.handleConnect(d, user, password)
+		s.handleConnect(d, user, password, false)
 
 	case strings.HasPrefix(command, "cr"): // create
 		s.handleCreate(d, user, password)
@@ -331,7 +342,8 @@ func (s *Server) handleLoginCommand(d *Descriptor, input string) {
 }
 
 // handleConnect authenticates and logs in a player.
-func (s *Server) handleConnect(d *Descriptor, user, password string) {
+// If dark is true and the player is a wizard/god, set DARK flag on connect.
+func (s *Server) handleConnect(d *Descriptor, user, password string, dark bool) {
 	if user == "" {
 		d.Send("Usage: connect <name> <password>")
 		return
@@ -362,7 +374,14 @@ func (s *Server) handleConnect(d *Descriptor, user, password string) {
 	s.Game.Conns.Login(d, player)
 	playerObj := s.Game.DB.Objects[player]
 
-	log.Printf("[%d] Player %s(#%d) connected from %s", d.ID, playerObj.Name, player, d.Addr)
+	// Connect dark: set DARK flag if wizard/god requested it
+	if dark && (Wizard(s.Game, player) || player == gamedb.DBRef(1)) {
+		playerObj.Flags[0] |= gamedb.FlagDark
+		d.AutoDark = true
+		log.Printf("[%d] Player %s(#%d) DARK-connected from %s", d.ID, playerObj.Name, player, d.Addr)
+	} else {
+		log.Printf("[%d] Player %s(#%d) connected from %s", d.ID, playerObj.Name, player, d.Addr)
+	}
 
 	d.Send(fmt.Sprintf("Welcome back, %s!", playerObj.Name))
 
@@ -379,10 +398,12 @@ func (s *Server) handleConnect(d *Descriptor, user, password string) {
 		}
 	}
 
-	// Announce to room
+	// Announce to room (suppress if dark-connected)
 	loc := playerObj.Location
-	s.Game.Conns.SendToRoomExcept(s.Game.DB, loc, player,
-		fmt.Sprintf("%s has connected.", playerObj.Name))
+	if !d.AutoDark {
+		s.Game.Conns.SendToRoomExcept(s.Game.DB, loc, player,
+			fmt.Sprintf("%s has connected.", playerObj.Name))
+	}
 
 	// Show current room
 	s.Game.ShowRoom(d, loc)
@@ -397,9 +418,7 @@ func (s *Server) handleConnect(d *Descriptor, user, password string) {
 
 	// Fire ACONNECT triggers
 	connCount := len(s.Game.Conns.GetByPlayer(player))
-	s.Game.QueueAttrAction(player, player, 39, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 39
-	// Global ACONNECT on master room
-	s.Game.QueueAttrAction(s.Game.MasterRoomRef(), player, 39, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 39
+	s.Game.FireConnectAttr(player, connCount, 39) // A_ACONNECT = 39
 }
 
 // handleCreate creates a new player and logs them in.

@@ -820,7 +820,8 @@ func (p *Parser) readQuotedString() (string, error) {
 			}
 			return buf.String(), nil
 		case '\\':
-			// Escape sequence
+			// Escape sequence — matches C getstring (db_objects.c).
+			// C's default case writes only the escaped char (discards backslash).
 			next, err := p.mustReadByte()
 			if err != nil {
 				return buf.String(), err
@@ -832,12 +833,14 @@ func (p *Parser) readQuotedString() (string, error) {
 				buf.WriteByte('\r')
 			case 't':
 				buf.WriteByte('\t')
+			case 'e':
+				buf.WriteByte('\x1b') // ESC character (ANSI)
 			case '\\':
 				buf.WriteByte('\\')
 			case '"':
 				buf.WriteByte('"')
 			default:
-				buf.WriteByte('\\')
+				// Match C: \X → X (discard backslash, keep escaped char)
 				buf.WriteByte(next)
 			}
 		default:

@@ -145,12 +145,12 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		return false
 	}
 
-	debugDollar := strings.HasPrefix(input, "+") && objRef == 123
+	debugDollar := strings.HasPrefix(input, "+")
 
 	// Skip halted objects
 	if obj.HasFlag(gamedb.FlagHalt) {
 		if debugDollar {
-			log.Printf("DOLLARDEBUG #%d HALTED, skipping", objRef)
+			log.Printf("DOLLARDEBUG #%d(%s) HALTED, skipping", objRef, obj.Name)
 		}
 		return false
 	}
@@ -167,9 +167,6 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		// Format: "owner:flags:$pattern:command"
 		attrFlags := parseAttrFlags(attr.Value)
 		if attrFlags&AFNoProg != 0 {
-			if debugDollar {
-				log.Printf("DOLLARDEBUG #%d attr %d: NOPROG, skipping", objRef, attr.Number)
-			}
 			continue
 		}
 
@@ -177,9 +174,6 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		rest := text[1:] // skip $
 		colonIdx := findUnescapedColon(rest)
 		if colonIdx < 0 {
-			if debugDollar {
-				log.Printf("DOLLARDEBUG #%d attr %d: no colon found in %q", objRef, attr.Number, text[:min(60, len(text))])
-			}
 			continue
 		}
 		pattern := rest[:colonIdx]
@@ -187,8 +181,8 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 
 		// Match the pattern against input
 		matched, args := matchWild(pattern, input)
-		if debugDollar && dollarCount <= 5 {
-			log.Printf("DOLLARDEBUG #%d attr %d: pattern=%q input=%q matched=%v", objRef, attr.Number, pattern, input, matched)
+		if debugDollar && dollarCount <= 10 {
+			log.Printf("DOLLARDEBUG #%d(%s) attr %d: pattern=%q input=%q matched=%v", objRef, obj.Name, attr.Number, pattern, input, matched)
 		}
 		if !matched {
 			continue
@@ -214,11 +208,18 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 
 	// Check parent chain
 	parentRef := obj.Parent
+	if debugDollar && parentRef != gamedb.Nothing {
+		if pObj, ok := g.DB.Objects[parentRef]; ok {
+			log.Printf("DOLLARDEBUG #%d(%s) checking parent #%d(%s) attrs=%d", objRef, obj.Name, parentRef, pObj.Name, len(pObj.Attrs))
+		} else {
+			log.Printf("DOLLARDEBUG #%d(%s) parent #%d NOT FOUND in DB", objRef, obj.Name, parentRef)
+		}
+	}
 	visited := make(map[gamedb.DBRef]bool)
 	visited[objRef] = true
 	for parentRef != gamedb.Nothing && !visited[parentRef] {
 		visited[parentRef] = true
-		if g.matchDollarOnParent(parentRef, objRef, player, cause, input) {
+		if g.matchDollarOnParent(parentRef, objRef, player, cause, input, debugDollar) {
 			return true
 		}
 		if pObj, ok := g.DB.Objects[parentRef]; ok {
@@ -232,19 +233,33 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 }
 
 // matchDollarOnParent checks a parent object's attributes, skipping AF_PRIVATE.
-func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBRef, input string) bool {
+func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBRef, input string, debug bool) bool {
 	parent, ok := g.DB.Objects[parentRef]
 	if !ok {
 		return false
 	}
 
+	if debug && parentRef == 9536 {
+		log.Printf("DOLLARDEBUG parent #9536 total attrs=%d", len(parent.Attrs))
+		for _, a := range parent.Attrs {
+			t := eval.StripAttrPrefix(a.Value)
+			if strings.HasPrefix(t, "$") {
+				log.Printf("DOLLARDEBUG parent #9536 HAS attr %d: value_prefix=%q", a.Number, truncDebug(t, 60))
+			}
+		}
+	}
+	dollarCount := 0
 	for _, attr := range parent.Attrs {
 		text := eval.StripAttrPrefix(attr.Value)
 		if !strings.HasPrefix(text, "$") {
 			continue
 		}
+		dollarCount++
 		attrFlags := parseAttrFlags(attr.Value)
 		if attrFlags&AFNoProg != 0 || attrFlags&AFPrivate != 0 {
+			if debug {
+				log.Printf("DOLLARDEBUG parent #%d attr %d SKIPPED flags=0x%x (noprog=%v private=%v)", parentRef, attr.Number, attrFlags, attrFlags&AFNoProg != 0, attrFlags&AFPrivate != 0)
+			}
 			continue
 		}
 
@@ -257,10 +272,16 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 		command := rest[colonIdx+1:]
 
 		matched, args := matchWild(pattern, input)
+		if debug && dollarCount <= 10 {
+			log.Printf("DOLLARDEBUG parent #%d attr %d: pattern=%q input=%q matched=%v", parentRef, attr.Number, pattern, input, matched)
+		}
 		if !matched {
 			continue
 		}
 
+		if debug {
+			log.Printf("DOLLARDEBUG parent #%d MATCHED for child #%d", parentRef, childRef)
+		}
 		entry := &QueueEntry{
 			Player:  childRef, // Execute as child, not parent
 			Cause:   cause,
@@ -294,6 +315,13 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 	// to split BEFORE evaluation, preserving brace-protected content for @wait etc.
 	cmds := splitSemicolonRespectingBraces(entry.Command)
 
+	if entry.Player == 9118 {
+		log.Printf("ACONDBG ExecuteQueueEntry player=#%d command=%q", entry.Player, entry.Command)
+		for i, c := range cmds {
+			log.Printf("ACONDBG   split[%d]=%q", i, c)
+		}
+	}
+
 	// Snapshot q-registers onto descriptors so @program can capture them.
 	descs := g.Conns.GetByPlayer(entry.Player)
 
@@ -310,6 +338,9 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		// BEFORE evaluation; we approximate this by preserving braces through eval.
 		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval, entry.Args)
 		evaluated = strings.TrimSpace(evaluated)
+		if entry.Player == 9118 {
+			log.Printf("ACONDBG   cmd=%q -> evaluated=%q", cmd, evaluated)
+		}
 		if evaluated == "" {
 			continue
 		}
@@ -582,6 +613,7 @@ func (g *Game) doSwitchObj(player, cause gamedb.DBRef, args string) {
 		raw := stripOuterBraces(strings.TrimSpace(parts[len(parts)-1]))
 		raw = strings.ReplaceAll(raw, "#$", expr)
 		log.Printf("SWITCHDEBUG   DEFAULT, dispatching action=%q", truncDebug(raw, 200))
+		g.dispatchSwitchAction(player, cause, raw)
 	}
 }
 
@@ -923,6 +955,40 @@ func (g *Game) QueueAttrAction(obj, cause gamedb.DBRef, attrNum int, args []stri
 	g.Queue.Add(entry)
 }
 
+// FireConnectAttr fires ACONNECT (or ADISCONNECT) on a player, matching C's
+// announce_connattr: fires on the player, the master room, and all objects
+// in the master room's contents chain.
+func (g *Game) FireConnectAttr(player gamedb.DBRef, connCount int, attrNum int) {
+	args := []string{"connect", fmt.Sprintf("%d", connCount)}
+
+	// 1. Fire on the player itself
+	g.QueueAttrAction(player, player, attrNum, args)
+
+	// 2. Fire on the master room
+	masterRoom := g.MasterRoomRef()
+	if masterRoom == gamedb.Nothing {
+		return
+	}
+	g.QueueAttrAction(masterRoom, player, attrNum, args)
+
+	// 3. Fire on every object in the master room's contents
+	mrObj, ok := g.DB.Objects[masterRoom]
+	if !ok {
+		return
+	}
+	for obj := mrObj.Contents; obj != gamedb.Nothing; {
+		o, exists := g.DB.Objects[obj]
+		if !exists {
+			break
+		}
+		g.QueueAttrAction(obj, player, attrNum, args)
+		obj = o.Next
+		if obj == mrObj.Contents {
+			break // avoid infinite loop
+		}
+	}
+}
+
 // RunStartup walks all objects and queues STARTUP (attr #19).
 // Checks both the HAS_STARTUP flag and the actual attribute, since imported
 // databases may not have the flag set consistently.
@@ -1092,12 +1158,18 @@ func matchWildHelper(pattern, str string, args *[]string) bool {
 	return len(str) == 0
 }
 
-// parseAttrFlags extracts the flags portion from "owner:flags:value".
+// parseAttrFlags extracts the flags portion from "\x01owner:flags:value".
+// Only parses when the ATR_INFO_CHAR (\x01) prefix is present; otherwise
+// returns 0 to avoid misinterpreting command text (e.g. "$+wear *:..." colons)
+// as flag separators.
 func parseAttrFlags(raw string) int {
+	if len(raw) == 0 || raw[0] != '\x01' {
+		return 0
+	}
 	colonCount := 0
 	start := 0
-	for i, ch := range raw {
-		if ch == ':' {
+	for i := 1; i < len(raw); i++ {
+		if raw[i] == ':' {
 			colonCount++
 			if colonCount == 1 {
 				start = i + 1

@@ -10,6 +10,7 @@ import (
 
 	"github.com/crystal-mush/gotinymush/pkg/flatfile"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
+	"github.com/crystal-mush/gotinymush/pkg/validate"
 )
 
 func main() {
@@ -18,7 +19,9 @@ func main() {
 	showRooms := flag.Bool("rooms", false, "List room summary")
 	showObj := flag.Int("obj", -1, "Show details for a specific object by dbref")
 	showAttrStats := flag.Bool("attrstats", false, "Show attribute usage statistics")
-	validate := flag.Bool("validate", false, "Run referential integrity checks")
+	runValidate := flag.Bool("validate", false, "Run referential integrity checks")
+	runFullValidate := flag.Bool("validate-all", false, "Run all validators (double-escape, percent, integrity, etc.)")
+	autoFix := flag.Bool("fix", false, "Auto-apply all fixable findings (use with -validate-all)")
 	flag.Parse()
 
 	if *dbPath == "" {
@@ -28,6 +31,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "  -obj <dbref>  Show object details")
 		fmt.Fprintln(os.Stderr, "  -attrstats    Show attribute usage stats")
 		fmt.Fprintln(os.Stderr, "  -validate     Run integrity checks")
+		fmt.Fprintln(os.Stderr, "  -validate-all Run all validators (double-escape, percent, integrity, etc.)")
+		fmt.Fprintln(os.Stderr, "  -fix          Auto-apply all fixable findings (use with -validate-all)")
 		os.Exit(1)
 	}
 
@@ -66,9 +71,14 @@ func main() {
 		printAttrStats(db)
 	}
 
-	if *validate {
+	if *runValidate {
 		fmt.Println()
 		runValidation(db)
+	}
+
+	if *runFullValidate {
+		fmt.Println()
+		runFullValidation(db, *autoFix)
 	}
 }
 
@@ -404,6 +414,70 @@ func runValidation(db *gamedb.Database) {
 	}
 
 	fmt.Printf("\nValidation complete: %d errors, %d warnings\n", errors, warnings)
+}
+
+func runFullValidation(db *gamedb.Database, autoFix bool) {
+	fmt.Println("=== FULL VALIDATION ===")
+	v := validate.New(db)
+	findings := v.Run()
+
+	// Print summary
+	summary := v.Summary()
+	fmt.Println("\n--- Summary ---")
+	cats := []validate.Category{
+		validate.CatDoubleEscape,
+		validate.CatAttrFlags,
+		validate.CatEscapeSeq,
+		validate.CatPercent,
+		validate.CatIntegrityError,
+		validate.CatIntegrityWarn,
+	}
+	total := 0
+	for _, cat := range cats {
+		if count, ok := summary[cat]; ok && count > 0 {
+			fmt.Printf("  %-25s %d\n", cat.String(), count)
+			total += count
+		}
+	}
+	fmt.Printf("  %-25s %d\n", "TOTAL", total)
+
+	if len(findings) == 0 {
+		fmt.Println("\nNo issues found.")
+		return
+	}
+
+	// Print findings grouped by category
+	fmt.Println("\n--- Findings ---")
+	for _, f := range findings {
+		sev := strings.ToUpper(f.Severity.String())
+		fmt.Printf("[%s] %s: %s\n", sev, f.ID, f.Description)
+		if f.Current != "" {
+			fmt.Printf("  Current:  %s\n", f.Current)
+		}
+		if f.Proposed != "" {
+			fmt.Printf("  Proposed: %s\n", f.Proposed)
+		}
+		if f.Effect != "" {
+			fmt.Printf("  Effect:   %s\n", f.Effect)
+		}
+	}
+
+	if autoFix {
+		fmt.Println("\n--- Applying fixes ---")
+		fixableCats := []validate.Category{
+			validate.CatDoubleEscape,
+			validate.CatPercent,
+		}
+		totalFixed := 0
+		for _, cat := range fixableCats {
+			count := v.ApplyAll(cat)
+			if count > 0 {
+				fmt.Printf("  Fixed %d %s findings\n", count, cat.String())
+				totalFixed += count
+			}
+		}
+		fmt.Printf("  Total fixes applied: %d\n", totalFixed)
+	}
 }
 
 func flagNames(obj *gamedb.Object) string {

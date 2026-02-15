@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/crystal-mush/gotinymush/pkg/admin"
 	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 	"github.com/gorilla/websocket"
@@ -25,6 +29,7 @@ type WebConfig struct {
 	KeyFile     string
 	CertDir     string
 	StaticDir   string
+	ClientURL   string // URL of external web client container; if set, / is reverse-proxied to it
 	CORSOrigins []string
 	RateLimit   int
 	JWTSecret   string
@@ -33,12 +38,15 @@ type WebConfig struct {
 
 // WebServer provides HTTP/WebSocket transport alongside the TCP game server.
 type WebServer struct {
-	game    *Game
-	httpSrv *http.Server
-	mux     *http.ServeMux
-	auth    *AuthService
-	rl      *rateLimiter
-	upgrader websocket.Upgrader
+	game      *Game
+	httpSrv   *http.Server
+	mux       *http.ServeMux
+	auth      *AuthService
+	rl        *rateLimiter
+	upgrader  websocket.Upgrader
+	admin     *admin.Admin
+	metrics   *Metrics
+	startTime time.Time
 }
 
 // NewWebServer creates a web server bound to the game.
@@ -47,10 +55,11 @@ func NewWebServer(game *Game, cfg WebConfig) *WebServer {
 	rl := newRateLimiter(cfg.RateLimit)
 
 	ws := &WebServer{
-		game: game,
-		mux:  http.NewServeMux(),
-		auth: auth,
-		rl:   rl,
+		game:      game,
+		mux:       http.NewServeMux(),
+		auth:      auth,
+		rl:        rl,
+		startTime: time.Now(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				if len(cfg.CORSOrigins) == 0 {
@@ -98,12 +107,56 @@ func (ws *WebServer) registerRoutes(cfg WebConfig) {
 	// REST API endpoints
 	ws.RegisterRESTRoutes()
 
-	// Static file serving (SPA)
-	if cfg.StaticDir != "" {
-		if _, err := os.Stat(cfg.StaticDir); err == nil {
-			fs := http.FileServer(http.Dir(cfg.StaticDir))
-			ws.mux.Handle("GET /", spaHandler(fs, cfg.StaticDir))
+	// Health endpoint (no auth, before admin)
+	ws.mux.HandleFunc("GET /health", ws.handleHealth)
+
+	// Prometheus metrics endpoint
+	ws.metrics = NewMetrics(ws.game, time.Now())
+	ws.mux.Handle("GET /metrics", ws.metrics.Handler())
+
+	// Admin panel
+	ctrl := &gameServerController{game: ws.game, running: true, startTime: time.Now()}
+	ws.admin = admin.New(ctrl)
+	if ws.game.ConfPath != "" {
+		ws.admin.SetDataDir(filepath.Dir(ws.game.ConfPath))
+		ws.admin.SetConfPath(ws.game.ConfPath)
+	}
+	ws.mux.Handle("/admin/", ws.admin.Handler("/admin"))
+
+	// Root "/" handler: reverse proxy to web client container, serve local SPA, or redirect to /admin.
+	// NOTE: Must use method-less pattern "/" (not "GET /") to avoid Go 1.22 mux conflict
+	// with the method-less "/admin/" pattern registered above.
+	if cfg.ClientURL != "" {
+		// Reverse proxy to external web client container
+		target, err := url.Parse(cfg.ClientURL)
+		if err != nil {
+			log.Printf("web: invalid web_client_url %q: %v", cfg.ClientURL, err)
+		} else {
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+				log.Printf("web: client proxy error: %v", err)
+				// Fall back to redirect to admin if client is down
+				http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
+			}
+			ws.mux.Handle("/", proxy)
+			log.Printf("web: proxying / to web client at %s", cfg.ClientURL)
 		}
+	} else if cfg.StaticDir != "" {
+		// Serve local static SPA files
+		if _, err := os.Stat(cfg.StaticDir); err == nil {
+			fsrv := http.FileServer(http.Dir(cfg.StaticDir))
+			ws.mux.Handle("/", spaHandler(fsrv, cfg.StaticDir))
+		} else {
+			// StaticDir configured but doesn't exist — redirect to admin
+			ws.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
+			})
+		}
+	} else {
+		// No web client configured — redirect to admin panel
+		ws.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
+		})
 	}
 }
 
@@ -372,6 +425,18 @@ func (ws *WebServer) handleAuthRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": newToken})
+}
+
+// --- Health Handler ---
+
+func (ws *WebServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":         "ok",
+		"version":        Version,
+		"uptime_seconds": time.Since(ws.startTime).Seconds(),
+		"game_running":   true,
+	})
 }
 
 // --- SPA Handler ---

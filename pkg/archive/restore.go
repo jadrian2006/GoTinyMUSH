@@ -168,8 +168,19 @@ func RestoreArchive(params RestoreParams) (*RestoreResult, error) {
 	return result, nil
 }
 
-// extractArchive extracts a .tar.gz to a destination directory.
+// ExtractTarGz extracts a .tar.gz archive to a destination directory.
+// It is the exported form used by the admin import flow.
+func ExtractTarGz(archivePath, destDir string) error {
+	return extractTarGzToDir(archivePath, destDir)
+}
+
+// extractArchive extracts a .tar.gz to a destination directory (internal).
 func extractArchive(archivePath, destDir string) error {
+	return extractTarGzToDir(archivePath, destDir)
+}
+
+// extractTarGzToDir is the shared implementation for tar.gz extraction.
+func extractTarGzToDir(archivePath, destDir string) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err

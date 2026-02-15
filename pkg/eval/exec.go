@@ -57,6 +57,13 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			}
 			pos++
 
+		case '\033': // ESC byte — pass through literally (ANSI sequences in already-evaluated text)
+			buf.WriteByte(ch)
+			pos++
+
+		case 0: // NUL byte — skip
+			pos++
+
 		case '\\':
 			// General escape - add following char literally
 			atSpace = false

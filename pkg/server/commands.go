@@ -2557,10 +2557,9 @@ func (g *Game) DisconnectPlayer(d *Descriptor) {
 		playerName := g.PlayerName(d.Player)
 		loc := g.PlayerLocation(d.Player)
 
-		// Fire ADISCONNECT triggers before announcing
-		g.QueueAttrAction(d.Player, d.Player, 40, []string{"disconnect"}) // A_ADISCONNECT = 40
-		// Global ADISCONNECT on master room
-		g.QueueAttrAction(g.MasterRoomRef(), d.Player, 40, []string{"disconnect"}) // A_ADISCONNECT = 40
+		// Fire ADISCONNECT triggers (player + master room + master room contents)
+		connCount := len(g.Conns.GetByPlayer(d.Player))
+		g.FireConnectAttr(d.Player, connCount, 40) // A_ADISCONNECT = 40
 
 		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
 			fmt.Sprintf("%s has disconnected.", playerName))

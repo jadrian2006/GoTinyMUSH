@@ -1,15 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/crystal-mush/gotinymush/pkg/admin"
 	"github.com/crystal-mush/gotinymush/pkg/archive"
 	"github.com/crystal-mush/gotinymush/pkg/boltstore"
 	mushcrypt "github.com/crystal-mush/gotinymush/pkg/crypt"
@@ -56,38 +59,48 @@ func main() {
 		}
 	}
 
-	if *dbPath == "" && *boltPath == "" {
-		fmt.Fprintln(os.Stderr, "Usage: gotinymush -conf <config> -db <flatfile> [-bolt <boltfile>] [-port 6250]")
-		fmt.Fprintln(os.Stderr, "       gotinymush -conf <config> -bolt <boltfile> [-port 6250]")
-		fmt.Fprintln(os.Stderr, "       gotinymush -bolt <boltfile> -godpass <newpassword>")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Environment variables (used as defaults when flags are not set):")
-		fmt.Fprintln(os.Stderr, "  MUSH_CONF      Path to game config file (.yaml)")
-		fmt.Fprintln(os.Stderr, "  MUSH_DB        Path to TinyMUSH flatfile database")
-		fmt.Fprintln(os.Stderr, "  MUSH_BOLT      Path to bbolt persistent database")
-		fmt.Fprintln(os.Stderr, "  MUSH_IMPORT    Set to 'true' to force reimport from flatfile")
-		fmt.Fprintln(os.Stderr, "  MUSH_PORT      TCP port to listen on")
-		fmt.Fprintln(os.Stderr, "  MUSH_TEXTDIR   Path to text files directory")
-		fmt.Fprintln(os.Stderr, "  MUSH_ALIASCONF Path to alias config file(s)")
-		fmt.Fprintln(os.Stderr, "  MUSH_COMSYSDB  Path to mod_comsys.db (channel system)")
-		fmt.Fprintln(os.Stderr, "  MUSH_FRESH     Set to 'true' to wipe bolt DB on every restart")
-		fmt.Fprintln(os.Stderr, "  MUSH_SPELLCHECK Set to 'true' to enable spellcheck functions")
-		fmt.Fprintln(os.Stderr, "  MUSH_DICTDIR   Path to dictionary directory")
-		fmt.Fprintln(os.Stderr, "  MUSH_DICTURL   LanguageTool API URL for remote spellcheck")
-		fmt.Fprintln(os.Stderr, "  MUSH_SQL       Set to 'true' to enable SQL functions")
-		fmt.Fprintln(os.Stderr, "  MUSH_SQLDB     Path to SQLite3 database file")
-		fmt.Fprintln(os.Stderr, "  MUSH_CLEARTEXT Set to 'false' to disable plaintext listener")
-		fmt.Fprintln(os.Stderr, "  MUSH_TLS       Set to 'true' to enable TLS listener")
-		fmt.Fprintln(os.Stderr, "  MUSH_TLS_PORT  TLS listen port (default: port+1)")
-		fmt.Fprintln(os.Stderr, "  MUSH_TLS_CERT  Path to TLS certificate file")
-		fmt.Fprintln(os.Stderr, "  MUSH_TLS_KEY   Path to TLS private key file")
-		fmt.Fprintln(os.Stderr, "  MUSH_RESTORE   Path to archive .tar.gz for pre-boot restore")
-		fmt.Fprintln(os.Stderr, "  MUSH_GODPASS   Set God (#1) password and exit")
-		fmt.Fprintln(os.Stderr, "  MUSH_ARCHIVE_DIR      Archive output directory")
-		fmt.Fprintln(os.Stderr, "  MUSH_ARCHIVE_INTERVAL Auto-archive interval in minutes")
-		fmt.Fprintln(os.Stderr, "  MUSH_ARCHIVE_RETAIN   Keep last N archives")
-		fmt.Fprintf(os.Stderr, "  MUSH_ARCHIVE_HOOK     Shell command after archive (%sf = path)\n", "%")
-		os.Exit(1)
+	// Load game config early (needed for setup mode and normal mode)
+	var gc *server.GameConf
+	if *confFile != "" {
+		var err error
+		gc, err = server.LoadGameConf(*confFile)
+		if err != nil {
+			log.Printf("Config file not available (%v) — using defaults", err)
+			gc = server.DefaultGameConf()
+		} else {
+			log.Printf("Loaded game config from %s", *confFile)
+		}
+	} else {
+		gc = server.DefaultGameConf()
+	}
+
+	// Command-line port override
+	if *port != 0 {
+		gc.Port = *port
+	}
+
+	// Auto-detect existing game.bolt in data directory if not explicitly set
+	if *boltPath == "" {
+		dataDir := "/game/data"
+		if *confFile != "" {
+			dataDir = filepath.Dir(*confFile)
+		}
+		candidate := filepath.Join(dataDir, "game.bolt")
+		if _, err := os.Stat(candidate); err == nil {
+			*boltPath = candidate
+			log.Printf("Auto-detected bolt store: %s", candidate)
+		}
+	}
+
+	setupMode := *dbPath == "" && *boltPath == ""
+	if setupMode {
+		log.Printf("No database specified — starting in setup mode (admin panel only)")
+		dataDir := "/game/data"
+		if *confFile != "" {
+			dataDir = filepath.Dir(*confFile)
+		}
+		startSetupMode(*confFile, *port, gc, dataDir)
+		return
 	}
 
 	// Pre-boot restore from archive
@@ -118,23 +131,10 @@ func main() {
 		}
 	}
 
-	// Load game config if specified, otherwise use defaults
-	var gc *server.GameConf
-	if *confFile != "" {
-		var err error
-		gc, err = server.LoadGameConf(*confFile)
-		if err != nil {
-			log.Fatalf("Error loading game config: %v", err)
-		}
-		log.Printf("Loaded game config from %s", *confFile)
-	} else {
-		gc = server.DefaultGameConf()
-	}
+	// (gc already loaded above, before setup mode check)
 
-	// Command-line flags override config file values
-	if *port != 0 {
-		gc.Port = *port
-	}
+	// Command-line flags override config file values (non-port, port already handled)
+
 
 	// TLS cert/key: flags override config
 	if *tlsCert != "" {
@@ -311,9 +311,10 @@ func main() {
 	if len(aliasPaths) > 0 {
 		ac, err := server.LoadAliasConfig(aliasPaths...)
 		if err != nil {
-			log.Fatalf("Error loading alias config: %v", err)
+			log.Printf("WARNING: alias config not loaded: %v", err)
+		} else {
+			srv.Game.ApplyAliasConfig(ac)
 		}
-		srv.Game.ApplyAliasConfig(ac)
 	}
 
 	// Initialize spellcheck if enabled
@@ -492,4 +493,54 @@ func loadMail(game *server.Game, store *boltstore.Store, expireDays int) {
 
 	game.Mail = m
 	log.Printf("Mail system enabled (expiration: %d days)", expireDays)
+}
+
+// startSetupMode runs the server in setup-only mode: just the admin panel web server,
+// no game engine, no telnet listeners. Used when no database is configured yet.
+func startSetupMode(confFile string, port int, gc *server.GameConf, dataDir string) {
+	webPort := gc.WebPort
+	if webPort == 0 {
+		webPort = 8443
+	}
+
+	// Create admin panel with no controller (setup mode)
+	adminPanel := admin.New(nil)
+	adminPanel.SetDataDir(dataDir)
+	adminPanel.SetConfPath(confFile)
+	setupStart := time.Now()
+	mux := http.NewServeMux()
+
+	// Health endpoint (no auth, available in setup mode)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":         "ok",
+			"version":        server.Version,
+			"uptime_seconds": time.Since(setupStart).Seconds(),
+			"game_running":   false,
+		})
+	})
+
+	mux.Handle("/admin/", adminPanel.Handler("/admin"))
+
+	// Redirect / to /admin
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "" {
+			http.Redirect(w, r, "/admin/", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	addr := fmt.Sprintf(":%d", webPort)
+	log.Printf("Setup mode: admin panel at http://0.0.0.0%s/admin/", addr)
+	log.Printf("Upload a flatfile or archive to get started.")
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatalf("Setup mode web server error: %v", err)
+	}
 }

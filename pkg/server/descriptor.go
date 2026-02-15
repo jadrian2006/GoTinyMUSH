@@ -50,6 +50,7 @@ type Descriptor struct {
 	BytesSent int    // Total bytes sent to this connection
 	BytesRecv int    // Total bytes received from this connection
 	Transport TransportType // Transport type (TCP, WebSocket)
+	AutoDark  bool         // Wizard connected dark; cleared on first command input
 	OOB       *oob.Capabilities // Negotiated OOB protocols (nil = none)
 
 	// SendFunc overrides the default Send behavior (used by WebSocket transport).
