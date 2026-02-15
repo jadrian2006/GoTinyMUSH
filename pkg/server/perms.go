@@ -40,23 +40,32 @@ func Inherits(g *Game, obj gamedb.DBRef) bool {
 }
 
 // Wizard returns true if obj is an effective wizard.
-// Having the WIZARD flag alone is not enough — the object must also Inherit.
+// Matches C TinyMUSH: Wizard(x) = has WIZARD flag directly, OR owner has
+// WIZARD and object Inherits. Players always inherit their own privileges.
 func Wizard(g *Game, obj gamedb.DBRef) bool {
 	o, ok := g.DB.Objects[obj]
 	if !ok {
 		return false
 	}
-	return o.HasFlag(gamedb.FlagWizard) && Inherits(g, obj)
+	if o.HasFlag(gamedb.FlagWizard) {
+		return true
+	}
+	// Check if owner has WIZARD and object inherits
+	owner, ownerOK := g.DB.Objects[o.Owner]
+	if ownerOK && owner.HasFlag(gamedb.FlagWizard) && Inherits(g, obj) {
+		return true
+	}
+	return false
 }
 
-// Royalty returns true if obj is effective royalty.
-// Having the ROYALTY flag alone is not enough — the object must also Inherit.
+// Royalty returns true if obj has the ROYALTY flag.
+// Unlike Wizard, Royalty does NOT require Inherits — matches C TinyMUSH.
 func Royalty(g *Game, obj gamedb.DBRef) bool {
 	o, ok := g.DB.Objects[obj]
 	if !ok {
 		return false
 	}
-	return o.HasFlag(gamedb.FlagRoyalty) && Inherits(g, obj)
+	return o.HasFlag(gamedb.FlagRoyalty)
 }
 
 // WizRoy returns true if obj is either an effective wizard or royalty.
