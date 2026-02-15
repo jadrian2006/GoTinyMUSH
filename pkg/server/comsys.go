@@ -207,7 +207,14 @@ func (g *Game) SendToChannel(channelName string, sender gamedb.DBRef, msg string
 		return
 	}
 	listeners := g.Comsys.ChannelListeners(channelName)
+	// Deduplicate by player — a player may have multiple aliases for the
+	// same channel but should only receive each message once.
+	seen := make(map[gamedb.DBRef]bool)
 	for _, ca := range listeners {
+		if seen[ca.Player] {
+			continue
+		}
+		seen[ca.Player] = true
 		if g.Conns.IsConnected(ca.Player) {
 			g.EmitEvent(ca.Player, channelName, events.Event{
 				Type:    events.EvChannel,
