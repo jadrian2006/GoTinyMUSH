@@ -30,7 +30,7 @@ COPY data/goTinyAlias.conf /game/data/goTinyAlias.conf
 # Copy seed database for first-time setup
 COPY data/minimal.FLAT /game/data/minimal.FLAT
 
-RUN chown -R mush:mush /game
+RUN mkdir -p /game/certs && chown -R mush:mush /game
 USER mush
 
 EXPOSE 6250 8443
