@@ -193,7 +193,7 @@ func DefaultGameConf() *GameConf {
 		WebStaticDir:            "web/dist",
 		WebRateLimit:            60,
 		JWTExpiry:               86400,
-		CertDir:                 "certs",
+		CertDir:                 "",
 		ScrollbackRetention:     86400,
 	}
 }
