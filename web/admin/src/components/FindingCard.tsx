@@ -14,9 +14,9 @@ interface Finding {
 }
 
 const severityColors: Record<number, string> = {
-  0: 'text-red-400 bg-red-500/10 border-red-500/30',      // error
-  1: 'text-amber-400 bg-amber-500/10 border-amber-500/30', // warning
-  2: 'text-blue-400 bg-blue-500/10 border-blue-500/30',    // info
+  0: 'text-red-300 bg-red-950/50 border-red-500/30',       // error
+  1: 'text-amber-200 bg-amber-950/40 border-amber-500/30', // warning
+  2: 'text-blue-300 bg-blue-950/50 border-blue-500/30',    // info
 }
 
 const severityLabels: Record<number, string> = {
@@ -44,7 +44,7 @@ export function FindingCard({ finding, onFix }: FindingCardProps) {
               <span class="text-xs font-mono opacity-50">{finding.attr_name}</span>
             )}
           </div>
-          <p class="text-sm">{finding.description}</p>
+          <p class="text-sm text-slate-200">{finding.description}</p>
         </div>
         {finding.fixable && !finding.fixed && onFix && (
           <button
@@ -60,18 +60,18 @@ export function FindingCard({ finding, onFix }: FindingCardProps) {
       </div>
       {finding.current && (
         <div class="mt-2">
-          <div class="text-xs opacity-50 mb-0.5">Current:</div>
-          <pre class="text-xs font-mono bg-black/20 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">{finding.current}</pre>
+          <div class="text-xs text-slate-400 mb-0.5">Current:</div>
+          <pre class="text-xs font-mono bg-slate-900/60 text-slate-300 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">{finding.current}</pre>
         </div>
       )}
       {finding.proposed && (
         <div class="mt-1">
-          <div class="text-xs opacity-50 mb-0.5">Proposed:</div>
-          <pre class="text-xs font-mono bg-black/20 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">{finding.proposed}</pre>
+          <div class="text-xs text-slate-400 mb-0.5">Proposed:</div>
+          <pre class="text-xs font-mono bg-slate-900/60 text-slate-300 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">{finding.proposed}</pre>
         </div>
       )}
       {finding.effect && (
-        <div class="mt-1 text-xs opacity-70">
+        <div class="mt-1 text-xs text-slate-400">
           Effect: {finding.effect}
         </div>
       )}
