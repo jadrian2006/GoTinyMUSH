@@ -19,11 +19,17 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
-// SetupTLS returns a *tls.Config using one of three strategies:
+// TLSResult holds the TLS config and optional autocert manager.
+type TLSResult struct {
+	Config       *tls.Config
+	AutocertMgr  *autocert.Manager // Non-nil when using Let's Encrypt
+}
+
+// SetupTLS returns a TLSResult using one of three strategies:
 //  1. Let's Encrypt (autocert) when domain is non-empty
 //  2. Provided cert/key files
 //  3. Self-signed cert (generated to certDir on first run)
-func SetupTLS(domain, certFile, keyFile, certDir string) (*tls.Config, error) {
+func SetupTLS(domain, certFile, keyFile, certDir string) (*TLSResult, error) {
 	// Strategy 1: Let's Encrypt via autocert
 	if domain != "" {
 		log.Printf("tls: using Let's Encrypt for domain %q", domain)
@@ -36,7 +42,7 @@ func SetupTLS(domain, certFile, keyFile, certDir string) (*tls.Config, error) {
 			HostPolicy: autocert.HostWhitelist(domain),
 			Cache:      autocert.DirCache(cacheDir),
 		}
-		return m.TLSConfig(), nil
+		return &TLSResult{Config: m.TLSConfig(), AutocertMgr: m}, nil
 	}
 
 	// Strategy 2: Provided cert/key
@@ -46,12 +52,16 @@ func SetupTLS(domain, certFile, keyFile, certDir string) (*tls.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("loading TLS cert: %w", err)
 		}
-		return &tls.Config{Certificates: []tls.Certificate{cert}}, nil
+		return &TLSResult{Config: &tls.Config{Certificates: []tls.Certificate{cert}}}, nil
 	}
 
 	// Strategy 3: Self-signed
 	log.Printf("tls: generating self-signed certificate in %s", certDir)
-	return generateSelfSigned(certDir)
+	cfg, err := generateSelfSigned(certDir)
+	if err != nil {
+		return nil, err
+	}
+	return &TLSResult{Config: cfg}, nil
 }
 
 // generateSelfSigned creates a self-signed certificate and saves it to certDir.

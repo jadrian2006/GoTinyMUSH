@@ -122,11 +122,27 @@ func (ws *WebServer) Start(cfg WebConfig) error {
 	// Try TLS setup; fall back to HTTP if no certs available
 	hasTLS := cfg.Domain != "" || (cfg.CertFile != "" && cfg.KeyFile != "") || cfg.CertDir != ""
 	if hasTLS {
-		tlsCfg, err := SetupTLS(cfg.Domain, cfg.CertFile, cfg.KeyFile, cfg.CertDir)
+		result, err := SetupTLS(cfg.Domain, cfg.CertFile, cfg.KeyFile, cfg.CertDir)
 		if err != nil {
 			log.Printf("web: TLS setup failed (%v), falling back to HTTP", err)
 		} else {
-			ws.httpSrv.TLSConfig = tlsCfg
+			ws.httpSrv.TLSConfig = result.Config
+
+			// If using Let's Encrypt, start HTTP listener on port 80 for ACME challenges
+			// and to redirect HTTP -> HTTPS.
+			if result.AutocertMgr != nil {
+				go func() {
+					httpSrv := &http.Server{
+						Addr:    ":80",
+						Handler: result.AutocertMgr.HTTPHandler(nil),
+					}
+					log.Printf("ACME HTTP challenge listener on :80")
+					if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+						log.Printf("ACME HTTP listener error: %v", err)
+					}
+				}()
+			}
+
 			log.Printf("Web server listening on %s (HTTPS)", ws.httpSrv.Addr)
 			err = ws.httpSrv.ListenAndServeTLS("", "")
 			if err == http.ErrServerClosed {
