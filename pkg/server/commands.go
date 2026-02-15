@@ -22,6 +22,7 @@ type CommandHandler func(g *Game, d *Descriptor, args string, switches []string)
 type Command struct {
 	Name    string
 	Handler CommandHandler
+	NoGuest bool // if true, guests cannot use this command
 }
 
 // InitCommands registers all available game commands.
@@ -31,6 +32,9 @@ func InitCommands() map[string]*Command {
 
 	register := func(name string, handler CommandHandler) {
 		cmds[strings.ToLower(name)] = &Command{Name: name, Handler: handler}
+	}
+	registerNG := func(name string, handler CommandHandler) {
+		cmds[strings.ToLower(name)] = &Command{Name: name, Handler: handler, NoGuest: true}
 	}
 
 	// Communication
@@ -56,60 +60,60 @@ func InitCommands() map[string]*Command {
 	register("DOING", cmdDoing)
 	register("score", cmdScore)
 
-	// Building
-	register("@dig", cmdDig)
-	register("@open", cmdOpen)
-	register("@describe", cmdDescribe)
-	register("@name", cmdRename)
-	register("@set", cmdSet)
-	register("@create", cmdCreate)
-	register("@destroy", cmdDestroy)
-	register("@link", cmdLink)
-	register("@unlink", cmdUnlink)
-	register("@parent", cmdParent)
-	register("@chown", cmdChown)
-	register("@clone", cmdClone)
-	register("@wipe", cmdWipe)
-	register("@lock", cmdLock)
-	register("@unlock", cmdUnlock)
+	// Building (no guest)
+	registerNG("@dig", cmdDig)
+	registerNG("@open", cmdOpen)
+	registerNG("@describe", cmdDescribe)
+	registerNG("@name", cmdRename)
+	registerNG("@set", cmdSet)
+	registerNG("@create", cmdCreate)
+	registerNG("@destroy", cmdDestroy)
+	registerNG("@link", cmdLink)
+	registerNG("@unlink", cmdUnlink)
+	registerNG("@parent", cmdParent)
+	registerNG("@chown", cmdChown)
+	registerNG("@clone", cmdClone)
+	registerNG("@wipe", cmdWipe)
+	registerNG("@lock", cmdLock)
+	registerNG("@unlock", cmdUnlock)
 
-	// Admin/wizard
-	register("@teleport", cmdTeleport)
-	register("@force", cmdForce)
-	register("@trigger", cmdTriggerCmd)
-	register("@wait", cmdWaitCmd)
-	register("@notify", cmdNotify)
-	register("@halt", cmdHalt)
-	register("@boot", cmdBoot)
-	register("@wall", cmdWall)
-	register("@newpassword", cmdNewPassword)
-	register("@find", cmdFind)
-	register("@stats", cmdStats)
-	register("@ps", cmdPs)
+	// Admin/wizard (no guest)
+	registerNG("@teleport", cmdTeleport)
+	registerNG("@force", cmdForce)
+	registerNG("@trigger", cmdTriggerCmd)
+	registerNG("@wait", cmdWaitCmd)
+	registerNG("@notify", cmdNotify)
+	registerNG("@halt", cmdHalt)
+	registerNG("@boot", cmdBoot)
+	registerNG("@wall", cmdWall)
+	registerNG("@newpassword", cmdNewPassword)
+	registerNG("@find", cmdFind)
+	registerNG("@stats", cmdStats)
+	registerNG("@ps", cmdPs)
 
 	// Eval / softcode
 	register("@eval", cmdEval)
-	register("@switch", cmdSwitch)
-	register("@dolist", cmdDolist)
-	register("@program", cmdProgram)
+	registerNG("@switch", cmdSwitch)
+	registerNG("@dolist", cmdDolist)
+	registerNG("@program", cmdProgram)
 	register("@quitprogram", cmdQuitProgram)
 
-	// Database
-	register("@dump", cmdDump)
-	register("@backup", cmdBackup)
-	register("@readcache", cmdReadCache)
-	register("@archive", cmdArchive)
+	// Database (no guest)
+	registerNG("@dump", cmdDump)
+	registerNG("@backup", cmdBackup)
+	registerNG("@readcache", cmdReadCache)
+	registerNG("@archive", cmdArchive)
 
-	// Softcode / Queue management
-	register("@function", cmdFunction)
-	register("@drain", cmdDrain)
-	register("@edit", cmdEdit)
-	register("@admin", cmdAdmin)
+	// Softcode / Queue management (no guest)
+	registerNG("@function", cmdFunction)
+	registerNG("@drain", cmdDrain)
+	registerNG("@edit", cmdEdit)
+	registerNG("@admin", cmdAdmin)
 
-	// SQL
-	register("@sql", cmdSQL)
-	register("@sqlinit", cmdSQLInit)
-	register("@sqldisconnect", cmdSQLDisconnect)
+	// SQL (no guest)
+	registerNG("@sql", cmdSQL)
+	registerNG("@sqlinit", cmdSQLInit)
+	registerNG("@sqldisconnect", cmdSQLDisconnect)
 
 	// Session
 	register("QUIT", cmdQuit)
@@ -121,117 +125,117 @@ func InitCommands() map[string]*Command {
 	register("qhelp", cmdQhelp)
 	register("wizhelp", cmdWizhelp)
 	register("news", cmdNews)
-	// +help intentionally NOT registered as built-in — handled by softcode $+help on #25
+	register("+help", cmdPlusHelp)
 
 	// Player object commands
-	register("get", cmdGet)
-	register("take", cmdGet)
-	register("drop", cmdDrop)
-	register("give", cmdGive)
+	registerNG("get", cmdGet)
+	registerNG("take", cmdGet)
+	registerNG("drop", cmdDrop)
+	registerNG("give", cmdGive)
 	register("enter", cmdEnter)
 	register("leave", cmdLeave)
 	register("whisper", cmdWhisper)
 	register("use", cmdUse)
-	register("kill", cmdKill)
+	registerNG("kill", cmdKill)
 
 	// Communication
 	register("@oemit", cmdOemit)
 	register("@remit", cmdRemit)
 
 	// Admin/Builder utilities
-	register("@password", cmdPassword)
+	registerNG("@password", cmdPassword)
 	register("@version", cmdVersion)
 	register("version", cmdVersion)
 	register("@motd", cmdMotd)
-	register("@chzone", cmdChzone)
-	register("@search", cmdSearch)
-	register("@decompile", cmdDecompile)
-	register("@power", cmdPower)
+	registerNG("@chzone", cmdChzone)
+	registerNG("@search", cmdSearch)
+	registerNG("@decompile", cmdDecompile)
+	registerNG("@power", cmdPower)
 
-	// Attribute-setting @commands
+	// Attribute-setting @commands (all no guest)
 	// Success/Failure messages
-	register("@success", makeAttrSetter(4))     // A_SUCC
-	register("@osuccess", makeAttrSetter(1))     // A_OSUCC
-	register("@asuccess", makeAttrSetter(12))    // A_ASUCC
-	register("@fail", makeAttrSetter(3))         // A_FAIL
-	register("@ofail", makeAttrSetter(2))        // A_OFAIL
-	register("@afail", makeAttrSetter(13))       // A_AFAIL
-	register("@drop", makeAttrSetter(9))         // A_DROP (attribute setter)
-	register("@odrop", makeAttrSetter(8))        // A_ODROP
-	register("@adrop", makeAttrSetter(14))       // A_ADROP
-	register("@kill", makeAttrSetter(11))        // A_KILL
-	register("@okill", makeAttrSetter(10))       // A_OKILL
-	register("@akill", makeAttrSetter(15))       // A_AKILL
+	registerNG("@success", makeAttrSetter(4))     // A_SUCC
+	registerNG("@osuccess", makeAttrSetter(1))     // A_OSUCC
+	registerNG("@asuccess", makeAttrSetter(12))    // A_ASUCC
+	registerNG("@fail", makeAttrSetter(3))         // A_FAIL
+	registerNG("@ofail", makeAttrSetter(2))        // A_OFAIL
+	registerNG("@afail", makeAttrSetter(13))       // A_AFAIL
+	registerNG("@drop", makeAttrSetter(9))         // A_DROP (attribute setter)
+	registerNG("@odrop", makeAttrSetter(8))        // A_ODROP
+	registerNG("@adrop", makeAttrSetter(14))       // A_ADROP
+	registerNG("@kill", makeAttrSetter(11))        // A_KILL
+	registerNG("@okill", makeAttrSetter(10))       // A_OKILL
+	registerNG("@akill", makeAttrSetter(15))       // A_AKILL
 	// Enter/Leave attributes
-	register("@enter", makeAttrSetter(29))       // A_ENTER
-	register("@oenter", makeAttrSetter(49))      // A_OENTER
-	register("@oxenter", makeAttrSetter(30))     // A_OXENTER
-	register("@aenter", makeAttrSetter(31))      // A_AENTER
-	register("@leave", makeAttrSetter(46))       // A_LEAVE
-	register("@oleave", makeAttrSetter(47))      // A_OLEAVE
-	register("@aleave", makeAttrSetter(48))      // A_ALEAVE
+	registerNG("@enter", makeAttrSetter(29))       // A_ENTER
+	registerNG("@oenter", makeAttrSetter(49))      // A_OENTER
+	registerNG("@oxenter", makeAttrSetter(30))     // A_OXENTER
+	registerNG("@aenter", makeAttrSetter(31))      // A_AENTER
+	registerNG("@leave", makeAttrSetter(46))       // A_LEAVE
+	registerNG("@oleave", makeAttrSetter(47))      // A_OLEAVE
+	registerNG("@aleave", makeAttrSetter(48))      // A_ALEAVE
 	// Use attributes
-	register("@use", makeAttrSetter(41))         // A_USE
-	register("@ouse", makeAttrSetter(42))        // A_OUSE
-	register("@ause", makeAttrSetter(16))        // A_AUSE
+	registerNG("@use", makeAttrSetter(41))         // A_USE
+	registerNG("@ouse", makeAttrSetter(42))        // A_OUSE
+	registerNG("@ause", makeAttrSetter(16))        // A_AUSE
 	// Player info
-	register("@sex", makeAttrSetter(7))          // A_SEX
-	register("@alias", makeAttrSetter(54))       // A_ALIAS
-	register("@away", makeAttrSetter(69))        // A_AWAY
-	register("@idle", makeAttrSetter(70))        // A_IDLE
-	register("@listen", makeAttrSetter(24))      // A_LISTEN
-	register("@ahear", makeAttrSetter(25))       // A_AHEAR
+	registerNG("@sex", makeAttrSetter(7))          // A_SEX
+	registerNG("@alias", makeAttrSetter(54))       // A_ALIAS
+	registerNG("@away", makeAttrSetter(69))        // A_AWAY
+	registerNG("@idle", makeAttrSetter(70))        // A_IDLE
+	registerNG("@listen", makeAttrSetter(24))      // A_LISTEN
+	registerNG("@ahear", makeAttrSetter(25))       // A_AHEAR
 	// Move attributes
-	register("@move", makeAttrSetter(51))        // A_MOVE
-	register("@omove", makeAttrSetter(52))       // A_OMOVE
-	register("@amove", makeAttrSetter(53))       // A_AMOVE
+	registerNG("@move", makeAttrSetter(51))        // A_MOVE
+	registerNG("@omove", makeAttrSetter(52))       // A_OMOVE
+	registerNG("@amove", makeAttrSetter(53))       // A_AMOVE
 	// Description variants
-	register("@odescribe", makeAttrSetter(33))   // A_ODESC
-	register("@adescribe", makeAttrSetter(32))   // A_ADESC
-	register("@idesc", makeAttrSetter(28))       // A_IDESC
+	registerNG("@odescribe", makeAttrSetter(33))   // A_ODESC
+	registerNG("@adescribe", makeAttrSetter(32))   // A_ADESC
+	registerNG("@idesc", makeAttrSetter(28))       // A_IDESC
 	// Payment
-	register("@pay", makeAttrSetter(21))         // A_PAY
-	register("@opay", makeAttrSetter(22))        // A_OPAY
-	register("@apay", makeAttrSetter(23))        // A_APAY
+	registerNG("@pay", makeAttrSetter(21))         // A_PAY
+	registerNG("@opay", makeAttrSetter(22))        // A_OPAY
+	registerNG("@apay", makeAttrSetter(23))        // A_APAY
 	// Startup/daily
-	register("@startup", makeAttrSetter(19))     // A_STARTUP
-	register("@daily", makeAttrSetter(252))      // A_DAILYATTRIB
+	registerNG("@startup", makeAttrSetter(19))     // A_STARTUP
+	registerNG("@daily", makeAttrSetter(252))      // A_DAILYATTRIB
 	// Format overrides (attr numbers match C source: attrs.h)
-	register("@conformat", makeAttrSetter(214))  // A_LCON_FMT
-	register("@exitformat", makeAttrSetter(215)) // A_LEXITS_FMT
-	register("@nameformat", makeAttrSetter(222)) // A_NAME_FMT
+	registerNG("@conformat", makeAttrSetter(214))  // A_LCON_FMT
+	registerNG("@exitformat", makeAttrSetter(215)) // A_LEXITS_FMT
+	registerNG("@nameformat", makeAttrSetter(222)) // A_NAME_FMT
 	// Enter/Leave aliases
-	register("@ealias", makeAttrSetter(60))      // A_EALIAS
-	register("@lalias", makeAttrSetter(61))      // A_LALIAS
+	registerNG("@ealias", makeAttrSetter(60))      // A_EALIAS
+	registerNG("@lalias", makeAttrSetter(61))      // A_LALIAS
 	// Filtering
-	register("@filter", makeAttrSetter(88))      // A_FILTER
-	register("@infilter", makeAttrSetter(87))    // A_INFILTER
-	register("@forwardlist", makeAttrSetter(91)) // A_FORWARDLIST
-	register("@prefix", makeAttrSetter(86))      // A_PREFIX
-	register("@inprefix", makeAttrSetter(85))    // A_INPREFIX
+	registerNG("@filter", makeAttrSetter(88))      // A_FILTER
+	registerNG("@infilter", makeAttrSetter(87))    // A_INFILTER
+	registerNG("@forwardlist", makeAttrSetter(91)) // A_FORWARDLIST
+	registerNG("@prefix", makeAttrSetter(86))      // A_PREFIX
+	registerNG("@inprefix", makeAttrSetter(85))    // A_INPREFIX
 	// Enter/Leave/Use failure variants
-	register("@efail", makeAttrSetter(62))       // A_EFAIL
-	register("@oefail", makeAttrSetter(63))      // A_OEFAIL
-	register("@aefail", makeAttrSetter(64))      // A_AEFAIL
-	register("@lfail", makeAttrSetter(65))       // A_LFAIL
-	register("@olfail", makeAttrSetter(66))      // A_OLFAIL
-	register("@alfail", makeAttrSetter(67))      // A_ALFAIL
-	register("@ufail", makeAttrSetter(71))       // A_UFAIL
-	register("@oufail", makeAttrSetter(72))      // A_OUFAIL
-	register("@aufail", makeAttrSetter(73))      // A_AUFAIL
+	registerNG("@efail", makeAttrSetter(62))       // A_EFAIL
+	registerNG("@oefail", makeAttrSetter(63))      // A_OEFAIL
+	registerNG("@aefail", makeAttrSetter(64))      // A_AEFAIL
+	registerNG("@lfail", makeAttrSetter(65))       // A_LFAIL
+	registerNG("@olfail", makeAttrSetter(66))      // A_OLFAIL
+	registerNG("@alfail", makeAttrSetter(67))      // A_ALFAIL
+	registerNG("@ufail", makeAttrSetter(71))       // A_UFAIL
+	registerNG("@oufail", makeAttrSetter(72))      // A_OUFAIL
+	registerNG("@aufail", makeAttrSetter(73))      // A_AUFAIL
 	// Teleport messages
-	register("@tport", makeAttrSetter(75))       // A_TPORT
-	register("@otport", makeAttrSetter(76))      // A_OTPORT
-	register("@oxtport", makeAttrSetter(77))     // A_OXTPORT
-	register("@atport", makeAttrSetter(78))      // A_ATPORT
+	registerNG("@tport", makeAttrSetter(75))       // A_TPORT
+	registerNG("@otport", makeAttrSetter(76))      // A_OTPORT
+	registerNG("@oxtport", makeAttrSetter(77))     // A_OXTPORT
+	registerNG("@atport", makeAttrSetter(78))      // A_ATPORT
 	// Costs/charges
-	register("@cost", makeAttrSetter(17))        // A_CHARGES
-	register("@runout", makeAttrSetter(18))      // A_RUNOUT
+	registerNG("@cost", makeAttrSetter(17))        // A_CHARGES
+	registerNG("@runout", makeAttrSetter(18))      // A_RUNOUT
 	// Reject
-	register("@reject", makeAttrSetter(68))      // A_REJECT
+	registerNG("@reject", makeAttrSetter(68))      // A_REJECT
 
 	// Spellcheck
-	register("@dictionary", cmdDictionary)
+	registerNG("@dictionary", cmdDictionary)
 
 	// Comsys (channel system)
 	register("addcom", cmdAddcom)
@@ -240,17 +244,17 @@ func InitCommands() map[string]*Command {
 	register("comlist", cmdComlist)
 	register("comtitle", cmdComtitle)
 	register("allcom", cmdAllcom)
-	register("@ccreate", cmdCcreate)
-	register("@cdestroy", cmdCdestroy)
+	registerNG("@ccreate", cmdCcreate)
+	registerNG("@cdestroy", cmdCdestroy)
 	register("@clist", cmdClist)
 	register("@cwho", cmdCwho)
-	register("@cboot", cmdCboot)
-	register("@cemit", cmdCemit)
-	register("@cset", cmdCset)
+	registerNG("@cboot", cmdCboot)
+	registerNG("@cemit", cmdCemit)
+	registerNG("@cset", cmdCset)
 
-	// Mail system
-	register("@mail", cmdMail)
-	register("-", cmdMailDash)
+	// Mail system (no guest)
+	registerNG("@mail", cmdMail)
+	registerNG("-", cmdMailDash)
 
 	return cmds
 }
@@ -274,6 +278,10 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		cmdPoseNoSpc(g, d, input[1:], nil)
 		return
 	case '&':
+		if g.IsGuest(d.Player) {
+			d.Send("Permission denied.")
+			return
+		}
 		cmdSetVAttr(g, d, input[1:], nil)
 		return
 	}
@@ -298,6 +306,10 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 
 	// Look up command
 	if cmd, ok := g.Commands[strings.ToLower(cmdName)]; ok {
+		if cmd.NoGuest && g.IsGuest(d.Player) {
+			d.Send("Permission denied.")
+			return
+		}
 		cmd.Handler(g, d, args, switches)
 		return
 	}
@@ -309,6 +321,10 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		attrName := lower[1:]
 		// Only do this if it looks like an attribute set (has obj=value)
 		if strings.Contains(args, "=") {
+			if g.IsGuest(d.Player) {
+				d.Send("Permission denied.")
+				return
+			}
 			cmdSetVAttr(g, d, attrName+" "+args, nil)
 			return
 		}

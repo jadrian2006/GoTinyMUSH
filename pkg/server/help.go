@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -55,10 +56,27 @@ func LoadHelpFile(path string) *HelpFile {
 
 // Lookup finds a help entry by topic name. Tries exact match first,
 // then prefix match (e.g. "help @swi" matches "@switch").
+// If the topic contains wildcards (* or ?), returns a list of matching topics.
 func (hf *HelpFile) Lookup(topic string) string {
 	topic = strings.ToLower(strings.TrimSpace(topic))
 	if topic == "" {
 		topic = "help"
+	}
+
+	// Wildcard search
+	if strings.ContainsAny(topic, "*?") {
+		var matches []string
+		for key := range hf.Entries {
+			if wildMatchSimple(topic, key) {
+				matches = append(matches, key)
+			}
+		}
+		if len(matches) == 0 {
+			return ""
+		}
+		sort.Strings(matches)
+		return fmt.Sprintf("Here are the entries which match '%s':\n  %s",
+			topic, strings.Join(matches, "  "))
 	}
 
 	// Exact match

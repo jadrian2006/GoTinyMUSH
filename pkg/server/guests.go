@@ -63,6 +63,11 @@ func (gm *GuestManager) AllGuests() []gamedb.DBRef {
 	return refs
 }
 
+// IsGuest returns true if the given player is a tracked guest.
+func (g *Game) IsGuest(player gamedb.DBRef) bool {
+	return g.Guests != nil && g.Guests.IsGuest(player)
+}
+
 // GuestsEnabled returns true if the guest system is configured.
 func (g *Game) GuestsEnabled() bool {
 	return g.Conf != nil && g.Conf.GuestCharNum >= 0
