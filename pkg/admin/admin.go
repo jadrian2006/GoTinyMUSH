@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/crystal-mush/gotinymush/pkg/archive"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
@@ -109,6 +110,14 @@ type ImportSession struct {
 	TypeCounts  map[string]int `json:"type_counts,omitempty"`
 }
 
+// CommitProgress tracks the current stage of a commit operation.
+type CommitProgress struct {
+	Stage   string `json:"stage"`   // "idle", "writing_db", "writing_comsys", "writing_config", "writing_files", "done", "error"
+	Detail  string `json:"detail"`  // human-readable detail
+	Error   string `json:"error"`   // error message if stage is "error"
+	Percent int    `json:"percent"` // 0-100
+}
+
 // Admin is the admin panel HTTP handler.
 type Admin struct {
 	mu         sync.RWMutex
@@ -117,6 +126,9 @@ type Admin struct {
 
 	// Import session (persists across requests during an import flow)
 	session *ImportSession
+
+	// Commit progress (readable without the write lock)
+	commitProgress atomic.Value // stores *CommitProgress
 
 	// Setup mode paths (set when running without a controller)
 	dataDir  string // data directory (e.g. /game/data)
@@ -173,6 +185,7 @@ func (a *Admin) Handler(prefix string) http.Handler {
 	mux.HandleFunc("GET /api/import/findings", a.handleImportFindings)
 	mux.HandleFunc("POST /api/import/fix", a.handleImportFix)
 	mux.HandleFunc("POST /api/import/commit", a.handleImportCommit)
+	mux.HandleFunc("GET /api/import/commit/progress", a.handleCommitProgress)
 
 	// Import routes (new: session management, discovery, file editing)
 	mux.HandleFunc("GET /api/import/session", a.handleImportSession)
@@ -217,6 +230,32 @@ func adminSPAHandler(fileServer http.Handler, fsys fs.FS) http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// setCommitProgress updates the commit progress atomically.
+func (a *Admin) setCommitProgress(stage, detail string, percent int) {
+	a.commitProgress.Store(&CommitProgress{
+		Stage:   stage,
+		Detail:  detail,
+		Percent: percent,
+	})
+}
+
+// setCommitError marks the commit progress as failed.
+func (a *Admin) setCommitError(err string) {
+	a.commitProgress.Store(&CommitProgress{
+		Stage: "error",
+		Error: err,
+	})
+}
+
+// handleCommitProgress returns the current commit progress (lock-free read).
+func (a *Admin) handleCommitProgress(w http.ResponseWriter, r *http.Request) {
+	p, _ := a.commitProgress.Load().(*CommitProgress)
+	if p == nil {
+		p = &CommitProgress{Stage: "idle"}
+	}
+	writeJSON(w, http.StatusOK, p)
 }
 
 // readJSON decodes a JSON request body.

@@ -188,13 +188,39 @@ export function ImportFlow() {
     }
   }
 
+  const [commitProgress, setCommitProgress] = useState<{ stage: string, detail: string, percent: number } | null>(null)
+
   const handleCommit = async () => {
     setLoading(true)
     setError('')
+    setCommitProgress({ stage: 'starting', detail: 'Starting commit...', percent: 0 })
+
+    // Poll progress while commit runs
+    const progressPoll = setInterval(async () => {
+      try {
+        const p = await api.importCommitProgress()
+        if (p.stage && p.stage !== 'idle') {
+          setCommitProgress(p)
+        }
+        if (p.stage === 'error') {
+          clearInterval(progressPoll)
+          setError(p.error || 'Commit failed')
+          setCommitProgress(null)
+          setLoading(false)
+        }
+      } catch {
+        // Progress poll failed, commit may still be running
+      }
+    }, 500)
+
     try {
       await api.importCommit()
+      clearInterval(progressPoll)
+      setCommitProgress(null)
       setStep('committed')
     } catch (e: any) {
+      clearInterval(progressPoll)
+      setCommitProgress(null)
       setError(e.message)
     } finally {
       setLoading(false)
@@ -360,6 +386,24 @@ export function ImportFlow() {
               </div>
             )}
           </div>
+
+          {/* Commit progress indicator */}
+          {commitProgress && (
+            <div class="bg-slate-800 rounded p-4 mb-4">
+              <div class="flex items-center gap-3 mb-2">
+                <div class="inline-block w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                <span class="text-sm text-slate-200">{commitProgress.detail}</span>
+              </div>
+              <div class="w-full bg-slate-700 rounded-full h-2">
+                <div
+                  class="bg-indigo-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${commitProgress.percent}%` }}
+                />
+              </div>
+              <div class="text-xs text-slate-500 mt-1">{commitProgress.percent}%</div>
+            </div>
+          )}
+
           <div class="flex gap-3">
             <button
               onClick={handleCommit}
@@ -370,7 +414,8 @@ export function ImportFlow() {
             </button>
             <button
               onClick={() => setStep('resolve')}
-              class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm transition-colors"
+              disabled={loading}
+              class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm transition-colors disabled:opacity-50"
             >
               Back to Resolve
             </button>

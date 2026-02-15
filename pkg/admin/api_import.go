@@ -341,11 +341,15 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	a.setCommitProgress("starting", "Preparing commit...", 0)
+
 	if a.session == nil || a.session.FlatfileDB == nil {
+		a.setCommitError("no flatfile has been uploaded")
 		writeError(w, http.StatusBadRequest, "no flatfile has been uploaded")
 		return
 	}
 	if !a.session.ReadyToCommit {
+		a.setCommitError("run validation before committing")
 		writeError(w, http.StatusBadRequest, "run validation before committing")
 		return
 	}
@@ -359,6 +363,7 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if dataDir == "" {
+		a.setCommitError("no data directory configured")
 		writeError(w, http.StatusInternalServerError, "no data directory configured")
 		return
 	}
@@ -370,22 +375,29 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write the database to bolt store
+	a.setCommitProgress("writing_db", fmt.Sprintf("Writing %d objects to database...", len(a.session.FlatfileDB.Objects)), 10)
+	log.Printf("admin: commit: writing %d objects to bolt store...", len(a.session.FlatfileDB.Objects))
+
 	boltPath := filepath.Join(dataDir, "game.bolt")
 	store, err := boltstore.Open(boltPath)
 	if err != nil {
+		a.setCommitError("failed to create bolt store: " + err.Error())
 		writeError(w, http.StatusInternalServerError, "failed to create bolt store: "+err.Error())
 		return
 	}
 	if err := store.ImportFromDatabase(a.session.FlatfileDB); err != nil {
 		store.Close()
+		a.setCommitError("failed to import database: " + err.Error())
 		writeError(w, http.StatusInternalServerError, "failed to import database: "+err.Error())
 		return
 	}
-	log.Printf("admin: committed %d objects to %s", len(a.session.FlatfileDB.Objects), boltPath)
+	log.Printf("admin: commit: wrote %d objects to %s", len(a.session.FlatfileDB.Objects), boltPath)
 	committed["bolt_path"] = boltPath
 
 	// Write comsys to boltstore if parsed
 	if a.session.ComsysParsed && len(a.session.Channels) > 0 {
+		a.setCommitProgress("writing_comsys", fmt.Sprintf("Writing %d channels...", len(a.session.Channels)), 50)
+		log.Printf("admin: commit: writing %d comsys channels...", len(a.session.Channels))
 		if err := store.ImportComsys(a.session.Channels, a.session.ChanAliases); err != nil {
 			log.Printf("admin: warning: import comsys: %v", err)
 		} else {
@@ -396,8 +408,10 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 	store.Close()
 
 	// Write staged config if present
+	a.setCommitProgress("writing_config", "Writing configuration...", 70)
 	confPath := filepath.Join(dataDir, "game.yaml")
 	if len(a.session.Config) > 0 {
+		log.Printf("admin: commit: writing config to %s", confPath)
 		if err := os.WriteFile(confPath, a.session.Config, 0644); err != nil {
 			log.Printf("admin: warning: write config: %v", err)
 		} else {
@@ -406,9 +420,11 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write staged text files
+	a.setCommitProgress("writing_files", "Writing text and data files...", 80)
 	if len(a.session.TextFiles) > 0 {
 		textDir := filepath.Join(dataDir, "text")
 		os.MkdirAll(textDir, 0755)
+		log.Printf("admin: commit: writing %d text files...", len(a.session.TextFiles))
 		for name, content := range a.session.TextFiles {
 			if err := os.WriteFile(filepath.Join(textDir, name), content, 0644); err != nil {
 				log.Printf("admin: warning: write text file %s: %v", name, err)
@@ -421,6 +437,7 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 	if len(a.session.DictFiles) > 0 {
 		dictDir := filepath.Join(dataDir, "dict")
 		os.MkdirAll(dictDir, 0755)
+		log.Printf("admin: commit: writing %d dict files...", len(a.session.DictFiles))
 		for name, content := range a.session.DictFiles {
 			if err := os.WriteFile(filepath.Join(dictDir, name), content, 0644); err != nil {
 				log.Printf("admin: warning: write dict file %s: %v", name, err)
@@ -431,6 +448,7 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 
 	// Write staged alias files
 	if len(a.session.Aliases) > 0 {
+		log.Printf("admin: commit: writing %d alias files...", len(a.session.Aliases))
 		for name, content := range a.session.Aliases {
 			aliasPath := filepath.Join(dataDir, name)
 			if err := os.WriteFile(aliasPath, content, 0644); err != nil {
@@ -440,10 +458,18 @@ func (a *Admin) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 		committed["alias_files_written"] = len(a.session.Aliases)
 	}
 
+	a.setCommitProgress("done", "Commit complete", 100)
+	log.Printf("admin: commit: complete")
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "committed",
 		"committed": committed,
 	})
+
+	// Flush response to ensure the client receives it immediately
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // handleImportSession returns the full session state.

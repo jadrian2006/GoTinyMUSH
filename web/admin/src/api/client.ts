@@ -52,6 +52,7 @@ export const api = {
   importFix: (findingId?: string, category?: string) =>
     request<any>('POST', '/import/fix', { finding_id: findingId, category }),
   importCommit: () => request<any>('POST', '/import/commit'),
+  importCommitProgress: () => request<any>('GET', '/import/commit/progress'),
 
   // Import — new session management
   importSession: () => request<any>('GET', '/import/session'),
