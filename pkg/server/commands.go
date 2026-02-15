@@ -125,7 +125,9 @@ func InitCommands() map[string]*Command {
 	register("qhelp", cmdQhelp)
 	register("wizhelp", cmdWizhelp)
 	register("news", cmdNews)
-	register("+help", cmdPlusHelp)
+	// NOTE: +help is NOT registered here. CrystalMUSH uses softcode $+help
+	// on Global Commands(#123) in the master room. The original crystal.conf
+	// has "helpfile +help text/plushelp" commented out (line 47).
 
 	// Player object commands
 	registerNG("get", cmdGet)
