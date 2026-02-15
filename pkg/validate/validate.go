@@ -64,6 +64,12 @@ func (s Severity) String() string {
 	}
 }
 
+// Highlight marks a range in Current or Proposed text that should be visually emphasized.
+type Highlight struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
 // Finding represents a single validation issue detected in the database.
 type Finding struct {
 	ID          string       `json:"id"`
@@ -76,6 +82,8 @@ type Finding struct {
 	Description string       `json:"description"`
 	Current     string       `json:"current,omitempty"`
 	Proposed    string       `json:"proposed,omitempty"`
+	CurrentHL   []Highlight  `json:"current_hl,omitempty"`
+	ProposedHL  []Highlight  `json:"proposed_hl,omitempty"`
 	Effect      string       `json:"effect,omitempty"`
 	Explanation string       `json:"explanation,omitempty"`
 	Fixable     bool         `json:"fixable"`

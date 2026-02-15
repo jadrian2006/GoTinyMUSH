@@ -1,3 +1,8 @@
+interface Highlight {
+  start: number
+  end: number
+}
+
 interface Finding {
   id: string
   category: number
@@ -8,6 +13,8 @@ interface Finding {
   description: string
   current: string
   proposed: string
+  current_hl?: Highlight[]
+  proposed_hl?: Highlight[]
   effect: string
   explanation: string
   fixable: boolean
@@ -24,6 +31,33 @@ const severityLabels: Record<number, string> = {
   0: 'ERROR',
   1: 'WARNING',
   2: 'INFO',
+}
+
+/** Renders text with highlighted spans */
+function HighlightedText({ text, highlights, hlClass }: {
+  text: string
+  highlights?: Highlight[]
+  hlClass: string
+}) {
+  if (!highlights || highlights.length === 0) {
+    return <>{text}</>
+  }
+
+  const parts: preact.JSX.Element[] = []
+  let last = 0
+  for (const hl of highlights) {
+    if (hl.start > last) {
+      parts.push(<span key={`t${last}`}>{text.slice(last, hl.start)}</span>)
+    }
+    parts.push(
+      <span key={`h${hl.start}`} class={hlClass}>{text.slice(hl.start, hl.end)}</span>
+    )
+    last = hl.end
+  }
+  if (last < text.length) {
+    parts.push(<span key={`t${last}`}>{text.slice(last)}</span>)
+  }
+  return <>{parts}</>
 }
 
 interface FindingCardProps {
@@ -67,13 +101,25 @@ export function FindingCard({ finding, onFix }: FindingCardProps) {
       {finding.current && (
         <div class="mt-2">
           <div class="text-xs text-slate-400 mb-0.5">Current:</div>
-          <pre class="text-xs font-mono bg-slate-900/60 text-slate-300 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">{finding.current}</pre>
+          <pre class="text-xs font-mono bg-slate-900/60 text-slate-300 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">
+            <HighlightedText
+              text={finding.current}
+              highlights={finding.current_hl}
+              hlClass="bg-red-500/30 text-red-200 rounded px-0.5"
+            />
+          </pre>
         </div>
       )}
       {finding.proposed && (
         <div class="mt-1">
           <div class="text-xs text-slate-400 mb-0.5">Proposed:</div>
-          <pre class="text-xs font-mono bg-slate-900/60 text-slate-300 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">{finding.proposed}</pre>
+          <pre class="text-xs font-mono bg-slate-900/60 text-slate-300 rounded p-1.5 overflow-x-auto whitespace-pre-wrap break-all">
+            <HighlightedText
+              text={finding.proposed}
+              highlights={finding.proposed_hl}
+              hlClass="bg-green-500/30 text-green-200 rounded px-0.5"
+            />
+          </pre>
         </div>
       )}
       {finding.effect && (

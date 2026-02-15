@@ -44,8 +44,22 @@ func (c *PercentChecker) Check(db *gamedb.Database) []Finding {
 			seq++
 
 			var effectParts []string
+			var currentHL, proposedHL []Highlight
+			offset := 0
 			for _, iss := range issues {
 				effectParts = append(effectParts, fmt.Sprintf("%q at pos %d", iss.match, iss.pos))
+				if iss.pos < 200 {
+					end := iss.pos + len(iss.match)
+					if end > 200 { end = 200 }
+					currentHL = append(currentHL, Highlight{Start: iss.pos, End: end})
+				}
+				pStart := iss.pos + offset
+				pEnd := pStart + len(iss.fix)
+				if pStart < 200 {
+					if pEnd > 200 { pEnd = 200 }
+					proposedHL = append(proposedHL, Highlight{Start: pStart, End: pEnd})
+				}
+				offset += len(iss.fix) - len(iss.match)
 			}
 
 			capturedObj := obj
@@ -63,6 +77,8 @@ func (c *PercentChecker) Check(db *gamedb.Database) []Finding {
 				Description: fmt.Sprintf("Backslash-percent pattern in %s on #%d (%s)", attrName, obj.DBRef, truncate(obj.Name, 30)),
 				Current:     truncate(text, 200),
 				Proposed:    truncate(proposed, 200),
+				CurrentHL:   currentHL,
+				ProposedHL:  proposedHL,
 				Effect:      strings.Join(effectParts, "; "),
 				Explanation: `Similar to bracket escaping, \\% was used in C TinyMUSH to produce a literal % after double-evaluation. GoTinyMUSH's single-pass evaluation means \\% now produces \% instead. The fix removes the extra backslash so percent-substitutions like %r (newline) and %t (tab) work correctly.`,
 				Fixable:     true,
