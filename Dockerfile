@@ -12,7 +12,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /gotinymush ./cmd/server
+ARG VERSION=0.2.0
+RUN CGO_ENABLED=0 go build -ldflags "-X github.com/crystal-mush/gotinymush/pkg/server.Version=${VERSION}" -o /gotinymush ./cmd/server
 
 FROM alpine:latest
 RUN adduser -D -h /game mush

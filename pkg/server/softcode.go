@@ -665,8 +665,20 @@ func (g *Game) ProcessQueue() {
 		if entry == nil {
 			break
 		}
-		g.ExecuteQueueEntry(entry)
+		g.safeExecuteQueueEntry(entry)
 	}
+}
+
+// safeExecuteQueueEntry wraps ExecuteQueueEntry with panic recovery so that
+// a single bad command cannot kill the queue processor goroutine.
+func (g *Game) safeExecuteQueueEntry(entry *QueueEntry) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in queue entry (player=#%d cmd=%q): %v",
+				entry.Player, entry.Command, r)
+		}
+	}()
+	g.ExecuteQueueEntry(entry)
 }
 
 // StartQueueProcessor starts the background queue processing loop.
@@ -675,7 +687,14 @@ func (g *Game) StartQueueProcessor() {
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
-			g.ProcessQueue()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("PANIC in queue processor: %v", r)
+					}
+				}()
+				g.ProcessQueue()
+			}()
 		}
 	}()
 }

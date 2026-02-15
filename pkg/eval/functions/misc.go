@@ -439,8 +439,12 @@ func strftimeToGo(format string, t time.Time) string {
 
 // Info functions
 
-func fnVersion(_ *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	buf.WriteString("GoTinyMUSH 0.1.0")
+func fnVersion(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if ctx.VersionStr != "" {
+		buf.WriteString(ctx.VersionStr)
+	} else {
+		buf.WriteString("GoTinyMUSH")
+	}
 }
 
 func fnMudname(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {

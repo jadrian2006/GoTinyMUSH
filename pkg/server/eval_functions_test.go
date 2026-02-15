@@ -726,8 +726,8 @@ func TestFnTimefmt(t *testing.T) {
 func TestFnVersionMudname(t *testing.T) {
 	e := newEvalTestEnv(t)
 	got := e.eval("[version()]")
-	if got != "GoTinyMUSH 0.1.0" {
-		t.Errorf("version() = %q", got)
+	if got != VersionString() {
+		t.Errorf("version() = %q, want %q", got, VersionString())
 	}
 	got = e.eval("[mudname()]")
 	if got != "GoTinyMUSH" {

@@ -1346,7 +1346,7 @@ func cmdPassword(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdVersion(g *Game, d *Descriptor, _ string, _ []string) {
-	d.Send("GoTinyMUSH 0.1.0")
+	d.Send(VersionString())
 }
 
 func cmdMotd(g *Game, d *Descriptor, args string, switches []string) {

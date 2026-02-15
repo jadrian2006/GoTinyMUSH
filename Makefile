@@ -8,6 +8,7 @@
 # Login with:   connect Wizard potrzebie
 
 BINARY    = gotinymush
+VERSION   = 0.2.0
 CONF      = data/crystal.yaml
 DB        = data/crystal.FLAT.LATEST
 BOLT      = data/game.bolt
@@ -15,12 +16,13 @@ TEXTDIR   = data/text
 ALIASCONF = data/goTinyAlias.conf
 COMSYSDB  = data/mod_comsys.db
 PORT      = 6886
+LDFLAGS   = -X github.com/crystal-mush/gotinymush/pkg/server.Version=$(VERSION)
 
 .PHONY: build dev run fresh clean test vet
 
 # Build the server binary
 build:
-	go build -o $(BINARY) ./cmd/server
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/server
 
 # Development mode: fresh reimport every restart (recommended during dev)
 dev: build

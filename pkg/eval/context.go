@@ -196,7 +196,8 @@ type EvalContext struct {
 	Functions map[string]*Function
 
 	// Game identity (set from game config)
-	MudName string
+	MudName    string
+	VersionStr string
 
 	// CArgs holds the current command arguments (%0-%9) from the calling context.
 	// This allows FnNoEval function handlers (iter, switch, etc.) to propagate
