@@ -152,6 +152,7 @@ func (s *Server) Start() error {
 			JWTExpiry:   s.Game.Conf.JWTExpiry,
 		}
 		s.webServer = NewWebServer(s.Game, cfg)
+		s.webServer.SetServer(s)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

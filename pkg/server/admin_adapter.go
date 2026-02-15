@@ -2,9 +2,13 @@ package server
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
+	"github.com/crystal-mush/gotinymush/pkg/archive"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +16,7 @@ import (
 // gameServerController adapts the Game to the admin.ServerController interface.
 type gameServerController struct {
 	game      *Game
+	server    *Server
 	startTime time.Time
 	running   bool
 }
@@ -127,4 +132,90 @@ func (c *gameServerController) GameStats() map[string]any {
 		}
 	}
 	return c.game.GameStats()
+}
+
+// WallAll sends a message to all connected players.
+func (c *gameServerController) WallAll(msg string) {
+	if c.game == nil || c.game.Conns == nil {
+		return
+	}
+	for _, d := range c.game.Conns.AllDescriptors() {
+		if d.State == ConnConnected {
+			d.Send(msg)
+		}
+	}
+}
+
+// CreateArchive creates a backup archive of all game data and returns the archive path.
+func (c *gameServerController) CreateArchive() (string, error) {
+	g := c.game
+	if g == nil {
+		return "", fmt.Errorf("no game instance")
+	}
+
+	// Determine archive directory
+	archiveDir := ""
+	if g.ConfPath != "" {
+		archiveDir = filepath.Join(filepath.Dir(g.ConfPath), "archives")
+	} else {
+		archiveDir = filepath.Join(os.TempDir(), "gotinymush-archives")
+	}
+
+	mudName := "GoTinyMUSH"
+	if g.Conf != nil && g.Conf.MudName != "" {
+		mudName = g.Conf.MudName
+	}
+
+	params := archive.ArchiveParams{
+		ArchiveDir:  archiveDir,
+		MudName:     mudName,
+		ObjectCount: len(g.DB.Objects),
+		DictDir:     g.DictDir,
+		TextDir:     g.TextDir,
+		ConfPath:    g.ConfPath,
+		AliasConfs:  g.AliasConfs,
+	}
+
+	if g.Store != nil {
+		params.BoltSnapshotFunc = func(dest string) error {
+			return g.Store.Backup(dest)
+		}
+	}
+
+	if g.SQLDB != nil {
+		params.SQLPath = g.SQLDB.Path()
+		params.SQLCheckpointFunc = func() error {
+			return g.SQLDB.Checkpoint()
+		}
+	}
+
+	return archive.CreateArchive(params)
+}
+
+// Shutdown disconnects all players and stops the server.
+func (c *gameServerController) Shutdown() {
+	c.running = false
+
+	// Disconnect all players
+	if c.game != nil && c.game.Conns != nil {
+		for _, d := range c.game.Conns.AllDescriptors() {
+			if d.State == ConnConnected {
+				c.game.DisconnectPlayer(d)
+			}
+			d.Close()
+		}
+	}
+
+	// Close listeners
+	if c.server != nil {
+		c.server.Stop()
+	}
+
+	log.Printf("admin: server shutdown complete")
+
+	// Exit process to trigger Docker restart
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}()
 }

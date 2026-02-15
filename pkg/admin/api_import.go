@@ -708,12 +708,16 @@ func (a *Admin) handleImportConvertConfig(w http.ResponseWriter, r *http.Request
 
 	fullPath := filepath.Join(a.session.StagingDir, req.Path)
 
-	if a.controller == nil {
-		writeError(w, http.StatusInternalServerError, "no server controller available")
+	var yamlBytes []byte
+	var err error
+	if a.controller != nil {
+		yamlBytes, err = a.controller.ConvertLegacyConfig(fullPath)
+	} else if a.ConvertLegacyConfigFunc != nil {
+		yamlBytes, err = a.ConvertLegacyConfigFunc(fullPath)
+	} else {
+		writeError(w, http.StatusInternalServerError, "no config converter available")
 		return
 	}
-
-	yamlBytes, err := a.controller.ConvertLegacyConfig(fullPath)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "conversion failed: "+err.Error())
 		return

@@ -69,6 +69,12 @@ export const api = {
   importPutFile: (role: string, name: string, content: string) =>
     request<any>('PUT', `/import/file/${encodeURIComponent(role)}/${encodeURIComponent(name)}`, { content }),
 
+  // Shutdown
+  serverShutdown: (delay?: number, reason?: string) =>
+    request<any>('POST', '/server/shutdown', { delay: delay || 300, reason: reason || '' }),
+  shutdownStatus: () => request<any>('GET', '/server/shutdown'),
+  shutdownCancel: () => request<any>('DELETE', '/server/shutdown'),
+
   // Setup
   setupStatus: () => request<any>('GET', '/setup/status'),
   createNewDB: () => request<any>('POST', '/import/create-new'),

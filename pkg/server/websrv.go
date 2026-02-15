@@ -45,8 +45,16 @@ type WebServer struct {
 	rl        *rateLimiter
 	upgrader  websocket.Upgrader
 	admin     *admin.Admin
+	ctrl      *gameServerController
 	metrics   *Metrics
 	startTime time.Time
+}
+
+// SetServer gives the admin controller a reference to the Server for shutdown support.
+func (ws *WebServer) SetServer(s *Server) {
+	if ws.ctrl != nil {
+		ws.ctrl.server = s
+	}
 }
 
 // NewWebServer creates a web server bound to the game.
@@ -116,6 +124,7 @@ func (ws *WebServer) registerRoutes(cfg WebConfig) {
 
 	// Admin panel
 	ctrl := &gameServerController{game: ws.game, running: true, startTime: time.Now()}
+	ws.ctrl = ctrl
 	ws.admin = admin.New(ctrl)
 	if ws.game.ConfPath != "" {
 		ws.admin.SetDataDir(filepath.Dir(ws.game.ConfPath))

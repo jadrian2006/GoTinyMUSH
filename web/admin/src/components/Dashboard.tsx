@@ -6,6 +6,10 @@ export function Dashboard() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [actionError, setActionError] = useState('')
+  const [shutdownStatus, setShutdownStatus] = useState<any>(null)
+  const [showShutdownDialog, setShowShutdownDialog] = useState(false)
+  const [shutdownDelay, setShutdownDelay] = useState(300)
+  const [shutdownReason, setShutdownReason] = useState('')
 
   const refresh = () => {
     setLoading(true)
@@ -15,9 +19,19 @@ export function Dashboard() {
       .finally(() => setLoading(false))
   }
 
+  const refreshShutdown = () => {
+    api.shutdownStatus()
+      .then(s => setShutdownStatus(s))
+      .catch(() => {})
+  }
+
   useEffect(() => {
     refresh()
-    const interval = setInterval(refresh, 5000)
+    refreshShutdown()
+    const interval = setInterval(() => {
+      refresh()
+      refreshShutdown()
+    }, 2000)
     return () => clearInterval(interval)
   }, [])
 
@@ -31,11 +45,22 @@ export function Dashboard() {
     }
   }
 
-  const handleStop = async () => {
+  const handleShutdown = async () => {
+    setActionError('')
+    setShowShutdownDialog(false)
+    try {
+      await api.serverShutdown(shutdownDelay, shutdownReason || undefined)
+      refreshShutdown()
+    } catch (e: any) {
+      setActionError(e.message)
+    }
+  }
+
+  const handleCancelShutdown = async () => {
     setActionError('')
     try {
-      await api.serverStop()
-      refresh()
+      await api.shutdownCancel()
+      refreshShutdown()
     } catch (e: any) {
       setActionError(e.message)
     }
@@ -193,6 +218,80 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Shutdown in progress banner */}
+      {shutdownStatus?.active && (
+        <div class="bg-red-500/10 border border-red-500/30 rounded p-4 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-red-300 uppercase tracking-wider">Shutdown In Progress</h3>
+            <button
+              onClick={handleCancelShutdown}
+              class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-xs transition-colors"
+            >
+              Cancel Shutdown
+            </button>
+          </div>
+          <div class="space-y-1 text-sm">
+            <div><span class="text-slate-500">Reason:</span> <span class="text-slate-300">{shutdownStatus.reason}</span></div>
+            <div><span class="text-slate-500">Stage:</span> <span class="text-slate-300">{shutdownStatus.stage}</span></div>
+            <div>
+              <span class="text-slate-500">Time remaining:</span>{' '}
+              <span class="text-red-300 font-mono text-lg">{formatUptime(shutdownStatus.remaining)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shutdown dialog */}
+      {showShutdownDialog && (
+        <div class="bg-slate-800 border border-red-500/30 rounded p-4 mb-4">
+          <h3 class="text-sm font-semibold text-red-300 mb-3">Graceful Shutdown</h3>
+          <p class="text-xs text-slate-400 mb-3">
+            Players will receive @wall warnings before the server shuts down. A backup archive will be created automatically.
+          </p>
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs text-slate-400 block mb-1">Delay</label>
+              <select
+                value={shutdownDelay}
+                onChange={(e) => setShutdownDelay(Number((e.target as HTMLSelectElement).value))}
+                class="w-full px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+              >
+                <option value={30}>30 seconds</option>
+                <option value={60}>1 minute</option>
+                <option value={120}>2 minutes</option>
+                <option value={300}>5 minutes (default)</option>
+                <option value={600}>10 minutes</option>
+                <option value={900}>15 minutes</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-400 block mb-1">Reason (optional)</label>
+              <input
+                type="text"
+                placeholder="Server maintenance"
+                value={shutdownReason}
+                onInput={(e) => setShutdownReason((e.target as HTMLInputElement).value)}
+                class="w-full px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div class="flex gap-2 pt-1">
+              <button
+                onClick={handleShutdown}
+                class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm transition-colors"
+              >
+                Begin Shutdown
+              </button>
+              <button
+                onClick={() => setShowShutdownDialog(false)}
+                class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div class="flex gap-3">
         {!status?.running ? (
           <button
@@ -202,14 +301,14 @@ export function Dashboard() {
           >
             Start Server
           </button>
-        ) : (
+        ) : !shutdownStatus?.active && !showShutdownDialog ? (
           <button
-            onClick={handleStop}
+            onClick={() => setShowShutdownDialog(true)}
             class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm transition-colors"
           >
-            Stop Server
+            Shutdown Server
           </button>
-        )}
+        ) : null}
         <button
           onClick={refresh}
           class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm transition-colors"

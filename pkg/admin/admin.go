@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/archive"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
@@ -50,6 +52,11 @@ type ServerController interface {
 	QueueStats() map[string]any
 	MemoryStats() map[string]any
 	GameStats() map[string]any
+
+	// Shutdown support.
+	WallAll(msg string)
+	CreateArchive() (string, error)
+	Shutdown()
 }
 
 // FileRole describes what role a discovered file plays in an import.
@@ -134,8 +141,25 @@ type Admin struct {
 	dataDir  string // data directory (e.g. /game/data)
 	confPath string // config file path (e.g. /game/data/game.yaml)
 
+	// Standalone config converter for setup mode (when controller is nil)
+	ConvertLegacyConfigFunc func(confPath string) ([]byte, error)
+
+	// Graceful shutdown state
+	shutdownCancel context.CancelFunc
+	shutdownStatus atomic.Value // stores *ShutdownStatus
+
 	// Authentication
 	auth *adminAuth
+}
+
+// ShutdownStatus tracks the state of a pending graceful shutdown.
+type ShutdownStatus struct {
+	Active    bool      `json:"active"`
+	Reason    string    `json:"reason"`
+	StartedAt time.Time `json:"started_at"`
+	ShutdownAt time.Time `json:"shutdown_at"`
+	Remaining int       `json:"remaining"` // seconds until shutdown
+	Stage     string    `json:"stage"`     // "warning", "countdown", "archiving", "disconnecting", "done"
 }
 
 // New creates an Admin handler. If controller is nil, the admin panel
@@ -196,6 +220,10 @@ func (a *Admin) Handler(prefix string) http.Handler {
 	mux.HandleFunc("POST /api/import/parse-comsys", a.handleImportParseComsys)
 	mux.HandleFunc("GET /api/import/file/{role}/{name}", a.handleImportFileRead)
 	mux.HandleFunc("PUT /api/import/file/{role}/{name}", a.handleImportFileWrite)
+
+	mux.HandleFunc("POST /api/server/shutdown", a.handleServerShutdown)
+	mux.HandleFunc("GET /api/server/shutdown", a.handleShutdownStatus)
+	mux.HandleFunc("DELETE /api/server/shutdown", a.handleShutdownCancel)
 
 	mux.HandleFunc("GET /api/setup/status", a.handleSetupStatus)
 	mux.HandleFunc("POST /api/import/create-new", a.handleCreateNewDB)

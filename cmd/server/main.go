@@ -19,6 +19,7 @@ import (
 	"github.com/crystal-mush/gotinymush/pkg/eval/functions"
 	"github.com/crystal-mush/gotinymush/pkg/flatfile"
 	"github.com/crystal-mush/gotinymush/pkg/server"
+	"gopkg.in/yaml.v3"
 )
 
 // envDefault returns the environment variable value if set, otherwise the fallback.
@@ -507,6 +508,13 @@ func startSetupMode(confFile string, port int, gc *server.GameConf, dataDir stri
 	adminPanel := admin.New(nil)
 	adminPanel.SetDataDir(dataDir)
 	adminPanel.SetConfPath(confFile)
+	adminPanel.ConvertLegacyConfigFunc = func(confPath string) ([]byte, error) {
+		gc, err := server.LoadGameConf(confPath)
+		if err != nil {
+			return nil, err
+		}
+		return yaml.Marshal(gc)
+	}
 	setupStart := time.Now()
 	mux := http.NewServeMux()
 
