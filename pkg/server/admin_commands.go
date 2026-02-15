@@ -682,10 +682,33 @@ func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
 	d.Send(fmt.Sprintf("  %d active connections", g.Conns.Count()))
 }
 
-func cmdPs(g *Game, d *Descriptor, _ string, _ []string) {
+func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
 	imm, wait, sem := g.Queue.Stats()
 	d.Send(fmt.Sprintf("Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
 	d.Send(fmt.Sprintf("Total: %d entries", imm+wait+sem))
+
+	if HasSwitch(switches, "all") {
+		entries := g.Queue.Peek(50)
+		if len(entries) == 0 {
+			d.Send("(no entries)")
+			return
+		}
+		for i, e := range entries {
+			name := g.PlayerName(e.Player)
+			cmd := e.Command
+			if len(cmd) > 60 {
+				cmd = cmd[:60] + "..."
+			}
+			qtype := "imm"
+			if !e.WaitUntil.IsZero() {
+				qtype = "wait"
+			}
+			if e.SemObj >= 0 {
+				qtype = "sem"
+			}
+			d.Send(fmt.Sprintf("  [%d] %s player=%s(#%d) cmd=%s", i+1, qtype, name, e.Player, cmd))
+		}
+	}
 }
 
 // --- Softcode Commands ---

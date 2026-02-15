@@ -232,3 +232,29 @@ func (q *CommandQueue) Stats() (immediate, waiting, semaphore int) {
 	defer q.mu.Unlock()
 	return len(q.immediate), len(q.waitQueue), len(q.semQueue)
 }
+
+// Peek returns up to n entries from all queues for inspection (does not remove them).
+func (q *CommandQueue) Peek(n int) []*QueueEntry {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var result []*QueueEntry
+	for _, e := range q.immediate {
+		if len(result) >= n {
+			break
+		}
+		result = append(result, e)
+	}
+	for _, e := range q.waitQueue {
+		if len(result) >= n {
+			break
+		}
+		result = append(result, e)
+	}
+	for _, e := range q.semQueue {
+		if len(result) >= n {
+			break
+		}
+		result = append(result, e)
+	}
+	return result
+}
