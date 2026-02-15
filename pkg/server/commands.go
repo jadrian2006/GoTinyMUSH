@@ -253,6 +253,7 @@ func InitCommands() map[string]*Command {
 	registerNG("@cboot", cmdCboot)
 	registerNG("@cemit", cmdCemit)
 	registerNG("@cset", cmdCset)
+	registerNG("@cinfo", cmdCinfo)
 
 	// Mail system (no guest)
 	registerNG("@mail", cmdMail)

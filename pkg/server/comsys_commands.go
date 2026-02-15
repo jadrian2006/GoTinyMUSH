@@ -414,3 +414,71 @@ func cmdCset(g *Game, d *Descriptor, args string, _ []string) {
 		g.Store.PutChannel(ch)
 	}
 }
+
+// cmdCinfo handles "@cinfo <channel>" — show detailed channel configuration.
+func cmdCinfo(g *Game, d *Descriptor, args string, _ []string) {
+	if g.Comsys == nil {
+		d.Send("The channel system is not enabled.")
+		return
+	}
+	chanName := strings.TrimSpace(args)
+	if chanName == "" {
+		d.Send("Usage: @cinfo <channel>")
+		return
+	}
+	ch := g.Comsys.GetChannel(chanName)
+	if ch == nil {
+		d.Send(fmt.Sprintf("Channel %q not found.", chanName))
+		return
+	}
+	if !Wizard(g, d.Player) && d.Player != ch.Owner {
+		d.Send("Permission denied. You must be the channel owner or a Wizard.")
+		return
+	}
+	owner := g.PlayerName(ch.Owner)
+	d.Send(fmt.Sprintf("--- Channel: %s ---", ch.Name))
+	d.Send(fmt.Sprintf("  Owner:       %s (#%d)", owner, ch.Owner))
+	d.Send(fmt.Sprintf("  Description: %s", ch.Description))
+	d.Send(fmt.Sprintf("  Header:      %s", ch.Header))
+	d.Send(fmt.Sprintf("  Messages:    %d", ch.NumSent))
+	// Flags
+	var flags []string
+	if ch.Flags&gamedb.ChanPublic != 0 {
+		flags = append(flags, "Public")
+	} else {
+		flags = append(flags, "Private")
+	}
+	if ch.Flags&gamedb.ChanLoud != 0 {
+		flags = append(flags, "Loud")
+	}
+	if ch.Flags&gamedb.ChanObject != 0 {
+		flags = append(flags, "Objects")
+	}
+	if ch.Flags&gamedb.ChanNoTitles != 0 {
+		flags = append(flags, "NoTitles")
+	}
+	d.Send(fmt.Sprintf("  Flags:       %s (0x%08x)", strings.Join(flags, " "), ch.Flags))
+	// Locks
+	joinLock := ch.JoinLock
+	if joinLock == "" {
+		joinLock = "(none)"
+	}
+	transLock := ch.TransLock
+	if transLock == "" {
+		transLock = "(none)"
+	}
+	recvLock := ch.RecvLock
+	if recvLock == "" {
+		recvLock = "(none)"
+	}
+	d.Send(fmt.Sprintf("  Join Lock:   %s", joinLock))
+	d.Send(fmt.Sprintf("  Trans Lock:  %s", transLock))
+	d.Send(fmt.Sprintf("  Recv Lock:   %s", recvLock))
+	// Charge
+	if ch.Charge > 0 || ch.ChargeCollected > 0 {
+		d.Send(fmt.Sprintf("  Charge:      %d (collected: %d)", ch.Charge, ch.ChargeCollected))
+	}
+	// Subscriber count
+	subs := g.Comsys.ChannelSubscribers(ch.Name)
+	d.Send(fmt.Sprintf("  Subscribers: %d", len(subs)))
+}
