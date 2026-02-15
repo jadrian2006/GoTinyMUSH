@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -24,6 +25,10 @@ const (
 func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) bool {
 	// Objects to search: player itself, inventory, room, room contents, master room contents
 	var searchObjs []gamedb.DBRef
+	debugDollar := strings.HasPrefix(input, "+") // debug + commands
+	if debugDollar {
+		log.Printf("DOLLARDEBUG MatchDollarCommands player=#%d input=%q", player, input)
+	}
 
 	// Player's own attributes
 	searchObjs = append(searchObjs, player)
@@ -89,11 +94,29 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 		}
 	}
 
+	if debugDollar {
+		names := make([]string, len(searchObjs))
+		for i, ref := range searchObjs {
+			if o, ok := g.DB.Objects[ref]; ok {
+				names[i] = fmt.Sprintf("#%d(%s)", ref, o.Name)
+			} else {
+				names[i] = fmt.Sprintf("#%d(?)", ref)
+			}
+		}
+		log.Printf("DOLLARDEBUG search list (%d objs): %v", len(searchObjs), names)
+	}
+
 	// Search each object's attributes
 	for _, objRef := range searchObjs {
 		if g.matchDollarOnObject(objRef, player, cause, input) {
+			if debugDollar {
+				log.Printf("DOLLARDEBUG MATCHED on #%d", objRef)
+			}
 			return true
 		}
+	}
+	if debugDollar {
+		log.Printf("DOLLARDEBUG NO MATCH for %q", input)
 	}
 	return false
 }
@@ -122,21 +145,31 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		return false
 	}
 
+	debugDollar := strings.HasPrefix(input, "+") && objRef == 123
+
 	// Skip halted objects
 	if obj.HasFlag(gamedb.FlagHalt) {
+		if debugDollar {
+			log.Printf("DOLLARDEBUG #%d HALTED, skipping", objRef)
+		}
 		return false
 	}
 
+	dollarCount := 0
 	for _, attr := range obj.Attrs {
 		text := eval.StripAttrPrefix(attr.Value)
 		if !strings.HasPrefix(text, "$") {
 			continue
 		}
+		dollarCount++
 
 		// Parse attribute flags from the raw value
 		// Format: "owner:flags:$pattern:command"
 		attrFlags := parseAttrFlags(attr.Value)
 		if attrFlags&AFNoProg != 0 {
+			if debugDollar {
+				log.Printf("DOLLARDEBUG #%d attr %d: NOPROG, skipping", objRef, attr.Number)
+			}
 			continue
 		}
 
@@ -144,6 +177,9 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		rest := text[1:] // skip $
 		colonIdx := findUnescapedColon(rest)
 		if colonIdx < 0 {
+			if debugDollar {
+				log.Printf("DOLLARDEBUG #%d attr %d: no colon found in %q", objRef, attr.Number, text[:min(60, len(text))])
+			}
 			continue
 		}
 		pattern := rest[:colonIdx]
@@ -151,6 +187,9 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 
 		// Match the pattern against input
 		matched, args := matchWild(pattern, input)
+		if debugDollar && dollarCount <= 5 {
+			log.Printf("DOLLARDEBUG #%d attr %d: pattern=%q input=%q matched=%v", objRef, attr.Number, pattern, input, matched)
+		}
 		if !matched {
 			continue
 		}
