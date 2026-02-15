@@ -248,6 +248,10 @@ func InitCommands() map[string]*Command {
 	register("@cemit", cmdCemit)
 	register("@cset", cmdCset)
 
+	// Mail system
+	register("@mail", cmdMail)
+	register("-", cmdMailDash)
+
 	return cmds
 }
 
@@ -989,6 +993,7 @@ type Game struct {
 	Texts       *TextFiles       // Cached text files (connect.txt, motd.txt, etc.)
 	TextDir     string           // Path to text files directory (for @readcache)
 	Comsys      *Comsys          // Channel/communication system (nil if disabled)
+	Mail        *Mail            // Built-in mail system (nil if disabled)
 	Conf        *GameConf        // Game configuration from conf file
 	FuncAliases map[string]string // Function aliases (alias -> target, uppercase)
 	BadNames    []string          // Forbidden player names from alias config

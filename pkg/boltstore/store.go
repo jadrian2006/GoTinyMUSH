@@ -25,7 +25,7 @@ func Open(path string) (*Store, error) {
 
 	// Ensure all buckets exist.
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts} {
+		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}

@@ -328,3 +328,35 @@ func (g *Game) PersistStructInstance(player gamedb.DBRef, name string, inst *gam
 		g.Store.PutStructInstance(player, name, inst)
 	}
 }
+
+// MailCount returns (total, unread, cleared) for a player.
+func (g *Game) MailCount(player gamedb.DBRef) (int, int, int) {
+	if g.Mail == nil {
+		return -1, -1, -1
+	}
+	return g.Mail.CountMessages(player)
+}
+
+// MailFrom returns the sender of message #num for player.
+func (g *Game) MailFrom(player gamedb.DBRef, num int) gamedb.DBRef {
+	if g.Mail == nil {
+		return gamedb.Nothing
+	}
+	msg := g.Mail.GetMessage(player, num)
+	if msg == nil {
+		return gamedb.Nothing
+	}
+	return msg.From
+}
+
+// MailSubject returns the subject of message #num for player.
+func (g *Game) MailSubject(player gamedb.DBRef, num int) string {
+	if g.Mail == nil {
+		return ""
+	}
+	msg := g.Mail.GetMessage(player, num)
+	if msg == nil {
+		return ""
+	}
+	return msg.Subject
+}

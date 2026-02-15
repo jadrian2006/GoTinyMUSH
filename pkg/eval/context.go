@@ -138,6 +138,15 @@ type GameState interface {
 	// PersistStructInstance saves or deletes a structure instance.
 	// Pass nil inst to delete.
 	PersistStructInstance(player gamedb.DBRef, name string, inst *gamedb.StructInstance)
+	// MailCount returns (total, unread, cleared) for a player's mailbox.
+	// Returns (-1, -1, -1) if mail is disabled.
+	MailCount(player gamedb.DBRef) (int, int, int)
+	// MailFrom returns the sender dbref of message #num for player.
+	// Returns gamedb.Nothing if not found or mail disabled.
+	MailFrom(player gamedb.DBRef, num int) gamedb.DBRef
+	// MailSubject returns the subject of message #num for player.
+	// Returns "" if not found or mail disabled.
+	MailSubject(player gamedb.DBRef, num int) string
 }
 
 // EvalContext is the execution context for MUSH expression evaluation.

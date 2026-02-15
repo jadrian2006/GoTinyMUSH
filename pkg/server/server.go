@@ -383,6 +383,14 @@ func (s *Server) handleConnect(d *Descriptor, user, password string) {
 	// Show current room
 	s.Game.ShowRoom(d, loc)
 
+	// Announce unread mail
+	if s.Game.Mail != nil {
+		total, unread, _ := s.Game.Mail.CountMessages(player)
+		if total > 0 && unread > 0 {
+			d.Send(fmt.Sprintf("You have %d unread mail message(s). Type @mail to read.", unread))
+		}
+	}
+
 	// Fire ACONNECT triggers
 	connCount := len(s.Game.Conns.GetByPlayer(player))
 	s.Game.QueueAttrAction(player, player, 35, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 35

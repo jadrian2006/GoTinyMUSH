@@ -345,8 +345,19 @@ func main() {
 		}
 	}
 
-	// Load comsys (channel system)
-	loadComsys(srv.Game, store, *comsysDB)
+	// Load comsys (channel system) if enabled
+	if gc.ComsysEnabled {
+		loadComsys(srv.Game, store, *comsysDB)
+	} else {
+		log.Printf("Comsys disabled by config")
+	}
+
+	// Load mail system if enabled
+	if gc.MailEnabled {
+		loadMail(srv.Game, store, gc.MailExpiration)
+	} else {
+		log.Printf("Mail system disabled by config")
+	}
 
 	// Load structures from bbolt
 	loadStructures(store)
@@ -457,4 +468,26 @@ func loadStructures(store *boltstore.Store) {
 	}
 	functions.LoadStructStore(defs, insts)
 	log.Printf("Loaded %d structure defs, %d instances from bolt", defCount, instCount)
+}
+
+// loadMail initializes the mail system from bbolt.
+func loadMail(game *server.Game, store *boltstore.Store, expireDays int) {
+	m := server.NewMail(expireDays)
+
+	if store != nil && store.HasMailData() {
+		msgs, err := store.LoadMail()
+		if err != nil {
+			log.Printf("WARNING: failed to load mail from bolt: %v", err)
+		} else {
+			m.LoadMessages(msgs)
+			total := 0
+			for _, inbox := range msgs {
+				total += len(inbox)
+			}
+			log.Printf("Loaded %d mail messages for %d players from bolt", total, len(msgs))
+		}
+	}
+
+	game.Mail = m
+	log.Printf("Mail system enabled (expiration: %d days)", expireDays)
 }

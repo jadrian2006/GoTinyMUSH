@@ -544,6 +544,11 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("ETA", fnEta, 4, 0)
 	ctx.RegisterFunction("INTERCEPT", fnIntercept, 5, 0)
 
+	// Mail system
+	ctx.RegisterFunction("MAIL", fnMail, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("MAILFROM", fnMailfrom, 1, 0)
+	ctx.RegisterFunction("MAILSUBJ", fnMailsubj, 1, 0)
+
 	// Structure/instance system
 	ctx.RegisterFunction("STRUCTURE", fnStructure, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("CONSTRUCT", fnConstruct, 0, eval.FnVarArgs)

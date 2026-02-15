@@ -71,6 +71,11 @@ type GameConf struct {
 	GuestPassword  string `yaml:"guest_password"`
 	GuestStartRoom int    `yaml:"guest_start_room"`
 
+	// --- Module toggles ---
+	MailEnabled   bool `yaml:"mail_enabled"`
+	ComsysEnabled bool `yaml:"comsys_enabled"`
+	MailExpiration int  `yaml:"mail_expiration"` // Days before auto-expire, 0 = never
+
 	// --- Channels (stored for future comsys) ---
 	PublicChannel string `yaml:"public_channel"`
 	PublicCalias  string `yaml:"public_calias"`
@@ -167,6 +172,9 @@ func DefaultGameConf() *GameConf {
 		GuestStartRoom:          -1,
 		GodDBRef:                1,
 		ZoneNestLimit:           20,
+		MailEnabled:             true,
+		ComsysEnabled:           true,
+		MailExpiration:          14,
 		SpellcheckEnabled:       false,
 		SpellcheckURL:           "https://api.languagetool.org/v2/check",
 		SQLEnabled:              false,
@@ -370,6 +378,14 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.GuestSuffixes = val
 		case "guest_basename":
 			gc.GuestBasename = val
+
+		// --- Module toggles ---
+		case "mail_enabled":
+			gc.MailEnabled = parseBool(val)
+		case "comsys_enabled":
+			gc.ComsysEnabled = parseBool(val)
+		case "mail_expiration":
+			gc.MailExpiration = atoi(val, gc.MailExpiration)
 
 		// --- Channels ---
 		case "public_channel":

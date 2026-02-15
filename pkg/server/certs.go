@@ -67,8 +67,14 @@ func SetupTLS(domain, certFile, keyFile, certDir string) (*TLSResult, error) {
 // generateSelfSigned creates a self-signed certificate and saves it to certDir.
 // If cert/key files already exist in certDir, they are loaded instead.
 func generateSelfSigned(certDir string) (*tls.Config, error) {
-	if err := os.MkdirAll(certDir, 0700); err != nil {
-		return nil, fmt.Errorf("creating cert dir: %w", err)
+	if err := os.MkdirAll(certDir, 0755); err != nil {
+		// Fallback to /tmp/certs if primary dir fails (e.g., Docker permission issues)
+		fallback := filepath.Join(os.TempDir(), "gotinymush-certs")
+		log.Printf("tls: cannot create cert dir %s (%v), falling back to %s", certDir, err, fallback)
+		certDir = fallback
+		if err := os.MkdirAll(certDir, 0755); err != nil {
+			return nil, fmt.Errorf("creating cert dir: %w", err)
+		}
 	}
 
 	certPath := filepath.Join(certDir, "self-signed.crt")

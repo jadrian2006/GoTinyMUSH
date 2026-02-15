@@ -16,6 +16,7 @@ func init() {
 	gob.Register(gamedb.ChanAlias{})
 	gob.Register(gamedb.StructDef{})
 	gob.Register(gamedb.StructInstance{})
+	gob.Register(gamedb.MailMessage{})
 }
 
 // encodeObject serializes an Object to bytes using gob.

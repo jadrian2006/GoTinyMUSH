@@ -16,6 +16,7 @@ var (
 	bucketChanAliases = []byte("chanaliases")
 	bucketStructDefs  = []byte("structdefs")
 	bucketStructInsts = []byte("structinsts")
+	bucketMail        = []byte("mail")
 )
 
 // Meta key constants.
