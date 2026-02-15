@@ -226,3 +226,56 @@ func truncate(s string, max int) string {
 	}
 	return s[:max-3] + "..."
 }
+
+// windowAroundHighlights returns a substring of text centered around the first highlight,
+// with adjusted highlight positions. Returns (windowText, adjustedHighlights).
+// If no highlights, falls back to simple truncation from the start.
+func windowAroundHighlights(text string, highlights []Highlight, maxLen int) (string, []Highlight) {
+	if len(text) <= maxLen {
+		return text, highlights
+	}
+	if len(highlights) == 0 {
+		return truncate(text, maxLen), nil
+	}
+
+	// Find the span covering all highlights
+	firstStart := highlights[0].Start
+	lastEnd := highlights[len(highlights)-1].End
+
+	// Calculate window: try to center around the highlight span
+	hlSpan := lastEnd - firstStart
+	contextBefore := (maxLen - hlSpan) / 3     // 1/3 context before
+	if contextBefore < 20 { contextBefore = 20 }
+
+	winStart := firstStart - contextBefore
+	if winStart < 0 { winStart = 0 }
+	winEnd := winStart + maxLen
+	if winEnd > len(text) {
+		winEnd = len(text)
+		winStart = winEnd - maxLen
+		if winStart < 0 { winStart = 0 }
+	}
+
+	// Build window text with ellipsis indicators
+	prefix := ""
+	suffix := ""
+	if winStart > 0 { prefix = "..." }
+	if winEnd < len(text) { suffix = "..." }
+
+	window := prefix + text[winStart:winEnd] + suffix
+	prefixLen := len(prefix)
+
+	// Adjust highlight positions relative to window
+	var adjusted []Highlight
+	for _, hl := range highlights {
+		aStart := hl.Start - winStart + prefixLen
+		aEnd := hl.End - winStart + prefixLen
+		if aStart < 0 { aStart = 0 }
+		if aEnd > len(window) { aEnd = len(window) }
+		if aStart < aEnd {
+			adjusted = append(adjusted, Highlight{Start: aStart, End: aEnd})
+		}
+	}
+
+	return window, adjusted
+}

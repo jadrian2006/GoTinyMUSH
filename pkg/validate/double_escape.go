@@ -73,21 +73,17 @@ func (c *DoubleEscapeChecker) Check(db *gamedb.Database) []Finding {
 				old := text[m.start:m.end]
 				fixed := fixSpan(old)
 				effectParts = append(effectParts, fmt.Sprintf("%q → %q", old, fixed))
-				// Highlight in current (only if within truncation limit)
-				if m.start < 200 {
-					end := m.end
-					if end > 200 { end = 200 }
-					currentHL = append(currentHL, Highlight{Start: m.start, End: end})
-				}
-				// Highlight in proposed (adjusted for size difference)
+				currentHL = append(currentHL, Highlight{Start: m.start, End: m.end})
 				pStart := m.start + offset
 				pEnd := pStart + len(fixed)
-				if pStart < 200 {
-					if pEnd > 200 { pEnd = 200 }
-					proposedHL = append(proposedHL, Highlight{Start: pStart, End: pEnd})
-				}
+				proposedHL = append(proposedHL, Highlight{Start: pStart, End: pEnd})
 				offset += len(fixed) - len(old)
 			}
+
+			// Window the text around the highlighted areas
+			const displayMax = 300
+			currentText, currentHLAdj := windowAroundHighlights(text, currentHL, displayMax)
+			proposedText, proposedHLAdj := windowAroundHighlights(proposed, proposedHL, displayMax)
 
 			// Capture for fix closure
 			capturedObj := obj
@@ -103,10 +99,10 @@ func (c *DoubleEscapeChecker) Check(db *gamedb.Database) []Finding {
 				AttrName:    attrName,
 				OwnerRef:    obj.Owner,
 				Description: fmt.Sprintf("Double-escaped brackets in %s on #%d (%s)", attrName, obj.DBRef, truncate(obj.Name, 30)),
-				Current:     truncate(text, 200),
-				Proposed:    truncate(proposed, 200),
-				CurrentHL:   currentHL,
-				ProposedHL:  proposedHL,
+				Current:     currentText,
+				Proposed:    proposedText,
+				CurrentHL:   currentHLAdj,
+				ProposedHL:  proposedHLAdj,
 				Effect:      strings.Join(effectParts, "; "),
 				Explanation: `C TinyMUSH evaluates queued commands twice, so game authors wrote \\[text\\] to get [text] after double processing. GoTinyMUSH evaluates correctly in a single pass, so the extra backslashes produce \text\ instead. The fix removes the extra escaping so text displays as originally intended.`,
 				Fixable:     true,
