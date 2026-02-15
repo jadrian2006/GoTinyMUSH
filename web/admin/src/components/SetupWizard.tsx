@@ -46,10 +46,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     const poll = setInterval(async () => {
       attempts++
       try {
-        const status = await api.serverStatus()
-        if (status) {
-          clearInterval(poll)
-          onComplete()
+        // Use /health endpoint (no auth required) instead of admin API
+        const res = await fetch('/health')
+        if (res.ok) {
+          const data = await res.json()
+          if (data.game_running) {
+            clearInterval(poll)
+            onComplete()
+          }
         }
       } catch {
         if (attempts > 30) {
