@@ -45,6 +45,7 @@ type Descriptor struct {
 	IdleTime  time.Duration
 	DoingStr  string // @doing text
 	ProgData  *ProgramData // Active @program state (nil = not programmed)
+	LastRData *eval.RegisterData // Snapshot of q-registers during queue execution (for @program)
 	CmdCount  int    // Total commands entered this session
 	BytesSent int    // Total bytes sent to this connection
 	BytesRecv int    // Total bytes received from this connection

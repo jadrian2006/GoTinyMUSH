@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"log"
 	"strings"
 
@@ -9,13 +8,17 @@ import (
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
+// progPrompt is the standard prompt sent to players in @program mode.
+// Includes telnet Go-Ahead (IAC GA = \xff\xf9) matching TinyMUSH 3.3 behavior.
+const progPrompt = "> \xff\xf9"
+
 // ProgramData holds the state for an active @program session on a descriptor.
 type ProgramData struct {
 	WaitCause gamedb.DBRef      // Object that initiated @program (enactor)
 	WaitData  *eval.RegisterData // Saved q-registers from initiating context
 }
 
-// cmdProgram implements @program <player>=<obj>/<attr>
+// cmdProgram implements @program <player>=<obj>/<attr>[:<prompt>]
 // Captures the target player's next line of input and executes the specified
 // attribute with the input available as %0.
 func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
@@ -46,14 +49,23 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	// Parse obj/attr
+	// Parse obj/attr — split on first '/' to get obj and attr[:prompt]
 	slashIdx := strings.IndexByte(objAttr, '/')
 	if slashIdx < 0 {
 		d.Send("@program: Usage: @program <player>=<obj>/<attr>")
 		return
 	}
 	objStr := strings.TrimSpace(objAttr[:slashIdx])
-	attrName := strings.ToUpper(strings.TrimSpace(objAttr[slashIdx+1:]))
+	attrPart := strings.TrimSpace(objAttr[slashIdx+1:])
+
+	// Parse optional :prompt from attrPart (e.g. "ATTR:Enter your name>")
+	var attrName, customPrompt string
+	if colonIdx := strings.IndexByte(attrPart, ':'); colonIdx >= 0 {
+		attrName = strings.ToUpper(strings.TrimSpace(attrPart[:colonIdx]))
+		customPrompt = attrPart[colonIdx+1:]
+	} else {
+		attrName = strings.ToUpper(attrPart)
+	}
 
 	// Resolve the object relative to the caller
 	obj := g.MatchObject(d.Player, objStr)
@@ -72,7 +84,7 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 	// Store the command text as A_PROGCMD on the target player
 	g.SetAttrRaw(target, gamedb.A_PROGCMD, cmdText, d.Player, gamedb.AFInternal|gamedb.AFDark)
 
-	// Find a descriptor for the target player and set program state
+	// Find all descriptors for the target player and set program state
 	targetDescs := g.Conns.GetByPlayer(target)
 	if len(targetDescs) == 0 {
 		d.Send("@program: That player is not connected.")
@@ -81,9 +93,28 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	targetDesc := targetDescs[0]
-	targetDesc.ProgData = &ProgramData{
-		WaitCause: d.Player,
+	// Clone q-registers from the calling descriptor's last queue context (if any)
+	var waitData *eval.RegisterData
+	if d.LastRData != nil {
+		waitData = d.LastRData.Clone()
+	}
+
+	// Program ALL of the target player's descriptors
+	for _, td := range targetDescs {
+		td.ProgData = &ProgramData{
+			WaitCause: d.Player,
+			WaitData:  waitData,
+		}
+	}
+
+	// Send custom prompt message if provided, then the standard "> " prompt
+	if customPrompt != "" {
+		for _, td := range targetDescs {
+			td.Send(customPrompt)
+		}
+	}
+	for _, td := range targetDescs {
+		td.SendNoNewline(progPrompt)
 	}
 
 	log.Printf("@program: player #%d programmed by #%d, attr %s on #%d",
@@ -95,12 +126,10 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 func cmdQuitProgram(g *Game, d *Descriptor, args string, switches []string) {
 	args = strings.TrimSpace(args)
 
-	var targetDesc *Descriptor
 	var target gamedb.DBRef
 
 	if args == "" {
 		// Cancel own program
-		targetDesc = d
 		target = d.Player
 	} else {
 		// Cancel another player's program
@@ -118,15 +147,26 @@ func cmdQuitProgram(g *Game, d *Descriptor, args string, switches []string) {
 			d.Send("That player is not connected.")
 			return
 		}
-		targetDesc = descs[0]
 	}
 
-	if targetDesc.ProgData == nil {
+	// Check if any descriptor is actually programmed
+	targetDescs := g.Conns.GetByPlayer(target)
+	inProg := false
+	for _, td := range targetDescs {
+		if td.ProgData != nil {
+			inProg = true
+			break
+		}
+	}
+	if !inProg {
 		d.Send("That player is not in a program.")
 		return
 	}
 
-	targetDesc.ProgData = nil
+	// Clear ALL descriptors for the target player
+	for _, td := range targetDescs {
+		td.ProgData = nil
+	}
 	g.removeAttr(target, gamedb.A_PROGCMD)
 	g.Conns.SendToPlayer(target, "Program terminated.")
 }
@@ -137,14 +177,18 @@ func (g *Game) HandleProgInput(d *Descriptor, input string) {
 	// Retrieve A_PROGCMD text from the player object
 	cmdText := g.GetAttrTextDirect(d.Player, gamedb.A_PROGCMD)
 	if cmdText == "" {
-		// No command stored — clear program state
-		d.ProgData = nil
+		// No command stored — clear program state on all descriptors
+		for _, td := range g.Conns.GetByPlayer(d.Player) {
+			td.ProgData = nil
+		}
 		return
 	}
 
-	// Save and clear program state
+	// Save and clear program state on ALL of the player's descriptors
 	progData := d.ProgData
-	d.ProgData = nil
+	for _, td := range g.Conns.GetByPlayer(d.Player) {
+		td.ProgData = nil
+	}
 	g.removeAttr(d.Player, gamedb.A_PROGCMD)
 
 	// Create a queue entry with input as %0
@@ -174,9 +218,4 @@ func (g *Game) removeAttr(obj gamedb.DBRef, attrNum int) {
 			return
 		}
 	}
-}
-
-// formatProgPrompt formats a prompt for a programmed player.
-func formatProgPrompt(playerName string) string {
-	return fmt.Sprintf("[%s]>", playerName)
 }

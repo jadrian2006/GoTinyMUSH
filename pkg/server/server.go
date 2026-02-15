@@ -262,6 +262,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 				if strings.HasPrefix(line, "|") {
 					// Pipe escape: execute remainder as normal command
 					DispatchCommand(s.Game, d, line[1:])
+					// Re-send prompt if still in program mode
+					if d.ProgData != nil {
+						d.SendNoNewline(progPrompt)
+					}
 				} else if strings.EqualFold(strings.TrimSpace(line), "@quitprogram") {
 					// Allow @quitprogram to work normally
 					DispatchCommand(s.Game, d, line)

@@ -253,6 +253,13 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 	// Evaluate the command string with args as %0-%9
 	evaluated := ctx.Exec(entry.Command, eval.EvFCheck|eval.EvEval|eval.EvStrip, entry.Args)
 
+	// Snapshot q-registers onto descriptors so @program can capture them.
+	descs := g.Conns.GetByPlayer(entry.Player)
+	rDataSnapshot := ctx.RData.Clone()
+	for _, dd := range descs {
+		dd.LastRData = rDataSnapshot
+	}
+
 	// Split on semicolons (respecting braces/brackets) and execute each command.
 	// This mirrors TinyMUSH's process_cmdline which uses parse_to(&cmdline, ';', 0).
 	cmds := splitSemicolonRespectingBraces(evaluated)
@@ -262,13 +269,17 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 			continue
 		}
 		// Find a descriptor for this player to dispatch through
-		descs := g.Conns.GetByPlayer(entry.Player)
 		if len(descs) > 0 {
 			DispatchCommand(g, descs[0], cmd)
 		} else {
 			// Object executing without a connected player - execute internally
 			g.ExecuteAsObject(entry.Player, entry.Cause, cmd)
 		}
+	}
+
+	// Clear q-register snapshot from descriptors
+	for _, dd := range descs {
+		dd.LastRData = nil
 	}
 
 	// Handle any notifications from the eval context
