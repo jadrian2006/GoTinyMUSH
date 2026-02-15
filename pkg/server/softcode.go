@@ -647,8 +647,8 @@ func (g *Game) ProcessQueue() {
 	// Move ready entries from wait queue
 	g.Queue.PromoteReady()
 
-	// Process up to N entries per tick
-	maxPerTick := 100
+	// Process up to N entries per tick (10ms tick × 500/tick = 50,000 entries/sec max)
+	maxPerTick := 500
 	for i := 0; i < maxPerTick; i++ {
 		entry := g.Queue.PopImmediate()
 		if entry == nil {
@@ -661,7 +661,7 @@ func (g *Game) ProcessQueue() {
 // StartQueueProcessor starts the background queue processing loop.
 func (g *Game) StartQueueProcessor() {
 	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
+		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
 			g.ProcessQueue()
