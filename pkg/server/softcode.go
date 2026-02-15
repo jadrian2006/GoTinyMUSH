@@ -303,10 +303,38 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 			continue
 		}
 
-		// Evaluate each individual command with args as %0-%9
-		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval|eval.EvStrip, entry.Args)
+		// Evaluate each individual command with args as %0-%9.
+		// We do NOT use EvStrip here so that brace grouping is preserved for
+		// commands like @switch that need to split on commas respecting braces.
+		// In C TinyMUSH, parse_arglist splits args by parse_to (brace-aware)
+		// BEFORE evaluation; we approximate this by preserving braces through eval.
+		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval, entry.Args)
 		evaluated = strings.TrimSpace(evaluated)
 		if evaluated == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(evaluated), "@switch") || strings.Contains(strings.ToLower(evaluated), "@pemit") {
+			log.Printf("QUEUEDEBUG ExecuteQueueEntry player=#%d evaluated=%q", entry.Player, truncDebug(evaluated, 300))
+		}
+
+		// If the result is a brace-wrapped command group (from @dolist, @wait,
+		// etc.), strip the outer braces and re-split on semicolons.
+		// This matches C's process_cmdline behavior where brace-grouped
+		// action lists are unwrapped before command dispatch.
+		if len(evaluated) >= 2 && evaluated[0] == '{' && evaluated[len(evaluated)-1] == '}' {
+			inner := evaluated[1 : len(evaluated)-1]
+			innerCmds := splitSemicolonRespectingBraces(inner)
+			for _, ic := range innerCmds {
+				ic = strings.TrimSpace(ic)
+				if ic == "" {
+					continue
+				}
+				if len(descs) > 0 {
+					DispatchCommand(g, descs[0], ic)
+				} else {
+					g.ExecuteAsObject(entry.Player, entry.Cause, ic)
+				}
+			}
 			continue
 		}
 
@@ -355,6 +383,14 @@ func splitSemicolonRespectingBraces(s string) []string {
 	start := 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
+		case '\x1b':
+			// Skip ANSI escape sequences (ESC[...m) to avoid unmatched '['
+			if i+1 < len(s) && s[i+1] == '[' {
+				i += 2
+				for i < len(s) && !((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z')) {
+					i++
+				}
+			}
 		case '{':
 			depth++
 		case '}':
@@ -386,6 +422,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	if input == "" {
 		return
 	}
+	log.Printf("OBJEXEC ExecuteAsObject player=#%d cause=#%d input=%q", player, cause, truncDebug(input, 200))
 
 	// Handle say/pose prefixes
 	switch input[0] {
@@ -409,7 +446,9 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	cmdLower := strings.ToLower(cmdName)
 
 	// Handle /switches on @commands
+	var switches string
 	if slashIdx := strings.IndexByte(cmdLower, '/'); slashIdx >= 0 {
+		switches = cmdLower[slashIdx+1:]
 		cmdLower = cmdLower[:slashIdx]
 	}
 
@@ -421,12 +460,39 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 			g.Conns.SendToPlayer(obj.Owner, args)
 		}
 	case "@pemit":
-		// Commands arrive already evaluated from ExecuteQueueEntry — do NOT re-evaluate.
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
 			message := args[eqIdx+1:]
+			log.Printf("OBJEXEC @pemit target=%q message=%q switches=%q", targetStr, truncDebug(message, 120), switches)
 			target := g.ResolveRef(player, targetStr)
-			if target != gamedb.Nothing {
+			if target == gamedb.Nothing {
+				target = g.MatchObject(player, targetStr)
+			}
+			if target == gamedb.Nothing {
+				break
+			}
+			if strings.HasPrefix(switches, "content") {
+				// @pemit/contents: send to all contents of target
+				if tObj, ok := g.DB.Objects[target]; ok {
+					cur := tObj.Contents
+					for cur != gamedb.Nothing {
+						g.SendMarkedToPlayer(cur, "EMIT", message)
+						if cObj, ok := g.DB.Objects[cur]; ok {
+							cur = cObj.Next
+						} else {
+							break
+						}
+					}
+				}
+			} else if strings.HasPrefix(switches, "list") {
+				// @pemit/list: send to multiple targets
+				for _, t := range strings.Fields(targetStr) {
+					ref := g.ResolveRef(player, t)
+					if ref != gamedb.Nothing {
+						g.SendMarkedToPlayer(ref, "EMIT", message)
+					}
+				}
+			} else {
 				g.SendMarkedToPlayer(target, "EMIT", message)
 			}
 		}
@@ -491,22 +557,95 @@ func (g *Game) doSwitchObj(player, cause gamedb.DBRef, args string) {
 	rest := strings.TrimSpace(args[eqIdx+1:])
 	parts := splitCommaRespectingBraces(rest)
 
+	log.Printf("SWITCHDEBUG doSwitchObj player=#%d expr=%q exprStr=%q parts=%d", player, expr, exprStr, len(parts))
+	for pi, p := range parts {
+		log.Printf("SWITCHDEBUG   part[%d]=%q", pi, truncDebug(p, 120))
+	}
+
 	for i := 0; i+1 < len(parts); i += 2 {
 		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval, nil)
+		log.Printf("SWITCHDEBUG   checking pattern=%q against expr=%q match=%v", pattern, expr, wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)))
 		if wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)) {
-			action := ctx.Exec(strings.TrimSpace(parts[i+1]), eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-			if action != "" {
-				g.ExecuteAsObject(player, cause, action)
-			}
+			// In C TinyMUSH, do_switch dispatches the matched action body
+			// to process_cmdline() for execution — it does NOT evaluate the
+			// action as an expression. The action body was already partially
+			// evaluated by parse_arglist (% subs and [] content), with braces
+			// preserved. We strip outer braces and dispatch as command(s).
+			raw := stripOuterBraces(strings.TrimSpace(parts[i+1]))
+			raw = strings.ReplaceAll(raw, "#$", expr)
+			log.Printf("SWITCHDEBUG   MATCHED i=%d, dispatching action=%q", i, truncDebug(raw, 200))
+			g.dispatchSwitchAction(player, cause, raw)
 			return
 		}
 	}
 	if len(parts)%2 == 1 {
-		action := ctx.Exec(strings.TrimSpace(parts[len(parts)-1]), eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-		if action != "" {
-			g.ExecuteAsObject(player, cause, action)
-		}
+		raw := stripOuterBraces(strings.TrimSpace(parts[len(parts)-1]))
+		raw = strings.ReplaceAll(raw, "#$", expr)
+		log.Printf("SWITCHDEBUG   DEFAULT, dispatching action=%q", truncDebug(raw, 200))
 	}
+}
+
+// dispatchSwitchAction executes a @switch action body as one or more commands.
+// The action may contain semicolons for multiple commands and/or nested braces.
+func (g *Game) dispatchSwitchAction(player, cause gamedb.DBRef, action string) {
+	cmds := splitSemicolonRespectingBraces(action)
+	log.Printf("SWITCHDEBUG dispatchSwitchAction player=#%d cmds=%d action=%q", player, len(cmds), truncDebug(action, 200))
+	for ci, cmd := range cmds {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
+		}
+		// Strip outer braces from sub-commands (brace groups from @dolist etc.)
+		cmd = stripOuterBraces(cmd)
+		log.Printf("SWITCHDEBUG   dispatch cmd[%d]=%q", ci, truncDebug(cmd, 200))
+		g.ExecuteAsObject(player, cause, cmd)
+	}
+}
+
+// truncDebug truncates a string for debug logging.
+func truncDebug(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// ansiVisualLen returns the display width of a string, skipping ANSI escape
+// sequences (ESC[...letter). Used for column alignment in tabular output.
+func ansiVisualLen(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && !((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z')) {
+				i++
+			}
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// ansiFmtLeft left-pads a string to width, accounting for ANSI escape codes.
+// Equivalent to fmt.Sprintf("%-*s", width, s) but ANSI-aware.
+func ansiFmtLeft(s string, width int) string {
+	pad := width - ansiVisualLen(s)
+	if pad <= 0 {
+		return s
+	}
+	return s + strings.Repeat(" ", pad)
+}
+
+// stripOuterBraces removes one level of outer brace grouping if present.
+// This matches C TinyMUSH where braces protect action bodies during
+// comma-splitting in @switch, but the content is then evaluated with
+// full function checking at dispatch time.
+func stripOuterBraces(s string) string {
+	if len(s) >= 2 && s[0] == '{' && s[len(s)-1] == '}' {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 // ObjSay handles say for non-connected objects.

@@ -317,7 +317,7 @@ func (g *Game) showChannelWho(d *Descriptor, ch *gamedb.Channel) {
 		if g.Conns.IsConnected(ca.Player) {
 			online = " *"
 		}
-		d.Send(fmt.Sprintf("%-25s %-10s %-6s%s", name, status, ca.Title, online))
+		d.Send(ansiFmtLeft(name, 25) + ansiFmtLeft(status, 10) + ansiFmtLeft(ca.Title, 6) + online)
 		count++
 	}
 	d.Send(fmt.Sprintf("-- %d subscriber(s) --", count))

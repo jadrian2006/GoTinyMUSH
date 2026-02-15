@@ -170,6 +170,25 @@ func fnSquish(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	}
 }
 
+// visualLen returns the display width of a string, ignoring ANSI escape
+// sequences. In TinyMUSH, ljust/rjust/center pad based on visible characters,
+// not raw byte length, so ANSI color codes don't count toward width.
+func visualLen(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			// Skip ESC [ ... <letter> sequence
+			i += 2
+			for i < len(s) && !((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z')) {
+				i++
+			}
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 func fnLjust(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	s := args[0]
@@ -177,7 +196,9 @@ func fnLjust(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	fill := " "
 	if len(args) > 2 && len(args[2]) > 0 { fill = args[2] }
 	buf.WriteString(s)
-	for buf.Len()-len(s) < width-len(s) {
+	vLen := visualLen(s)
+	padLen := width - vLen
+	for i := 0; i < padLen; i += len(fill) {
 		buf.WriteString(fill)
 	}
 }
@@ -188,7 +209,7 @@ func fnRjust(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	width := toInt(args[1])
 	fill := " "
 	if len(args) > 2 && len(args[2]) > 0 { fill = args[2] }
-	padLen := width - len(s)
+	padLen := width - visualLen(s)
 	for i := 0; i < padLen; i += len(fill) {
 		buf.WriteString(fill)
 	}
@@ -201,7 +222,7 @@ func fnCenter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	width := toInt(args[1])
 	fill := " "
 	if len(args) > 2 && len(args[2]) > 0 { fill = args[2] }
-	padTotal := width - len(s)
+	padTotal := width - visualLen(s)
 	if padTotal <= 0 {
 		buf.WriteString(s)
 		return

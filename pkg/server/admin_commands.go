@@ -735,19 +735,33 @@ func cmdSwitch(g *Game, d *Descriptor, args string, _ []string) {
 	for i := 0; i+1 < len(parts); i += 2 {
 		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval, nil)
 		if wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)) {
-			action := ctx.Exec(strings.TrimSpace(parts[i+1]), eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-			if action != "" {
-				DispatchCommand(g, d, action)
-			}
+			// In C TinyMUSH, do_switch dispatches the matched action body
+			// to process_cmdline() — it does NOT evaluate it as an expression.
+			// Strip braces, replace #$ with expr, dispatch as command(s).
+			raw := stripOuterBraces(strings.TrimSpace(parts[i+1]))
+			raw = strings.ReplaceAll(raw, "#$", expr)
+			dispatchSwitchActionDesc(g, d, raw)
 			return
 		}
 	}
 	// Default (odd trailing entry)
 	if len(parts)%2 == 1 {
-		action := ctx.Exec(strings.TrimSpace(parts[len(parts)-1]), eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-		if action != "" {
-			DispatchCommand(g, d, action)
+		raw := stripOuterBraces(strings.TrimSpace(parts[len(parts)-1]))
+		raw = strings.ReplaceAll(raw, "#$", expr)
+		dispatchSwitchActionDesc(g, d, raw)
+	}
+}
+
+// dispatchSwitchActionDesc executes a @switch action body for a connected player.
+func dispatchSwitchActionDesc(g *Game, d *Descriptor, action string) {
+	cmds := splitSemicolonRespectingBraces(action)
+	for _, cmd := range cmds {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
 		}
+		cmd = stripOuterBraces(cmd)
+		DispatchCommand(g, d, cmd)
 	}
 }
 
@@ -1135,15 +1149,19 @@ func splitCommaRespectingBraces(s string) []string {
 	start := 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			if depth > 0 {
-				depth--
+		case '\x1b':
+			// Skip ANSI escape sequences (ESC[...m) to avoid their '['
+			// being counted as depth-increasing brackets.
+			if i+1 < len(s) && s[i+1] == '[' {
+				i += 2 // skip ESC and [
+				for i < len(s) && !((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z')) {
+					i++
+				}
+				// i now points at the terminating letter (e.g., 'm'); loop will i++
 			}
-		case '[':
+		case '{', '[', '(':
 			depth++
-		case ']':
+		case '}', ']', ')':
 			if depth > 0 {
 				depth--
 			}

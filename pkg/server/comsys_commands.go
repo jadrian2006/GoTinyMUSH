@@ -111,7 +111,7 @@ func cmdComlist(g *Game, d *Descriptor, _ string, _ []string) {
 		if ca.IsListening {
 			status = "On"
 		}
-		d.Send(fmt.Sprintf("%-12s %-20s %-6s %-20s", ca.Alias, ca.Channel, status, ca.Title))
+		d.Send(ansiFmtLeft(ca.Alias, 12) + ansiFmtLeft(ca.Channel, 20) + ansiFmtLeft(status, 6) + ansiFmtLeft(ca.Title, 20))
 	}
 }
 
@@ -263,7 +263,7 @@ func cmdClist(g *Game, d *Descriptor, _ string, _ []string) {
 	d.Send(strings.Repeat("-", 70))
 	for _, ch := range channels {
 		owner := g.PlayerName(ch.Owner)
-		d.Send(fmt.Sprintf("%-20s %-6d %-8s %s", ch.Name, ch.NumSent, owner, ch.Description))
+		d.Send(ansiFmtLeft(ch.Name, 20) + ansiFmtLeft(fmt.Sprintf("%d", ch.NumSent), 6) + ansiFmtLeft(owner, 8) + ch.Description)
 	}
 	d.Send(fmt.Sprintf("-- %d channel(s) --", len(channels)))
 }
