@@ -397,9 +397,9 @@ func (s *Server) handleConnect(d *Descriptor, user, password string) {
 
 	// Fire ACONNECT triggers
 	connCount := len(s.Game.Conns.GetByPlayer(player))
-	s.Game.QueueAttrAction(player, player, 35, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 35
+	s.Game.QueueAttrAction(player, player, 39, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 39
 	// Global ACONNECT on master room
-	s.Game.QueueAttrAction(s.Game.MasterRoomRef(), player, 35, []string{"connect", fmt.Sprintf("%d", connCount)})
+	s.Game.QueueAttrAction(s.Game.MasterRoomRef(), player, 39, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 39
 }
 
 // handleCreate creates a new player and logs them in.

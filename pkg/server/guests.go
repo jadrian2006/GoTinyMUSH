@@ -327,6 +327,6 @@ func (s *Server) handleGuest(d *Descriptor) {
 
 	// Fire ACONNECT
 	connCount := len(s.Game.Conns.GetByPlayer(ref))
-	s.Game.QueueAttrAction(ref, ref, 35, []string{"connect", fmt.Sprintf("%d", connCount)})
-	s.Game.QueueAttrAction(s.Game.MasterRoomRef(), ref, 35, []string{"connect", fmt.Sprintf("%d", connCount)})
+	s.Game.QueueAttrAction(ref, ref, 39, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 39
+	s.Game.QueueAttrAction(s.Game.MasterRoomRef(), ref, 39, []string{"connect", fmt.Sprintf("%d", connCount)}) // A_ACONNECT = 39
 }

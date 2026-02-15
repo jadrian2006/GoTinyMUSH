@@ -126,6 +126,11 @@ type GameConf struct {
 	// --- Alias config includes (YAML: list of paths; legacy: from "include" directives) ---
 	AliasFiles []string `yaml:"alias_files"`
 
+	// --- Attribute access config ---
+	UserAttrAccess string   `yaml:"user_attr_access"` // Default flags for user-defined attrs
+	AttrTypes      []string `yaml:"attr_types"`       // Pattern-based attr flag assignment
+	AttrAccess     []string `yaml:"attr_access"`      // @attribute/access directives (deferred)
+
 	// --- Internal: resolved include paths from legacy .conf parsing ---
 	IncludedAliasConfs []string `yaml:"-"`
 }
@@ -261,8 +266,12 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			continue
 		}
 
-		// Lines starting with @ are runtime directives, skip them
+		// Lines starting with @ are runtime directives — capture @attribute/access
 		if line[0] == '@' {
+			lower := strings.ToLower(line)
+			if strings.HasPrefix(lower, "@attribute/access ") {
+				gc.AttrAccess = append(gc.AttrAccess, strings.TrimSpace(line[len("@attribute/access "):]))
+			}
 			continue
 		}
 
@@ -465,6 +474,14 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 		case "scrollback_retention":
 			gc.ScrollbackRetention = atoi(val, gc.ScrollbackRetention)
 
+		// --- Attribute access config ---
+		case "user_attr_access":
+			gc.UserAttrAccess = val
+		case "attr_type":
+			gc.AttrTypes = append(gc.AttrTypes, val)
+		case "attr_access":
+			gc.AttrAccess = append(gc.AttrAccess, val)
+
 		// --- Directives handled elsewhere ---
 		case "alias", "flag_alias", "function_alias", "attr_alias", "power_alias", "bad_name":
 			// Handled by LoadAliasConfig
@@ -500,6 +517,17 @@ func (g *Game) ApplyGameConf(gc *GameConf) {
 		gc.MudName, gc.MasterRoom, gc.PlayerStartingRoom, gc.PlayerStartingHome)
 	log.Printf("  economy: %s/%s starting=%d paycheck=%d",
 		gc.MoneyNameSingular, gc.MoneyNamePlural, gc.StartingMoney, gc.Paycheck)
+
+	// Apply deferred attribute access directives (requires DB to be loaded)
+	if gc.UserAttrAccess != "" {
+		g.ApplyUserAttrAccess(gc.UserAttrAccess)
+	}
+	for _, at := range gc.AttrTypes {
+		g.ApplyAttrType(at)
+	}
+	for _, aa := range gc.AttrAccess {
+		g.ApplyAttrAccess(aa)
+	}
 }
 
 // MasterRoomRef returns the configured master room dbref.

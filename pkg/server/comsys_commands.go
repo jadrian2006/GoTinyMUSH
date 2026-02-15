@@ -329,7 +329,7 @@ func cmdCboot(g *Game, d *Descriptor, args string, _ []string) {
 		}
 	}
 	targetObj := g.DB.Objects[target]
-	d.Send(fmt.Sprintf("Booted %s from channel %s (%d alias(es) removed).", targetObj.Name, ch.Name, removed))
+	d.Send(fmt.Sprintf("Booted %s from channel %s (%d alias(es) removed).", DisplayName(targetObj.Name), ch.Name, removed))
 	g.Conns.SendToPlayer(target, fmt.Sprintf("You have been booted from channel %s.", ch.Name))
 }
 
@@ -457,7 +457,7 @@ func cmdCinfo(g *Game, d *Descriptor, args string, _ []string) {
 	if ch.Flags&gamedb.ChanNoTitles != 0 {
 		flags = append(flags, "NoTitles")
 	}
-	d.Send(fmt.Sprintf("  Flags:       %s (0x%08x)", strings.Join(flags, " "), ch.Flags))
+	d.Send(fmt.Sprintf("  Flags:       %s", strings.Join(flags, " ")))
 	// Locks
 	joinLock := ch.JoinLock
 	if joinLock == "" {

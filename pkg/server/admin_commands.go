@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -152,6 +153,50 @@ func cmdParent(g *Game, d *Descriptor, args string, _ []string) {
 			d.Send(fmt.Sprintf("Parent of %s(#%d) set to %s(#%d).", obj.Name, target, g.ObjName(parent), parent))
 		}
 	}
+}
+
+// PropagateParentAttrs copies PROPAGATE-flagged attributes from parent to child.
+// Only copies attributes that the child doesn't already have.
+// Returns the number of attributes propagated.
+func (g *Game) PropagateParentAttrs(parent, child gamedb.DBRef) int {
+	parentObj, ok := g.DB.Objects[parent]
+	if !ok {
+		return 0
+	}
+	childObj, ok := g.DB.Objects[child]
+	if !ok {
+		return 0
+	}
+
+	// Build set of attr numbers the child already has
+	childAttrs := make(map[int]bool)
+	for _, attr := range childObj.Attrs {
+		childAttrs[attr.Number] = true
+	}
+
+	count := 0
+	for _, attr := range parentObj.Attrs {
+		// Check if this attribute's definition has AF_PROPAGATE
+		def := g.LookupAttrDef(attr.Number)
+		if def == nil || def.Flags&gamedb.AFPropagate == 0 {
+			continue
+		}
+		// Skip if child already has it
+		if childAttrs[attr.Number] {
+			continue
+		}
+		// Copy the attribute value from parent to child
+		childObj.Attrs = append(childObj.Attrs, gamedb.Attribute{
+			Number: attr.Number,
+			Value:  attr.Value,
+		})
+		count++
+	}
+
+	if count > 0 {
+		g.PersistObject(childObj)
+	}
+	return count
 }
 
 func cmdChown(g *Game, d *Descriptor, args string, _ []string) {
@@ -446,7 +491,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 		if oldLoc != gamedb.Nothing {
 			g.RemoveFromContents(oldLoc, victim)
 			g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
-				fmt.Sprintf("%s has left.", obj.Name))
+				fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
 		}
 		obj.Location = dest
 		persistList := []*gamedb.Object{obj}
@@ -462,7 +507,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 		}
 		g.PersistObjects(persistList...)
 		g.Conns.SendToRoomExcept(g.DB, dest, victim,
-			fmt.Sprintf("%s has arrived.", obj.Name))
+			fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
 	}
 
 	if victim == d.Player {
@@ -2052,7 +2097,7 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	// Drain semaphore entries from the queue
-	semAttr := 43 // A_SEMAPHORE default
+	semAttr := 47 // A_SEMAPHORE = 47
 	if attrName != "" {
 		num := g.LookupAttrNum(attrName)
 		if num >= 0 {
@@ -2064,7 +2109,7 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 
 	// Reset the semaphore count on the object
 	if attrName == "" {
-		g.SetAttr(target, 43, "") // Clear A_SEMAPHORE
+		g.SetAttr(target, 47, "") // Clear A_SEMAPHORE = 47
 	}
 
 	d.Send(fmt.Sprintf("Drained %d entries from %s.", count, objStr))
@@ -2480,4 +2525,561 @@ func (g *Game) archiveHook() string {
 		return g.Conf.ArchiveHook
 	}
 	return ""
+}
+
+// --- Attribute management ---
+
+// attrAccessNameTable maps flag names (used in @attribute/access and config
+// directives) to AF_ flag values. Matches C TinyMUSH's attraccess_nametab.
+var attrAccessNameTable = map[string]int{
+	"CONST":      gamedb.AFConst,
+	"DARK":       gamedb.AFDark,
+	"DEFAULT":    gamedb.AFDefault,
+	"DELETED":    gamedb.AFDeleted,
+	"GOD":        gamedb.AFGod,
+	"HIDDEN":     gamedb.AFMDark,
+	"IGNORE":     gamedb.AFNoCMD,
+	"INTERNAL":   gamedb.AFInternal,
+	"IS_LOCK":    gamedb.AFIsLock,
+	"LOCKED":     gamedb.AFLock,
+	"NO_CLONE":   gamedb.AFNoClone,
+	"NO_COMMAND":  gamedb.AFNoProg,
+	"NO_INHERIT": gamedb.AFPrivate,
+	"VISUAL":     gamedb.AFVisual,
+	"WIZARD":     gamedb.AFWizard,
+	"PROPAGATE":  gamedb.AFPropagate,
+}
+
+// parseAttrAccessFlags parses a space-separated list of flag names (with
+// optional ! prefix for negation) and returns (setFlags, clearFlags).
+// Matches C TinyMUSH's attraccess_nametab parsing in do_attribute.
+func parseAttrAccessFlags(value string) (set, clear int, errs []string) {
+	for _, token := range strings.Fields(strings.ToUpper(value)) {
+		negate := false
+		name := token
+		if len(name) > 0 && name[0] == '!' {
+			negate = true
+			name = name[1:]
+		}
+		f, ok := attrAccessNameTable[name]
+		if !ok {
+			errs = append(errs, token)
+			continue
+		}
+		if negate {
+			clear |= f
+		} else {
+			set |= f
+		}
+	}
+	return
+}
+
+// cmdAttribute implements @attribute/access, @attribute/rename, @attribute/delete.
+// Wizard-only. Matches C TinyMUSH's do_attribute.
+func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
+	if !Wizard(g, d.Player) {
+		d.Send("Permission denied.")
+		return
+	}
+
+	if len(switches) == 0 {
+		d.Send("Usage: @attribute/access <attr>=<flags>")
+		return
+	}
+
+	sw := strings.ToLower(switches[0])
+
+	switch sw {
+	case "access":
+		// @attribute/access <name>=<flags>
+		parts := strings.SplitN(args, "=", 2)
+		if len(parts) != 2 {
+			d.Send("Usage: @attribute/access <attr>=<flags>")
+			return
+		}
+		attrName := strings.TrimSpace(strings.ToUpper(parts[0]))
+		flagStr := strings.TrimSpace(parts[1])
+
+		if attrName == "" {
+			d.Send("Specify an attribute name.")
+			return
+		}
+
+		// Look up the attribute definition
+		def, ok := g.DB.AttrByName[attrName]
+		if !ok {
+			// Also check well-known attrs (can't modify their flags)
+			for _, wkName := range gamedb.WellKnownAttrs {
+				if strings.EqualFold(wkName, attrName) {
+					d.Send("Cannot modify access on built-in attributes.")
+					return
+				}
+			}
+			d.Send("No such user-named attribute.")
+			return
+		}
+
+		setFlags, clearFlags, errs := parseAttrAccessFlags(flagStr)
+		for _, e := range errs {
+			d.Send(fmt.Sprintf("Unknown permission: %s.", e))
+		}
+
+		if setFlags != 0 || clearFlags != 0 {
+			def.Flags = (def.Flags &^ clearFlags) | setFlags
+			// Persist to store
+			if g.Store != nil {
+				g.Store.PutMeta()
+			}
+			d.Send("Attribute access changed.")
+		}
+
+	case "rename":
+		// @attribute/rename <old>=<new>
+		parts := strings.SplitN(args, "=", 2)
+		if len(parts) != 2 {
+			d.Send("Usage: @attribute/rename <old>=<new>")
+			return
+		}
+		oldName := strings.TrimSpace(strings.ToUpper(parts[0]))
+		newName := strings.TrimSpace(strings.ToUpper(parts[1]))
+
+		def, ok := g.DB.AttrByName[oldName]
+		if !ok {
+			d.Send("No such user-named attribute.")
+			return
+		}
+		if _, exists := g.DB.AttrByName[newName]; exists {
+			d.Send("An attribute with that name already exists.")
+			return
+		}
+
+		delete(g.DB.AttrByName, oldName)
+		def.Name = newName
+		g.DB.AttrByName[newName] = def
+		if g.Store != nil {
+			g.Store.PutMeta()
+		}
+		d.Send("Attribute renamed.")
+
+	case "delete":
+		attrName := strings.TrimSpace(strings.ToUpper(args))
+		if attrName == "" {
+			d.Send("Usage: @attribute/delete <attr>")
+			return
+		}
+		def, ok := g.DB.AttrByName[attrName]
+		if !ok {
+			d.Send("No such user-named attribute.")
+			return
+		}
+		delete(g.DB.AttrByName, attrName)
+		delete(g.DB.AttrNames, def.Number)
+		if g.Store != nil {
+			g.Store.PutMeta()
+		}
+		d.Send("Attribute deleted.")
+
+	case "propagate":
+		cmdAttributePropagate(g, d, args)
+
+	default:
+		d.Send("Unknown switch. Use: @attribute/access, @attribute/rename, @attribute/delete, @attribute/propagate")
+	}
+}
+
+// ApplyAttrAccess applies an @attribute/access directive (from config file).
+// Format: "ATTRNAME=FLAGS" or "ATTRNAME FLAGS". Used during startup.
+func (g *Game) ApplyAttrAccess(value string) {
+	parts := strings.SplitN(value, "=", 2)
+	if len(parts) != 2 {
+		log.Printf("gameconf: invalid @attribute/access directive: %s", value)
+		return
+	}
+	attrName := strings.TrimSpace(strings.ToUpper(parts[0]))
+	flagStr := strings.TrimSpace(parts[1])
+
+	def, ok := g.DB.AttrByName[attrName]
+	if !ok {
+		log.Printf("gameconf: @attribute/access: no such attribute %q", attrName)
+		return
+	}
+
+	setFlags, clearFlags, errs := parseAttrAccessFlags(flagStr)
+	for _, e := range errs {
+		log.Printf("gameconf: @attribute/access %s: unknown flag %q", attrName, e)
+	}
+	if setFlags != 0 || clearFlags != 0 {
+		def.Flags = (def.Flags &^ clearFlags) | setFlags
+		log.Printf("gameconf: @attribute/access %s flags set to 0x%x", attrName, def.Flags)
+	}
+}
+
+// ApplyAttrType applies an attr_type config directive.
+// Format: "pattern flags" — sets flags on all user-defined attrs matching pattern.
+func (g *Game) ApplyAttrType(value string) {
+	parts := strings.Fields(value)
+	if len(parts) < 2 {
+		log.Printf("gameconf: invalid attr_type directive: %s", value)
+		return
+	}
+	pattern := strings.ToUpper(parts[0])
+	flagStr := strings.Join(parts[1:], " ")
+
+	setFlags, _, errs := parseAttrAccessFlags(flagStr)
+	for _, e := range errs {
+		log.Printf("gameconf: attr_type %s: unknown flag %q", pattern, e)
+	}
+	if setFlags == 0 {
+		return
+	}
+
+	count := 0
+	for _, def := range g.DB.AttrNames {
+		if wildMatchSimple(strings.ToLower(pattern), strings.ToLower(def.Name)) {
+			def.Flags |= setFlags
+			count++
+		}
+	}
+	log.Printf("gameconf: attr_type %s applied to %d attributes", pattern, count)
+}
+
+// ApplyUserAttrAccess sets the default flags for all user-defined attributes.
+// This is the user_attr_access config directive.
+func (g *Game) ApplyUserAttrAccess(value string) {
+	setFlags, _, errs := parseAttrAccessFlags(value)
+	for _, e := range errs {
+		log.Printf("gameconf: user_attr_access: unknown flag %q", e)
+	}
+	if setFlags == 0 {
+		return
+	}
+	count := 0
+	for _, def := range g.DB.AttrNames {
+		def.Flags |= setFlags
+		count++
+	}
+	log.Printf("gameconf: user_attr_access applied flags 0x%x to %d attributes", setFlags, count)
+}
+
+// --- @attlist command ---
+
+// parseTypeFilter extracts a type=<type> qualifier from args string.
+// Returns the remaining pattern and the ObjectType filter (-1 if none).
+func parseTypeFilter(args string) (string, int) {
+	parts := strings.Fields(args)
+	typeFilter := -1
+	var remaining []string
+	for _, p := range parts {
+		lower := strings.ToLower(p)
+		if strings.HasPrefix(lower, "type=") {
+			typeName := strings.ToUpper(p[5:])
+			switch typeName {
+			case "PLAYER":
+				typeFilter = int(gamedb.TypePlayer)
+			case "THING", "OBJECT":
+				typeFilter = int(gamedb.TypeThing)
+			case "ROOM":
+				typeFilter = int(gamedb.TypeRoom)
+			case "EXIT":
+				typeFilter = int(gamedb.TypeExit)
+			}
+		} else {
+			remaining = append(remaining, p)
+		}
+	}
+	return strings.Join(remaining, " "), typeFilter
+}
+
+// countAttrsOnObjects counts how many objects have each attribute number.
+// If objType >= 0, only counts objects of that type.
+// Non-wizards only count objects they control.
+func countAttrsOnObjects(g *Game, player gamedb.DBRef, objType int, isWiz bool) map[int]int {
+	counts := make(map[int]int)
+	for _, obj := range g.DB.Objects {
+		if objType >= 0 && int(obj.ObjType()) != objType {
+			continue
+		}
+		if obj.IsGoing() || obj.ObjType() == gamedb.TypeGarbage {
+			continue
+		}
+		// Non-wizards only count objects they control
+		if !isWiz && !Controls(g, player, obj.DBRef) {
+			continue
+		}
+		for _, attr := range obj.Attrs {
+			counts[attr.Number]++
+		}
+	}
+	return counts
+}
+
+// findObjectsWithAttr returns dbrefs of objects that have the given attr number.
+// If objType >= 0, only returns objects of that type.
+// Non-wizards only see objects they control. Limited to maxResults.
+func findObjectsWithAttr(g *Game, player gamedb.DBRef, attrNum int, objType int, isWiz bool, maxResults int) []gamedb.DBRef {
+	var results []gamedb.DBRef
+	for _, obj := range g.DB.Objects {
+		if objType >= 0 && int(obj.ObjType()) != objType {
+			continue
+		}
+		if obj.IsGoing() || obj.ObjType() == gamedb.TypeGarbage {
+			continue
+		}
+		if !isWiz && !Controls(g, player, obj.DBRef) {
+			continue
+		}
+		for _, attr := range obj.Attrs {
+			if attr.Number == attrNum {
+				results = append(results, obj.DBRef)
+				if maxResults > 0 && len(results) >= maxResults {
+					return results
+				}
+				break
+			}
+		}
+	}
+	return results
+}
+
+// cmdAttlist lists user-defined attribute definitions with their flags and object counts.
+// Usage: @attlist [type=<player|thing|room|exit>] [pattern]
+//        @attlist/detail <attrname> [type=<player|thing|room|exit>]
+// With type= filter, shows configured attrs present on objects of that type.
+// Without type=, shows all configured attrs (or pattern-matched attrs).
+// /detail shows individual objects that have a specific attribute.
+func cmdAttlist(g *Game, d *Descriptor, args string, switches []string) {
+	isDetail := false
+	for _, sw := range switches {
+		if strings.EqualFold(sw, "detail") {
+			isDetail = true
+		}
+	}
+
+	pattern, typeFilter := parseTypeFilter(strings.TrimSpace(args))
+	pattern = strings.TrimSpace(pattern)
+	isWiz := Wizard(g, d.Player)
+
+	// Detail mode: show objects with a specific attribute
+	if isDetail {
+		if pattern == "" {
+			d.Send("Usage: @attlist/detail <attrname> [type=<player|thing|room|exit>]")
+			return
+		}
+		attrName := strings.ToUpper(pattern)
+		def, ok := g.DB.AttrByName[attrName]
+		if !ok {
+			d.Send("No such attribute definition.")
+			return
+		}
+		results := findObjectsWithAttr(g, d.Player, def.Number, typeFilter, isWiz, 100)
+		typeName := ""
+		if typeFilter >= 0 {
+			typeName = " (" + gamedb.ObjectType(typeFilter).String() + " only)"
+		}
+		d.Send(fmt.Sprintf("--- Objects with %s%s ---", attrName, typeName))
+		for _, ref := range results {
+			obj := g.DB.Objects[ref]
+			if obj != nil {
+				d.Send(fmt.Sprintf("  #%d  %s (%s)", ref, DisplayName(obj.Name), obj.ObjType().String()))
+			}
+		}
+		total := len(results)
+		if total >= 100 {
+			d.Send(fmt.Sprintf("--- Showing first 100 of possibly more ---"))
+		} else {
+			d.Send(fmt.Sprintf("--- %d object(s) ---", total))
+		}
+		return
+	}
+
+	// Count attrs across relevant objects
+	attrCounts := countAttrsOnObjects(g, d.Player, typeFilter, isWiz)
+
+	// Collect matching definitions
+	type entry struct {
+		num   int
+		name  string
+		flags int
+		count int
+	}
+	var results []entry
+
+	for num, def := range g.DB.AttrNames {
+		if pattern != "" && !wildMatchSimple(strings.ToLower(pattern), strings.ToLower(def.Name)) {
+			continue
+		}
+		// Without a pattern or type filter, only show attrs that have flags set
+		if pattern == "" && typeFilter < 0 && def.Flags == 0 {
+			continue
+		}
+		// With type filter, only show attrs present on that type + must have flags
+		if typeFilter >= 0 {
+			if attrCounts[num] == 0 {
+				continue
+			}
+			if def.Flags == 0 {
+				continue
+			}
+		}
+		// Non-wizards can only see VISUAL attrs (when no type filter)
+		if typeFilter < 0 && !isWiz && def.Flags&gamedb.AFVisual == 0 {
+			continue
+		}
+		results = append(results, entry{num: num, name: def.Name, flags: def.Flags, count: attrCounts[num]})
+	}
+
+	// Sort by name
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].name < results[j].name
+	})
+
+	if len(results) == 0 {
+		if pattern != "" || typeFilter >= 0 {
+			d.Send("No matching configured attributes found.")
+		} else {
+			d.Send("No configured attributes defined.")
+		}
+		return
+	}
+
+	// Header
+	typeName := ""
+	if typeFilter >= 0 {
+		typeName = " on " + gamedb.ObjectType(typeFilter).String() + " objects"
+	}
+	if pattern == "" && typeFilter < 0 {
+		d.Send(fmt.Sprintf("--- Configured Attributes (%d) ---", len(results)))
+	} else {
+		d.Send(fmt.Sprintf("--- Configured Attributes%s (%d) ---", typeName, len(results)))
+	}
+	for _, e := range results {
+		flagStr := attrFlagString(e.flags)
+		if flagStr != "" {
+			flagStr = "[" + flagStr + "]"
+		} else {
+			flagStr = "[-]"
+		}
+		d.Send(fmt.Sprintf("  %-30s %-8s %d", e.name, flagStr, e.count))
+	}
+	d.Send(fmt.Sprintf("--- %d attribute(s) listed ---", len(results)))
+}
+
+// --- @attribute/propagate command ---
+
+// Propagate adds an attribute with a default value to target objects that
+// don't already have it. Wizard-only.
+//
+// Syntax:
+//   @attribute/propagate <attr>=<target>[/<default value>]
+//
+// Target can be:
+//   #dbref    — propagate to all children of that parent object
+//   PLAYER    — propagate to all player objects
+//   THING     — propagate to all thing objects
+//   ROOM      — propagate to all room objects
+//   EXIT      — propagate to all exit objects
+//   ALL       — propagate to all objects
+func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
+	parts := strings.SplitN(args, "=", 2)
+	if len(parts) != 2 {
+		d.Send("Usage: @attribute/propagate <attr>=<target>[/<default value>]")
+		return
+	}
+
+	attrName := strings.TrimSpace(strings.ToUpper(parts[0]))
+	rest := strings.TrimSpace(parts[1])
+
+	// Resolve attribute number
+	attrNum := g.ResolveAttrNum(attrName)
+	if attrNum < 0 {
+		d.Send(fmt.Sprintf("Unknown attribute: %s", attrName))
+		return
+	}
+
+	// Parse target and optional default value
+	var targetStr, defaultVal string
+	if slashIdx := strings.Index(rest, "/"); slashIdx >= 0 {
+		targetStr = strings.TrimSpace(rest[:slashIdx])
+		defaultVal = rest[slashIdx+1:]
+	} else {
+		targetStr = rest
+	}
+
+	// Determine which objects to propagate to
+	var targets []gamedb.DBRef
+	upper := strings.ToUpper(targetStr)
+
+	switch upper {
+	case "PLAYER", "THING", "ROOM", "EXIT", "ALL":
+		var filterType gamedb.ObjectType = -1
+		switch upper {
+		case "PLAYER":
+			filterType = gamedb.TypePlayer
+		case "THING":
+			filterType = gamedb.TypeThing
+		case "ROOM":
+			filterType = gamedb.TypeRoom
+		case "EXIT":
+			filterType = gamedb.TypeExit
+		}
+		for ref, obj := range g.DB.Objects {
+			if obj.Flags[0]&gamedb.FlagGoing != 0 {
+				continue
+			}
+			if filterType >= 0 && obj.ObjType() != filterType {
+				continue
+			}
+			targets = append(targets, ref)
+		}
+	default:
+		// Must be a #dbref — propagate to children of that parent
+		parentRef, err := parseDBRef(targetStr)
+		if err != nil {
+			d.Send("Target must be a #dbref, PLAYER, THING, ROOM, EXIT, or ALL.")
+			return
+		}
+		if _, ok := g.DB.Objects[parentRef]; !ok {
+			d.Send(fmt.Sprintf("Parent object #%d not found.", parentRef))
+			return
+		}
+		for ref, obj := range g.DB.Objects {
+			if obj.Parent == parentRef {
+				targets = append(targets, ref)
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		d.Send("No matching objects found.")
+		return
+	}
+
+	// Propagate: set attribute only on objects that don't already have it
+	set := 0
+	skipped := 0
+	for _, ref := range targets {
+		obj, ok := g.DB.Objects[ref]
+		if !ok {
+			continue
+		}
+		// Check if object already has this attribute
+		hasIt := false
+		for _, attr := range obj.Attrs {
+			if attr.Number == attrNum {
+				hasIt = true
+				break
+			}
+		}
+		if hasIt {
+			skipped++
+			continue
+		}
+		// Set the attribute with the default value
+		g.SetAttr(ref, attrNum, defaultVal)
+		set++
+	}
+
+	d.Send(fmt.Sprintf("Propagated %s to %d object(s) (%d already had it, %d total checked).",
+		attrName, set, skipped, len(targets)))
 }

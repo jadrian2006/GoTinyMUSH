@@ -549,6 +549,15 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("MAILFROM", fnMailfrom, 1, 0)
 	ctx.RegisterFunction("MAILSUBJ", fnMailsubj, 1, 0)
 
+	// Channel/Comsys functions
+	ctx.RegisterFunction("CINFO", fnCinfo, 2, 0)
+
+	// Attribute definition functions
+	ctx.RegisterFunction("LATTRDEF", fnLattrdef, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("ATTRDEFFLAGS", fnAttrdefflags, 1, 0)
+	ctx.RegisterFunction("HASATTRDEF", fnHasattrdef, 1, 0)
+	ctx.RegisterFunction("SETATTRDEF", fnSetattrdef, 2, 0)
+
 	// Structure/instance system
 	ctx.RegisterFunction("STRUCTURE", fnStructure, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("CONSTRUCT", fnConstruct, 0, eval.FnVarArgs)

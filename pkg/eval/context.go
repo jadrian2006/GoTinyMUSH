@@ -147,6 +147,26 @@ type GameState interface {
 	// MailSubject returns the subject of message #num for player.
 	// Returns "" if not found or mail disabled.
 	MailSubject(player gamedb.DBRef, num int) string
+	// ChannelInfo returns a field value for a channel by name.
+	// Valid fields: owner, description, header, flags, numsent, subscribers, joinlock, translock, recvlock, charge.
+	// Returns "" if channel not found, unknown field, or player lacks permission (must be channel owner or Wizard).
+	ChannelInfo(player gamedb.DBRef, name, field string) string
+	// ListAttrDefs returns a space-separated list of user-defined attribute names
+	// matching the given pattern (wildcard). Empty pattern matches all.
+	// objType filters by object type ("player", "thing", "room", "exit", or "" for all).
+	// Respects permissions: non-wizards only see VISUAL attr definitions.
+	ListAttrDefs(player gamedb.DBRef, pattern string, objType string) string
+	// AttrDefFlags returns the flag string for a user-defined attribute definition.
+	// Returns "#-1 NO SUCH ATTRIBUTE" if not found.
+	// Non-wizards can only query VISUAL attributes.
+	AttrDefFlags(player gamedb.DBRef, attrName string) string
+	// HasAttrDef returns "1" if a user-defined attribute exists, "0" otherwise.
+	HasAttrDef(attrName string) string
+	// SetAttrDefFlags modifies flags on a user-defined attribute definition.
+	// Returns "" on success, error string on failure. Wizard-only.
+	SetAttrDefFlags(player gamedb.DBRef, attrName, flags string) string
+	// IsWizard returns true if the player is an effective wizard.
+	IsWizard(player gamedb.DBRef) bool
 }
 
 // EvalContext is the execution context for MUSH expression evaluation.

@@ -155,10 +155,8 @@ func fnName(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	ref := resolveDBRef(ctx, args[0])
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		name := obj.Name
-		// For exits, return just the first alias (before ;)
-		if obj.ObjType() == gamedb.TypeExit {
-			if idx := strings.IndexByte(name, ';'); idx >= 0 { name = name[:idx] }
-		}
+		// Return just the display name (before first ;) — aliases are separated by semicolons
+		if idx := strings.IndexByte(name, ';'); idx >= 0 { name = name[:idx] }
 		buf.WriteString(name)
 	} else {
 		buf.WriteString("#-1 NOT FOUND")

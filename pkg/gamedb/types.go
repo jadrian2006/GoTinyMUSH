@@ -194,8 +194,15 @@ const (
 	AFRegexp   = 0x00008000 // Regex match for $-commands
 	AFNoClone  = 0x00010000 // Don't copy when cloning
 	AFConst    = 0x00020000 // No one can change (server-only)
-	AFCase     = 0x00040000 // Regexp case-sensitive
-	AFNow      = 0x01000000 // Execute match immediately
+	AFCase      = 0x00040000 // Regexp case-sensitive
+	AFStructure = 0x00080000 // Attribute contains a structure
+	AFDirty     = 0x00100000 // Attribute number has been modified
+	AFDefault   = 0x00200000 // did_it() checks attr_defaults obj
+	AFNoName    = 0x00400000 // If used as oattr, no name prepend
+	AFRMatch    = 0x00800000 // Set result of match into regs
+	AFNow       = 0x01000000 // Execute match immediately
+	AFTrace     = 0x02000000 // Trace ufunction
+	AFPropagate = 0x04000000 // Auto-copy from parent to child on @parent/@clone (GoTinyMUSH extension)
 )
 
 // BoolExpType represents the type of a boolean lock expression node.

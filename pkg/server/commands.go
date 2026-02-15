@@ -110,6 +110,10 @@ func InitCommands() map[string]*Command {
 	registerNG("@edit", cmdEdit)
 	registerNG("@admin", cmdAdmin)
 
+	// Attribute management (no guest)
+	registerNG("@attribute", cmdAttribute)
+	register("@attlist", cmdAttlist)
+
 	// SQL (no guest)
 	registerNG("@sql", cmdSQL)
 	registerNG("@sqlinit", cmdSQLInit)
@@ -168,73 +172,75 @@ func InitCommands() map[string]*Command {
 	registerNG("@kill", makeAttrSetter(11))        // A_KILL
 	registerNG("@okill", makeAttrSetter(10))       // A_OKILL
 	registerNG("@akill", makeAttrSetter(15))       // A_AKILL
-	// Enter/Leave attributes
-	registerNG("@enter", makeAttrSetter(29))       // A_ENTER
-	registerNG("@oenter", makeAttrSetter(49))      // A_OENTER
-	registerNG("@oxenter", makeAttrSetter(30))     // A_OXENTER
-	registerNG("@aenter", makeAttrSetter(31))      // A_AENTER
-	registerNG("@leave", makeAttrSetter(46))       // A_LEAVE
-	registerNG("@oleave", makeAttrSetter(47))      // A_OLEAVE
-	registerNG("@aleave", makeAttrSetter(48))      // A_ALEAVE
+	// Enter/Leave attributes — numbers from constants.h
+	registerNG("@enter", makeAttrSetter(33))       // A_ENTER = 33
+	registerNG("@oenter", makeAttrSetter(53))      // A_OENTER = 53
+	registerNG("@oxenter", makeAttrSetter(34))     // A_OXENTER = 34
+	registerNG("@aenter", makeAttrSetter(35))      // A_AENTER = 35
+	registerNG("@leave", makeAttrSetter(50))       // A_LEAVE = 50
+	registerNG("@oleave", makeAttrSetter(51))      // A_OLEAVE = 51
+	registerNG("@aleave", makeAttrSetter(52))      // A_ALEAVE = 52
+	registerNG("@oxleave", makeAttrSetter(54))     // A_OXLEAVE = 54
 	// Use attributes
-	registerNG("@use", makeAttrSetter(41))         // A_USE
-	registerNG("@ouse", makeAttrSetter(42))        // A_OUSE
-	registerNG("@ause", makeAttrSetter(16))        // A_AUSE
+	registerNG("@use", makeAttrSetter(45))         // A_USE = 45
+	registerNG("@ouse", makeAttrSetter(46))        // A_OUSE = 46
+	registerNG("@ause", makeAttrSetter(16))        // A_AUSE = 16
 	// Player info
-	registerNG("@sex", makeAttrSetter(7))          // A_SEX
-	registerNG("@alias", makeAttrSetter(54))       // A_ALIAS
-	registerNG("@away", makeAttrSetter(69))        // A_AWAY
-	registerNG("@idle", makeAttrSetter(70))        // A_IDLE
-	registerNG("@listen", makeAttrSetter(24))      // A_LISTEN
-	registerNG("@ahear", makeAttrSetter(25))       // A_AHEAR
+	registerNG("@sex", makeAttrSetter(7))          // A_SEX = 7
+	registerNG("@alias", makeAttrSetter(58))       // A_ALIAS = 58
+	registerNG("@away", makeAttrSetter(73))        // A_AWAY = 73
+	registerNG("@idle", makeAttrSetter(74))        // A_IDLE = 74
+	registerNG("@listen", makeAttrSetter(26))      // A_LISTEN = 26
+	registerNG("@ahear", makeAttrSetter(29))       // A_AHEAR = 29
 	// Move attributes
-	registerNG("@move", makeAttrSetter(51))        // A_MOVE
-	registerNG("@omove", makeAttrSetter(52))       // A_OMOVE
-	registerNG("@amove", makeAttrSetter(53))       // A_AMOVE
+	registerNG("@move", makeAttrSetter(55))        // A_MOVE = 55
+	registerNG("@omove", makeAttrSetter(56))       // A_OMOVE = 56
+	registerNG("@amove", makeAttrSetter(57))       // A_AMOVE = 57
 	// Description variants
-	registerNG("@odescribe", makeAttrSetter(33))   // A_ODESC
-	registerNG("@adescribe", makeAttrSetter(32))   // A_ADESC
-	registerNG("@idesc", makeAttrSetter(28))       // A_IDESC
+	registerNG("@odescribe", makeAttrSetter(37))   // A_ODESC = 37
+	registerNG("@adescribe", makeAttrSetter(36))   // A_ADESC = 36
+	registerNG("@idesc", makeAttrSetter(32))       // A_IDESC = 32
 	// Payment
-	registerNG("@pay", makeAttrSetter(21))         // A_PAY
-	registerNG("@opay", makeAttrSetter(22))        // A_OPAY
-	registerNG("@apay", makeAttrSetter(23))        // A_APAY
+	registerNG("@pay", makeAttrSetter(23))         // A_PAY = 23
+	registerNG("@opay", makeAttrSetter(22))        // A_OPAY = 22
+	registerNG("@apay", makeAttrSetter(21))        // A_APAY = 21
+	registerNG("@cost", makeAttrSetter(24))        // A_COST = 24
 	// Startup/daily
-	registerNG("@startup", makeAttrSetter(19))     // A_STARTUP
-	registerNG("@daily", makeAttrSetter(252))      // A_DAILYATTRIB
-	// Format overrides (attr numbers match C source: attrs.h)
-	registerNG("@conformat", makeAttrSetter(214))  // A_LCON_FMT
-	registerNG("@exitformat", makeAttrSetter(215)) // A_LEXITS_FMT
-	registerNG("@nameformat", makeAttrSetter(222)) // A_NAME_FMT
+	registerNG("@startup", makeAttrSetter(19))     // A_STARTUP = 19
+	registerNG("@daily", makeAttrSetter(204))      // A_DAILY = 204
+	// Format overrides
+	registerNG("@conformat", makeAttrSetter(214))  // A_LCON_FMT = 214
+	registerNG("@exitformat", makeAttrSetter(215)) // A_LEXITS_FMT = 215
+	registerNG("@nameformat", makeAttrSetter(222)) // A_NAME_FMT = 222
 	// Enter/Leave aliases
-	registerNG("@ealias", makeAttrSetter(60))      // A_EALIAS
-	registerNG("@lalias", makeAttrSetter(61))      // A_LALIAS
+	registerNG("@ealias", makeAttrSetter(64))      // A_EALIAS = 64
+	registerNG("@lalias", makeAttrSetter(65))      // A_LALIAS = 65
 	// Filtering
-	registerNG("@filter", makeAttrSetter(88))      // A_FILTER
-	registerNG("@infilter", makeAttrSetter(87))    // A_INFILTER
-	registerNG("@forwardlist", makeAttrSetter(91)) // A_FORWARDLIST
-	registerNG("@prefix", makeAttrSetter(86))      // A_PREFIX
-	registerNG("@inprefix", makeAttrSetter(85))    // A_INPREFIX
+	registerNG("@filter", makeAttrSetter(92))      // A_FILTER = 92
+	registerNG("@infilter", makeAttrSetter(91))    // A_INFILTER = 91
+	registerNG("@forwardlist", makeAttrSetter(95)) // A_FORWARDLIST = 95
+	registerNG("@prefix", makeAttrSetter(90))      // A_PREFIX = 90
+	registerNG("@inprefix", makeAttrSetter(89))    // A_INPREFIX = 89
 	// Enter/Leave/Use failure variants
-	registerNG("@efail", makeAttrSetter(62))       // A_EFAIL
-	registerNG("@oefail", makeAttrSetter(63))      // A_OEFAIL
-	registerNG("@aefail", makeAttrSetter(64))      // A_AEFAIL
-	registerNG("@lfail", makeAttrSetter(65))       // A_LFAIL
-	registerNG("@olfail", makeAttrSetter(66))      // A_OLFAIL
-	registerNG("@alfail", makeAttrSetter(67))      // A_ALFAIL
-	registerNG("@ufail", makeAttrSetter(71))       // A_UFAIL
-	registerNG("@oufail", makeAttrSetter(72))      // A_OUFAIL
-	registerNG("@aufail", makeAttrSetter(73))      // A_AUFAIL
+	registerNG("@efail", makeAttrSetter(66))       // A_EFAIL = 66
+	registerNG("@oefail", makeAttrSetter(67))      // A_OEFAIL = 67
+	registerNG("@aefail", makeAttrSetter(68))      // A_AEFAIL = 68
+	registerNG("@lfail", makeAttrSetter(69))       // A_LFAIL = 69
+	registerNG("@olfail", makeAttrSetter(70))      // A_OLFAIL = 70
+	registerNG("@alfail", makeAttrSetter(71))      // A_ALFAIL = 71
+	registerNG("@ufail", makeAttrSetter(75))       // A_UFAIL = 75
+	registerNG("@oufail", makeAttrSetter(76))      // A_OUFAIL = 76
+	registerNG("@aufail", makeAttrSetter(77))      // A_AUFAIL = 77
 	// Teleport messages
-	registerNG("@tport", makeAttrSetter(75))       // A_TPORT
-	registerNG("@otport", makeAttrSetter(76))      // A_OTPORT
-	registerNG("@oxtport", makeAttrSetter(77))     // A_OXTPORT
-	registerNG("@atport", makeAttrSetter(78))      // A_ATPORT
-	// Costs/charges
-	registerNG("@cost", makeAttrSetter(17))        // A_CHARGES
-	registerNG("@runout", makeAttrSetter(18))      // A_RUNOUT
+	registerNG("@tport", makeAttrSetter(79))       // A_TPORT = 79
+	registerNG("@otport", makeAttrSetter(80))      // A_OTPORT = 80
+	registerNG("@oxtport", makeAttrSetter(81))     // A_OXTPORT = 81
+	registerNG("@atport", makeAttrSetter(82))      // A_ATPORT = 82
+	// Charges
+	registerNG("@charges", makeAttrSetter(17))     // A_CHARGES = 17
+	registerNG("@runout", makeAttrSetter(18))      // A_RUNOUT = 18
 	// Reject
-	registerNG("@reject", makeAttrSetter(68))      // A_REJECT
+	registerNG("@reject", makeAttrSetter(72))      // A_REJECT = 72
 
 	// Spellcheck
 	registerNG("@dictionary", cmdDictionary)
@@ -460,7 +466,7 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 
 	if !g.Conns.IsConnected(target) {
 		targetObj := g.DB.Objects[target]
-		d.Send(fmt.Sprintf("%s is not connected.", targetObj.Name))
+		d.Send(fmt.Sprintf("%s is not connected.", DisplayName(targetObj.Name)))
 		return
 	}
 
@@ -469,14 +475,14 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 
 	pageData := map[string]any{
 		"sender":  senderName,
-		"target":  targetObj.Name,
+		"target":  DisplayName(targetObj.Name),
 		"message": message,
 	}
 
 	if message == "" {
 		g.EmitEvent(d.Player, "PAGE", events.Event{
 			Type: events.EvPage, Source: d.Player,
-			Text: fmt.Sprintf("You page %s.", targetObj.Name),
+			Text: fmt.Sprintf("You page %s.", DisplayName(targetObj.Name)),
 			Data: pageData,
 		})
 		g.EmitEvent(target, "PAGE", events.Event{
@@ -491,7 +497,7 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 			pose := strings.TrimPrefix(message, ":")
 			g.EmitEvent(d.Player, "PAGE", events.Event{
 				Type: events.EvPage, Source: d.Player,
-				Text: fmt.Sprintf("Long distance to %s: %s %s", targetObj.Name, senderName, pose),
+				Text: fmt.Sprintf("Long distance to %s: %s %s", DisplayName(targetObj.Name), senderName, pose),
 				Data: pageData,
 			})
 			g.EmitEvent(target, "PAGE", events.Event{
@@ -503,7 +509,7 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 			pose := strings.TrimPrefix(message, ";")
 			g.EmitEvent(d.Player, "PAGE", events.Event{
 				Type: events.EvPage, Source: d.Player,
-				Text: fmt.Sprintf("Long distance to %s: %s%s", targetObj.Name, senderName, pose),
+				Text: fmt.Sprintf("Long distance to %s: %s%s", DisplayName(targetObj.Name), senderName, pose),
 				Data: pageData,
 			})
 			g.EmitEvent(target, "PAGE", events.Event{
@@ -514,7 +520,7 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 		} else {
 			g.EmitEvent(d.Player, "PAGE", events.Event{
 				Type: events.EvPage, Source: d.Player,
-				Text: fmt.Sprintf("You page %s with \"%s\"", targetObj.Name, message),
+				Text: fmt.Sprintf("You page %s with \"%s\"", DisplayName(targetObj.Name), message),
 				Data: pageData,
 			})
 			g.EmitEvent(target, "PAGE", events.Event{
@@ -779,47 +785,45 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	if attrName != "" {
-		// Show a single attribute with permission check
-		upperName := strings.ToUpper(strings.TrimSpace(attrName))
+		// C TinyMUSH always uses parse_attrib_wild + exam_wildattrs for
+		// obj/attr — both exact names and wildcard patterns go through
+		// the same quick_wild matching path.
+		pattern := strings.ToLower(strings.TrimSpace(attrName))
 		obj, ok := g.DB.Objects[target]
 		if !ok {
 			d.Send("I don't see that here.")
 			return
 		}
-		// Resolve attr number
-		attrNum := -1
-		if def, ok := g.DB.AttrByName[upperName]; ok {
-			attrNum = def.Number
-		} else {
-			for num, name := range gamedb.WellKnownAttrs {
-				if strings.EqualFold(name, upperName) {
-					attrNum = num
-					break
-				}
-			}
-		}
-		if attrNum < 0 {
-			d.Send(fmt.Sprintf("No such attribute: %s", attrName))
-			return
-		}
-		// Find the attr on the object
 		found := false
 		for _, attr := range obj.Attrs {
-			if attr.Number == attrNum {
-				info := ParseAttrInfo(attr.Value)
-				def := g.LookupAttrDef(attrNum)
-				if !CanReadAttr(g, d.Player, target, def, info.Flags, info.Owner) {
-					d.Send("Permission denied.")
-				} else {
-					text := eval.StripAttrPrefix(attr.Value)
-					d.Send(fmt.Sprintf("  %s: %s", upperName, text))
-				}
-				found = true
-				break
+			name := g.DB.GetAttrName(attr.Number)
+			if name == "" {
+				name = fmt.Sprintf("ATTR_%d", attr.Number)
 			}
+			if !wildMatchSimple(pattern, strings.ToLower(name)) {
+				continue
+			}
+			info := ParseAttrInfo(attr.Value)
+			def := g.LookupAttrDef(attr.Number)
+			if !CanReadAttr(g, d.Player, target, def, info.Flags, info.Owner) {
+				continue
+			}
+			text := eval.StripAttrPrefix(attr.Value)
+			// C TinyMUSH: only show annotation if player controls object or owns attr
+			showAnnotation := Controls(g, d.Player, target) || info.Owner == d.Player
+			annotation := ""
+			if showAnnotation {
+				annotation = attrAnnotation(g, d.Player, info, def)
+			}
+			if annotation != "" {
+				d.Send(fmt.Sprintf("  %s %s: %s", name, annotation, text))
+			} else {
+				d.Send(fmt.Sprintf("  %s: %s", name, text))
+			}
+			found = true
 		}
 		if !found {
-			d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+			d.Send("No matching attributes found.")
 		}
 		return
 	}
@@ -843,7 +847,7 @@ func cmdInventory(g *Game, d *Descriptor, _ string, _ []string) {
 		if !ok {
 			break
 		}
-		d.Send(fmt.Sprintf("  %s", obj.Name))
+		d.Send(fmt.Sprintf("  %s", DisplayName(obj.Name)))
 		next = obj.Next
 	}
 }
@@ -1095,10 +1099,20 @@ func NewGame(db *gamedb.Database) *Game {
 	}
 }
 
+// DisplayName returns the display name of an object (before the first semicolon).
+// In TinyMUSH, object names can contain semicolon-separated aliases
+// (e.g., "Crystal Tuner;tuner;ct") — only the first part is the display name.
+func DisplayName(name string) string {
+	if idx := strings.IndexByte(name, ';'); idx >= 0 {
+		return name[:idx]
+	}
+	return name
+}
+
 // PlayerName returns the name of a player.
 func (g *Game) PlayerName(player gamedb.DBRef) string {
 	if obj, ok := g.DB.Objects[player]; ok {
-		return obj.Name
+		return DisplayName(obj.Name)
 	}
 	return "Unknown"
 }
@@ -1126,7 +1140,7 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 		g.RemoveFromContents(oldLoc, player)
 		// Announce departure
 		g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
-			fmt.Sprintf("%s has left.", playerObj.Name))
+			fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
 	}
 
 	// Set new location
@@ -1140,7 +1154,7 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 
 	// Announce arrival
 	g.Conns.SendToRoomExcept(g.DB, dest, player,
-		fmt.Sprintf("%s has arrived.", playerObj.Name))
+		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 
 	// Persist moved player and affected rooms
 	persistList := []*gamedb.Object{playerObj}
@@ -1208,7 +1222,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		ctx := makeCtx()
 		d.Send(ctx.Exec(nameFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
 	} else {
-		d.Send(roomObj.Name)
+		d.Send(DisplayName(roomObj.Name))
 	}
 
 	// Description — executor is the room (so v() resolves room attrs), enactor is the player
@@ -1263,7 +1277,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		d.Send("Contents:")
 		for _, ref := range contentRefs {
 			if obj, ok := g.DB.Objects[ref]; ok {
-				d.Send("  " + obj.Name)
+				d.Send("  " + DisplayName(obj.Name))
 			}
 		}
 	}
@@ -1317,19 +1331,24 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		}
 		d.Send("  " + strings.Join(exitNames, "  "))
 	}
+
+	// ADESC (36) — action list executed on the room when looked at
+	g.QueueAttrAction(room, d.Player, 36, nil) // A_ADESC
 }
 
 // ShowObject displays an object to a player.
+// Implements the C TinyMUSH did_it pattern: DESC to player, ODESC to room, ADESC action.
 func (g *Game) ShowObject(d *Descriptor, target gamedb.DBRef) {
 	obj, ok := g.DB.Objects[target]
 	if !ok {
 		d.Send("I don't see that here.")
 		return
 	}
-	d.Send(obj.Name)
-	desc := g.GetAttrText(target, 6)
+	d.Send(DisplayName(obj.Name))
+
+	// DESC (6) — description shown to the looker
+	desc := g.GetAttrText(target, 6) // A_DESC
 	if desc != "" {
-		// Executor is the target object (so v() resolves its attrs), enactor is the looker
 		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
 			functions.RegisterAll(c)
 		})
@@ -1337,6 +1356,20 @@ func (g *Game) ShowObject(d *Descriptor, target gamedb.DBRef) {
 	} else {
 		d.Send("You see nothing special.")
 	}
+
+	// ODESC (37) — message shown to others in the room
+	odesc := g.GetAttrText(target, 37) // A_ODESC
+	if odesc != "" {
+		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		msg := ctx.Exec(odesc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+		loc := g.PlayerLocation(d.Player)
+		g.Conns.SendToRoomExcept(g.DB, loc, d.Player, msg)
+	}
+
+	// ADESC (36) — action list executed on the target object
+	g.QueueAttrAction(target, d.Player, 36, nil) // A_ADESC
 }
 
 // ShowExamine shows detailed object info (wizard/owner command).
@@ -1396,8 +1429,12 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		if truncLen > 0 && len(text) > truncLen {
 			text = text[:truncLen] + "..."
 		}
-		// Build attribute flag/owner annotation like TinyMUSH: [#owner] [$D]
-		annotation := attrAnnotation(g, d.Player, info, def)
+		// C TinyMUSH: only show annotation if player controls object or owns attr
+		showAnnotation := Controls(g, d.Player, target) || info.Owner == d.Player
+		annotation := ""
+		if showAnnotation {
+			annotation = attrAnnotation(g, d.Player, info, def)
+		}
 		if annotation != "" {
 			d.Send(fmt.Sprintf("  %s %s: %s", name, annotation, text))
 		} else {
@@ -1435,22 +1472,37 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 }
 
 // attrAnnotation builds a TinyMUSH-style annotation string for an attribute.
-// Shows owner override as [#dbref] and per-instance flags as [$flags].
+// C TinyMUSH's view_atr shows: [#owner instance_flags(def_flags)]
+// Per-instance flags (aflags) and definition flags (ap->flags) are shown
+// separately: instance flags directly, definition flags in parentheses.
 func attrAnnotation(g *Game, player gamedb.DBRef, info AttrInfo, def *gamedb.AttrDef) string {
 	var parts []string
 	// Show owner if different from object owner (non-default)
 	if info.Owner != gamedb.Nothing && info.Owner != gamedb.DBRef(0) {
 		parts = append(parts, fmt.Sprintf("#%d", info.Owner))
 	}
-	// Show per-instance attribute flags
-	flags := info.Flags
+
+	// Per-instance flags (from the attribute value's \x01 header)
+	instStr := attrFlagString(info.Flags)
+	// Definition flags (from the AttrDef loaded from flatfile)
+	defStr := ""
 	if def != nil {
-		flags |= def.Flags
+		defStr = attrFlagString(def.Flags)
 	}
-	flagStr := attrFlagString(flags)
-	if flagStr != "" {
-		parts = append(parts, flagStr)
+
+	// Format: "inst(def)", "(def)", or "inst"
+	var flagPart string
+	if instStr != "" && defStr != "" {
+		flagPart = instStr + "(" + defStr + ")"
+	} else if defStr != "" {
+		flagPart = "(" + defStr + ")"
+	} else if instStr != "" {
+		flagPart = instStr
 	}
+	if flagPart != "" {
+		parts = append(parts, flagPart)
+	}
+
 	if len(parts) == 0 {
 		return ""
 	}
@@ -1458,52 +1510,71 @@ func attrAnnotation(g *Game, player gamedb.DBRef, info AttrInfo, def *gamedb.Att
 }
 
 // attrFlagString converts attribute flags to a compact display string.
+// Letter mappings match C TinyMUSH's view_atr exactly.
 func attrFlagString(flags int) string {
 	var buf strings.Builder
-	if flags&gamedb.AFDark != 0 {
-		buf.WriteByte('D')
+	if flags&gamedb.AFLock != 0 {
+		buf.WriteByte('+')
 	}
-	if flags&gamedb.AFWizard != 0 {
-		buf.WriteByte('W')
-	}
-	if flags&gamedb.AFMDark != 0 {
-		buf.WriteByte('M')
-	}
-	if flags&gamedb.AFVisual != 0 {
-		buf.WriteByte('V')
-	}
-	if flags&gamedb.AFNoCMD != 0 {
+	if flags&gamedb.AFNoProg != 0 {
 		buf.WriteByte('$')
-	}
-	if flags&gamedb.AFNoClone != 0 {
-		buf.WriteByte('c')
-	}
-	if flags&gamedb.AFPrivate != 0 {
-		buf.WriteByte('i')
-	}
-	if flags&gamedb.AFRegexp != 0 {
-		buf.WriteByte('R')
 	}
 	if flags&gamedb.AFCase != 0 {
 		buf.WriteByte('C')
 	}
-	if flags&gamedb.AFNoParse != 0 {
-		buf.WriteByte('P')
-	}
-	if flags&gamedb.AFGod != 0 {
-		buf.WriteByte('G')
-	}
-	if flags&gamedb.AFNoProg != 0 {
-		buf.WriteByte('N')
-	}
-	if flags&gamedb.AFODark != 0 {
-		buf.WriteByte('o')
+	if flags&gamedb.AFDefault != 0 {
+		buf.WriteByte('D')
 	}
 	if flags&gamedb.AFHTML != 0 {
 		buf.WriteByte('H')
 	}
-	if flags&gamedb.AFLock != 0 {
-		buf.WriteByte('+')
+	if flags&gamedb.AFPrivate != 0 {
+		buf.WriteByte('I')
+	}
+	if flags&gamedb.AFRMatch != 0 {
+		buf.WriteByte('M')
+	}
+	if flags&gamedb.AFNoName != 0 {
+		buf.WriteByte('N')
+	}
+	if flags&gamedb.AFNoParse != 0 {
+		buf.WriteByte('P')
+	}
+	if flags&gamedb.AFNow != 0 {
+		buf.WriteByte('Q')
+	}
+	if flags&gamedb.AFRegexp != 0 {
+		buf.WriteByte('R')
+	}
+	if flags&gamedb.AFStructure != 0 {
+		buf.WriteByte('S')
+	}
+	if flags&gamedb.AFTrace != 0 {
+		buf.WriteByte('T')
+	}
+	if flags&gamedb.AFVisual != 0 {
+		buf.WriteByte('V')
+	}
+	if flags&gamedb.AFNoClone != 0 {
+		buf.WriteByte('c')
+	}
+	if flags&gamedb.AFDark != 0 {
+		buf.WriteByte('d')
+	}
+	if flags&gamedb.AFGod != 0 {
+		buf.WriteByte('g')
+	}
+	if flags&gamedb.AFConst != 0 {
+		buf.WriteByte('k')
+	}
+	if flags&gamedb.AFMDark != 0 {
+		buf.WriteByte('m')
+	}
+	if flags&gamedb.AFWizard != 0 {
+		buf.WriteByte('w')
+	}
+	if flags&gamedb.AFPropagate != 0 {
+		buf.WriteByte('p')
 	}
 	return buf.String()
 }
@@ -1757,39 +1828,57 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 		return gamedb.Nothing
 	}
 
-	// Search room contents
-	loc := playerObj.Location
-	if locObj, ok := g.DB.Objects[loc]; ok {
-		next := locObj.Contents
+	nameLower := strings.ToLower(name)
+
+	// matchAliases checks name and semicolon-separated aliases for exact or prefix match.
+	// Returns 2 for exact match, 1 for prefix match, 0 for no match.
+	matchAliases := func(objName string) int {
+		for _, alias := range strings.Split(objName, ";") {
+			alias = strings.TrimSpace(alias)
+			aliasLower := strings.ToLower(alias)
+			if aliasLower == nameLower {
+				return 2 // exact
+			}
+			if strings.HasPrefix(aliasLower, nameLower) {
+				return 1 // prefix
+			}
+		}
+		return 0
+	}
+
+	// searchContents searches a contents chain for exact then prefix matches.
+	searchContents := func(first gamedb.DBRef) gamedb.DBRef {
+		var prefixMatch gamedb.DBRef = gamedb.Nothing
+		next := first
 		for next != gamedb.Nothing {
 			obj, ok := g.DB.Objects[next]
 			if !ok {
 				break
 			}
-			if strings.EqualFold(obj.Name, name) {
-				return next
-			}
-			// Check exit aliases
-			for _, alias := range strings.Split(obj.Name, ";") {
-				if strings.EqualFold(strings.TrimSpace(alias), name) {
-					return next
+			switch matchAliases(obj.Name) {
+			case 2:
+				return next // exact match wins immediately
+			case 1:
+				if prefixMatch == gamedb.Nothing {
+					prefixMatch = next // remember first prefix match
 				}
 			}
 			next = obj.Next
 		}
+		return prefixMatch
+	}
+
+	// Search room contents
+	loc := playerObj.Location
+	if locObj, ok := g.DB.Objects[loc]; ok {
+		if found := searchContents(locObj.Contents); found != gamedb.Nothing {
+			return found
+		}
 	}
 
 	// Search player inventory
-	next := playerObj.Contents
-	for next != gamedb.Nothing {
-		obj, ok := g.DB.Objects[next]
-		if !ok {
-			break
-		}
-		if strings.EqualFold(obj.Name, name) {
-			return next
-		}
-		next = obj.Next
+	if found := searchContents(playerObj.Contents); found != gamedb.Nothing {
+		return found
 	}
 
 	return gamedb.Nothing
@@ -1816,7 +1905,7 @@ func (g *Game) ResolveRef(player gamedb.DBRef, s string) gamedb.DBRef {
 // ObjName returns the name of an object by dbref.
 func (g *Game) ObjName(ref gamedb.DBRef) string {
 	if obj, ok := g.DB.Objects[ref]; ok {
-		return obj.Name
+		return DisplayName(obj.Name)
 	}
 	return fmt.Sprintf("#%d", ref)
 }
@@ -1864,6 +1953,9 @@ func (g *Game) GetAttrTextDirect(obj gamedb.DBRef, attrNum int) string {
 }
 
 // SetAttr sets an attribute on an object, preserving existing per-instance flags.
+// If the attribute doesn't exist on the object and the attribute definition has
+// AF_PROPAGATE, the attribute metadata (owner, per-instance flags) is copied
+// from the parent chain before applying the new value (lazy propagation).
 func (g *Game) SetAttr(obj gamedb.DBRef, attrNum int, value string) {
 	o, ok := g.DB.Objects[obj]
 	if !ok {
@@ -1880,9 +1972,49 @@ func (g *Game) SetAttr(obj gamedb.DBRef, attrNum int, value string) {
 			return
 		}
 	}
-	fullValue := "\x01" + owner + ":0:" + value
+
+	// Attribute doesn't exist on this object yet.
+	// Check for AF_PROPAGATE: if the attr definition has it, copy metadata
+	// from the parent chain so per-instance flags and owner are preserved.
+	instFlags := 0
+	if def := g.LookupAttrDef(attrNum); def != nil && def.Flags&gamedb.AFPropagate != 0 {
+		if parentInfo := g.findParentAttr(obj, attrNum); parentInfo != nil {
+			instFlags = parentInfo.Flags
+			// Use parent attr's owner if set, otherwise use object's owner
+			if parentInfo.Owner != gamedb.Nothing && parentInfo.Owner != gamedb.DBRef(0) {
+				owner = fmt.Sprintf("%d", parentInfo.Owner)
+			}
+		}
+	}
+
+	fullValue := fmt.Sprintf("\x01%s:%d:%s", owner, instFlags, value)
 	o.Attrs = append(o.Attrs, gamedb.Attribute{Number: attrNum, Value: fullValue})
 	g.PersistObject(o)
+}
+
+// findParentAttr walks the parent chain looking for an attribute.
+// Returns the AttrInfo from the first parent that has it, or nil.
+func (g *Game) findParentAttr(obj gamedb.DBRef, attrNum int) *AttrInfo {
+	o, ok := g.DB.Objects[obj]
+	if !ok {
+		return nil
+	}
+	// Walk parent chain (with depth limit to prevent cycles)
+	cur := o.Parent
+	for depth := 0; depth < 20 && cur != gamedb.Nothing; depth++ {
+		pObj, ok := g.DB.Objects[cur]
+		if !ok {
+			break
+		}
+		for _, attr := range pObj.Attrs {
+			if attr.Number == attrNum {
+				info := ParseAttrInfo(attr.Value)
+				return &info
+			}
+		}
+		cur = pObj.Parent
+	}
+	return nil
 }
 
 // SetAttrRaw sets an attribute with explicit owner and flags.
@@ -2067,9 +2199,9 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 	playerObj.Contents = target
 	g.PersistObjects(obj, playerObj)
 
-	d.Send(fmt.Sprintf("You pick up %s.", obj.Name))
+	d.Send(fmt.Sprintf("You pick up %s.", DisplayName(obj.Name)))
 	g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-		fmt.Sprintf("%s picks up %s.", g.PlayerName(d.Player), obj.Name))
+		fmt.Sprintf("%s picks up %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
 
 	// Fire ASUCC if present
 	g.QueueAttrAction(target, d.Player, 12, nil) // A_ASUCC = 12
@@ -2108,9 +2240,9 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 	locObj.Contents = target
 	g.PersistObjects(obj, locObj)
 
-	d.Send(fmt.Sprintf("You drop %s.", obj.Name))
+	d.Send(fmt.Sprintf("You drop %s.", DisplayName(obj.Name)))
 	g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-		fmt.Sprintf("%s drops %s.", g.PlayerName(d.Player), obj.Name))
+		fmt.Sprintf("%s drops %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
 
 	// Fire ADROP if present
 	g.QueueAttrAction(target, d.Player, 14, nil) // A_ADROP = 14
@@ -2148,7 +2280,7 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 		playerObj.Pennies -= amount
 		targetObj.Pennies += amount
 		g.PersistObjects(playerObj, targetObj)
-		d.Send(fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), targetObj.Name))
+		d.Send(fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
 		g.Conns.SendToPlayer(target,
 			fmt.Sprintf("%s gives you %d %s.", g.PlayerName(d.Player), amount, g.MoneyName(amount)))
 		return
@@ -2173,9 +2305,9 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 	targetObj.Contents = thing
 	g.PersistObjects(thingObj, targetObj)
 
-	d.Send(fmt.Sprintf("You give %s to %s.", thingObj.Name, targetObj.Name))
+	d.Send(fmt.Sprintf("You give %s to %s.", DisplayName(thingObj.Name), DisplayName(targetObj.Name)))
 	g.Conns.SendToPlayer(target,
-		fmt.Sprintf("%s gives you %s.", g.PlayerName(d.Player), thingObj.Name))
+		fmt.Sprintf("%s gives you %s.", g.PlayerName(d.Player), DisplayName(thingObj.Name)))
 }
 
 func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
@@ -2215,7 +2347,7 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 
 	// Announce departure
 	g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-		fmt.Sprintf("%s has left.", playerObj.Name))
+		fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
 
 	// Move inside target
 	playerObj.Location = target
@@ -2223,12 +2355,12 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 	obj.Contents = d.Player
 	g.PersistObjects(playerObj, obj)
 
-	d.Send(fmt.Sprintf("You enter %s.", obj.Name))
+	d.Send(fmt.Sprintf("You enter %s.", DisplayName(obj.Name)))
 	g.Conns.SendToRoomExcept(g.DB, target, d.Player,
-		fmt.Sprintf("%s has arrived.", playerObj.Name))
+		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 
 	g.ShowRoom(d, target)
-	g.QueueAttrAction(target, d.Player, 31, nil) // A_AENTER = 31
+	g.QueueAttrAction(target, d.Player, 35, nil) // A_AENTER = 35
 }
 
 func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
@@ -2257,7 +2389,7 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 	// Remove from container
 	g.RemoveFromContents(loc, d.Player)
 	g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-		fmt.Sprintf("%s has left.", playerObj.Name))
+		fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
 
 	// Move to container's location
 	destObj, ok := g.DB.Objects[dest]
@@ -2272,10 +2404,10 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 
 	d.Send("You leave.")
 	g.Conns.SendToRoomExcept(g.DB, dest, d.Player,
-		fmt.Sprintf("%s has arrived.", playerObj.Name))
+		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 
 	g.ShowRoom(d, dest)
-	g.QueueAttrAction(loc, d.Player, 48, nil) // A_ALEAVE = 48
+	g.QueueAttrAction(loc, d.Player, 52, nil) // A_ALEAVE = 52
 }
 
 func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
@@ -2300,7 +2432,7 @@ func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	senderName := g.PlayerName(d.Player)
-	d.Send(g.WrapMarker(d.Player, "WHISPER", fmt.Sprintf("You whisper \"%s\" to %s.", message, targetObj.Name)))
+	d.Send(g.WrapMarker(d.Player, "WHISPER", fmt.Sprintf("You whisper \"%s\" to %s.", message, DisplayName(targetObj.Name))))
 	g.SendMarkedToPlayer(target, "WHISPER",
 		fmt.Sprintf("%s whispers \"%s\"", senderName, message))
 
@@ -2314,7 +2446,7 @@ func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
 			continue
 		}
 		if g.PlayerLocation(dd.Player) == loc {
-			dd.Send(g.WrapMarker(dd.Player, "WHISPER", fmt.Sprintf("%s whispers something to %s.", senderName, targetObj.Name)))
+			dd.Send(g.WrapMarker(dd.Player, "WHISPER", fmt.Sprintf("%s whispers something to %s.", senderName, DisplayName(targetObj.Name))))
 		}
 	}
 }
@@ -2335,12 +2467,12 @@ func cmdUse(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	// Fire A_USE
-	useText := g.GetAttrText(target, 41) // A_USE = 41
+	useText := g.GetAttrText(target, 45) // A_USE = 45
 	if useText != "" {
 		d.Send(useText)
 	}
 	// Fire A_OUSE to room
-	ouText := g.GetAttrText(target, 42) // A_OUSE = 42
+	ouText := g.GetAttrText(target, 46) // A_OUSE = 46
 	if ouText != "" {
 		loc := g.PlayerLocation(d.Player)
 		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
@@ -2372,7 +2504,7 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	senderName := g.PlayerName(d.Player)
-	d.Send(fmt.Sprintf("You killed %s!", targetObj.Name))
+	d.Send(fmt.Sprintf("You killed %s!", DisplayName(targetObj.Name)))
 	g.Conns.SendToPlayer(target,
 		fmt.Sprintf("%s killed you!", senderName))
 
@@ -2382,7 +2514,7 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 		loc := targetObj.Location
 		g.RemoveFromContents(loc, target)
 		g.Conns.SendToRoomExcept(g.DB, loc, target,
-			fmt.Sprintf("%s has left.", targetObj.Name))
+			fmt.Sprintf("%s has left.", DisplayName(targetObj.Name)))
 		if destObj, ok := g.DB.Objects[home]; ok {
 			targetObj.Location = home
 			targetObj.Next = destObj.Contents
@@ -2390,7 +2522,7 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 			g.PersistObjects(targetObj, destObj)
 		}
 		g.Conns.SendToRoomExcept(g.DB, home, target,
-			fmt.Sprintf("%s has arrived.", targetObj.Name))
+			fmt.Sprintf("%s has arrived.", DisplayName(targetObj.Name)))
 		// Show room to victim
 		for _, dd := range g.Conns.GetByPlayer(target) {
 			g.ShowRoom(dd, home)
@@ -2426,9 +2558,9 @@ func (g *Game) DisconnectPlayer(d *Descriptor) {
 		loc := g.PlayerLocation(d.Player)
 
 		// Fire ADISCONNECT triggers before announcing
-		g.QueueAttrAction(d.Player, d.Player, 36, []string{"disconnect"}) // A_ADISCONNECT = 36
+		g.QueueAttrAction(d.Player, d.Player, 40, []string{"disconnect"}) // A_ADISCONNECT = 40
 		// Global ADISCONNECT on master room
-		g.QueueAttrAction(g.MasterRoomRef(), d.Player, 36, []string{"disconnect"})
+		g.QueueAttrAction(g.MasterRoomRef(), d.Player, 40, []string{"disconnect"}) // A_ADISCONNECT = 40
 
 		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
 			fmt.Sprintf("%s has disconnected.", playerName))

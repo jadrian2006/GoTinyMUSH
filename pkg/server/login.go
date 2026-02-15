@@ -60,9 +60,9 @@ func LookupPlayer(db *gamedb.Database, name string) gamedb.DBRef {
 		if strings.EqualFold(obj.Name, name) {
 			return obj.DBRef
 		}
-		// Match on ALIAS attribute (A_ALIAS = 54)
+		// Match on ALIAS attribute (A_ALIAS = 58)
 		for _, attr := range obj.Attrs {
-			if attr.Number == 54 {
+			if attr.Number == 58 {
 				alias := eval.StripAttrPrefix(attr.Value)
 				if alias != "" && strings.EqualFold(alias, name) {
 					return obj.DBRef

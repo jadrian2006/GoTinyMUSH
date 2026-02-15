@@ -1,7 +1,8 @@
 package gamedb
 
-// Well-known (built-in) attribute numbers from attrs.h
+// Well-known (built-in) attribute numbers from constants.h
 // These are system-defined and always present.
+// Numbers MUST match the C TinyMUSH source exactly since the flatfile uses these numbers.
 var WellKnownAttrs = map[int]string{
 	1:   "OSUCC",
 	2:   "OFAIL",
@@ -23,127 +24,137 @@ var WellKnownAttrs = map[int]string{
 	18:  "RUNOUT",
 	19:  "STARTUP",
 	20:  "ACLONE",
-	21:  "PAY",
+	21:  "APAY",
 	22:  "OPAY",
-	23:  "APAY",
-	24:  "OLISTEN",
-	25:  "AHEAR",
-	26:  "LAST",
-	27:  "QUEUEMAX",
-	28:  "IDESC",
-	29:  "ENTER",
-	30:  "OXENTER",
-	31:  "AENTER",
-	32:  "ADESC",
-	33:  "ODESC",
-	34:  "RQUOTA",
-	35:  "ACONNECT",
-	36:  "ADISCONNECT",
-	37:  "ALLOWANCE",
-	38:  "LOCK",
-	39:  "NAME",
-	40:  "COMMENT",
-	41:  "USE",
-	42:  "OUSE",
-	43:  "SEMAPHORE",
-	44:  "TIMEOUT",
-	45:  "QUOTA",
-	46:  "LEAVE",
-	47:  "OLEAVE",
-	48:  "ALEAVE",
-	49:  "OENTER",
-	50:  "OXLEAVE",
-	51:  "MOVE",
-	52:  "OMOVE",
-	53:  "AMOVE",
-	54:  "ALIAS",
-	55:  "LENTER",
-	56:  "LLEAVE",
-	57:  "LPAGE",
-	58:  "LUSE",
-	59:  "LGIVE",
-	60:  "EALIAS",
-	61:  "LALIAS",
-	62:  "EFAIL",
-	63:  "OEFAIL",
-	64:  "AEFAIL",
-	65:  "LFAIL",
-	66:  "OLFAIL",
-	67:  "ALFAIL",
-	68:  "REJECT",
-	69:  "AWAY",
-	70:  "IDLE",
-	71:  "UFAIL",
-	72:  "OUFAIL",
-	73:  "AUFAIL",
-	74:  "PFAIL",
-	75:  "TPORT",
-	76:  "OTPORT",
-	77:  "OXTPORT",
-	78:  "ATPORT",
-	79:  "PRIVS",
-	80:  "LOGINDATA",
-	81:  "LTPORT",
-	82:  "LDROP",
-	83:  "LRECEIVE",
-	84:  "LASTSITE",
-	85:  "INPREFIX",
-	86:  "PREFIX",
-	87:  "INFILTER",
-	88:  "FILTER",
-	89:  "LLINK",
-	90:  "LTELOUT",
-	91:  "FORWARDLIST",
-	92:  "MAILFOLDERS",
-	93:  "LUSER",
-	94:  "LPARENT",
-	95:  "VA",
-	96:  "VB",
-	97:  "VC",
-	98:  "VD",
-	99:  "VE",
-	100: "VF",
-	101: "VG",
-	102: "VH",
-	103: "VI",
-	104: "VJ",
-	105: "VK",
-	106: "VL",
-	107: "VM",
-	108: "VN",
-	109: "VO",
-	110: "VP",
-	111: "VQ",
-	112: "VR",
-	113: "VS",
-	114: "VT",
-	115: "VU",
-	116: "VV",
-	117: "VW",
-	118: "VX",
-	119: "VY",
-	120: "VZ",
-	129: "LCONTROL",
-	200: "SPEECHMOD",
-	201: "SPEECHLOCK",
-	202: "PROPDIR",
-	203: "CREATED_TIME",
-	204: "MODIFIED_TIME",
-	210: "PROGCMD",
-	213: "LASTIP",
-	214: "CONFORMAT",  // A_LCON_FMT in C source
-	215: "EXITFORMAT", // A_LEXITS_FMT in C source
-	218: "LASTSITE",
-	// Additional high-number system attrs
-	222: "NAMEFORMAT", // A_NAME_FMT in C source
-	240: "VRML_URL",
-	241: "HTDESC",
-	242: "REASON",
-	243: "REGINFO",
-	244: "CONNINFO",
-	252: "DAILYATTRIB",
-	253: "LCHOWN",
-	// A_USER_START marks where user-defined attrs begin
+	23:  "PAY",
+	24:  "COST",
+	25:  "MONEY",
+	26:  "LISTEN",
+	27:  "AAHEAR",
+	28:  "AMHEAR",
+	29:  "AHEAR",
+	30:  "LAST",
+	31:  "QUEUEMAX",
+	32:  "IDESC",
+	33:  "ENTER",
+	34:  "OXENTER",
+	35:  "AENTER",
+	36:  "ADESC",
+	37:  "ODESC",
+	38:  "RQUOTA",
+	39:  "ACONNECT",
+	40:  "ADISCONNECT",
+	41:  "ALLOWANCE",
+	42:  "LOCK",
+	43:  "NAME",
+	44:  "COMMENT",
+	45:  "USE",
+	46:  "OUSE",
+	47:  "SEMAPHORE",
+	48:  "TIMEOUT",
+	49:  "QUOTA",
+	50:  "LEAVE",
+	51:  "OLEAVE",
+	52:  "ALEAVE",
+	53:  "OENTER",
+	54:  "OXLEAVE",
+	55:  "MOVE",
+	56:  "OMOVE",
+	57:  "AMOVE",
+	58:  "ALIAS",
+	59:  "LENTER",
+	60:  "LLEAVE",
+	61:  "LPAGE",
+	62:  "LUSE",
+	63:  "LGIVE",
+	64:  "EALIAS",
+	65:  "LALIAS",
+	66:  "EFAIL",
+	67:  "OEFAIL",
+	68:  "AEFAIL",
+	69:  "LFAIL",
+	70:  "OLFAIL",
+	71:  "ALFAIL",
+	72:  "REJECT",
+	73:  "AWAY",
+	74:  "IDLE",
+	75:  "UFAIL",
+	76:  "OUFAIL",
+	77:  "AUFAIL",
+	// 78: unused (formerly A_PFAIL)
+	79:  "TPORT",
+	80:  "OTPORT",
+	81:  "OXTPORT",
+	82:  "ATPORT",
+	// 83: unused (formerly A_PRIVS)
+	84:  "LOGINDATA",
+	85:  "LTPORT",
+	86:  "LDROP",
+	87:  "LRECEIVE",
+	88:  "LASTSITE",
+	89:  "INPREFIX",
+	90:  "PREFIX",
+	91:  "INFILTER",
+	92:  "FILTER",
+	93:  "LLINK",
+	94:  "LTELOUT",
+	95:  "FORWARDLIST",
+	96:  "MAILFOLDERS",
+	97:  "LUSER",
+	98:  "LPARENT",
+	99:  "LCONTROL",
+	100: "VA",
+	101: "VB",
+	102: "VC",
+	103: "VD",
+	104: "VE",
+	105: "VF",
+	106: "VG",
+	107: "VH",
+	108: "VI",
+	109: "VJ",
+	110: "VK",
+	111: "VL",
+	112: "VM",
+	113: "VN",
+	114: "VO",
+	115: "VP",
+	116: "VQ",
+	117: "VR",
+	118: "VS",
+	119: "VT",
+	120: "VU",
+	121: "VV",
+	122: "VW",
+	123: "VX",
+	124: "VY",
+	125: "VZ",
+	// 126-128: unused
+	129: "GFAIL",
+	130: "OGFAIL",
+	131: "AGFAIL",
+	132: "RFAIL",
+	133: "ORFAIL",
+	134: "ARFAIL",
+	135: "DFAIL",
+	136: "ODFAIL",
+	137: "ADFAIL",
+	138: "TFAIL",
+	139: "OTFAIL",
+	140: "ATFAIL",
+	141: "TOFAIL",
+	142: "OTOFAIL",
+	143: "ATOFAIL",
+	144: "LOPEN",
+	// High-number system attrs
+	202: "AMAIL",
+	204: "DAILYATTRIB",
+	214: "CONFORMAT",  // A_LCON_FMT
+	215: "EXITFORMAT", // A_LEXITS_FMT
+	218: "LASTIP",
+	221: "HTDESC",
+	222: "NAMEFORMAT", // A_NAME_FMT
+	231: "PROPDIR",
 }
 
 // Well-known attribute number constants.
@@ -155,32 +166,32 @@ const A_USER_START = 256
 // WellKnownAttrFlags maps built-in attribute numbers to their default flags.
 // Matches the attr flag definitions in C TinyMUSH's attrs.h.
 var WellKnownAttrFlags = map[int]int{
-	5:   AFDark | AFInternal,             // A_PASS — password hash
-	26:  AFInternal,                       // A_LAST — last command (internal)
-	34:  AFInternal | AFGod,               // A_RQUOTA
-	37:  AFInternal | AFGod,               // A_ALLOWANCE
-	38:  AFInternal | AFIsLock,            // A_LOCK — default lock
-	39:  AFInternal,                       // A_NAME
-	43:  AFInternal,                       // A_SEMAPHORE
-	44:  AFInternal,                       // A_TIMEOUT
-	45:  AFInternal | AFGod,               // A_QUOTA
-	55:  AFInternal | AFIsLock,            // A_LENTER
-	56:  AFInternal | AFIsLock,            // A_LLEAVE
-	57:  AFInternal | AFIsLock,            // A_LPAGE
-	58:  AFInternal | AFIsLock,            // A_LUSE
-	59:  AFInternal | AFIsLock,            // A_LGIVE
-	79:  AFDark | AFNoCMD | AFInternal,    // A_PRIVS
-	80:  AFDark | AFNoCMD | AFInternal,    // A_LOGINDATA
-	81:  AFInternal | AFIsLock,            // A_LTPORT
-	82:  AFInternal | AFIsLock,            // A_LDROP
-	83:  AFInternal | AFIsLock,            // A_LRECEIVE
-	84:  AFDark | AFNoCMD | AFInternal | AFGod, // A_LASTSITE
-	89:  AFInternal | AFIsLock,            // A_LLINK
-	90:  AFInternal | AFIsLock,            // A_LTELOUT
-	92:  AFInternal,                       // A_MAILFOLDERS
-	93:  AFInternal | AFIsLock,            // A_LUSER
-	94:  AFInternal | AFIsLock,            // A_LPARENT
-	129: AFInternal | AFIsLock,            // A_LCONTROL
-	210: AFInternal | AFDark,                       // A_PROGCMD
-	213: AFDark | AFNoCMD | AFInternal | AFGod, // A_LASTIP
+	5:   AFDark | AFInternal,                       // A_PASS — password hash
+	25:  AFInternal,                                 // A_MONEY
+	30:  AFInternal,                                 // A_LAST — last login time
+	38:  AFInternal | AFGod,                         // A_RQUOTA
+	41:  AFInternal | AFGod,                         // A_ALLOWANCE
+	42:  AFInternal | AFIsLock,                      // A_LOCK — default lock
+	43:  AFInternal,                                 // A_NAME
+	47:  AFInternal,                                 // A_SEMAPHORE
+	48:  AFInternal,                                 // A_TIMEOUT
+	49:  AFInternal | AFGod,                         // A_QUOTA
+	59:  AFInternal | AFIsLock,                      // A_LENTER
+	60:  AFInternal | AFIsLock,                      // A_LLEAVE
+	61:  AFInternal | AFIsLock,                      // A_LPAGE
+	62:  AFInternal | AFIsLock,                      // A_LUSE
+	63:  AFInternal | AFIsLock,                      // A_LGIVE
+	84:  AFDark | AFNoCMD | AFInternal,              // A_LOGINDATA
+	85:  AFInternal | AFIsLock,                      // A_LTPORT
+	86:  AFInternal | AFIsLock,                      // A_LDROP
+	87:  AFInternal | AFIsLock,                      // A_LRECEIVE
+	88:  AFDark | AFNoCMD | AFInternal | AFGod,      // A_LASTSITE
+	93:  AFInternal | AFIsLock,                      // A_LLINK
+	94:  AFInternal | AFIsLock,                      // A_LTELOUT
+	96:  AFInternal,                                 // A_MAILFOLDERS
+	97:  AFInternal | AFIsLock,                      // A_LUSER
+	98:  AFInternal | AFIsLock,                      // A_LPARENT
+	99:  AFInternal | AFIsLock,                      // A_LCONTROL
+	210: AFInternal | AFDark,                        // A_PROGCMD
+	218: AFDark | AFNoCMD | AFInternal | AFGod,      // A_LASTIP
 }

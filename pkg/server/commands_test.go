@@ -597,7 +597,7 @@ func TestUse(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Set a USE attribute on TestObject
-	env.game.SetAttr(2, 41, "You use the object.") // A_USE = 41
+	env.game.SetAttr(2, 45, "You use the object.") // A_USE = 45
 	clearOutput(env.player)
 
 	DispatchCommand(env.game, env.player, "use TestObject")
@@ -844,10 +844,10 @@ func TestAttrSetterBulk(t *testing.T) {
 		{"@fail me=nope", 3, "nope"},
 		{"@ofail me=fails", 2, "fails"},
 		{"@sex me=Female", 7, "Female"},
-		{"@alias me=Wiz", 54, "Wiz"},
-		{"@listen me=* says *", 24, "* says *"},
-		{"@idesc me=Inside description", 28, "Inside description"},
-		{"@reject me=Go away!", 68, "Go away!"},
+		{"@alias me=Wiz", 58, "Wiz"},
+		{"@listen me=* says *", 26, "* says *"},
+		{"@idesc me=Inside description", 32, "Inside description"},
+		{"@reject me=Go away!", 72, "Go away!"},
 	}
 
 	for _, tt := range tests {

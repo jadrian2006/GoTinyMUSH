@@ -1,7 +1,9 @@
 package server
 
 import (
+	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -359,4 +361,196 @@ func (g *Game) MailSubject(player gamedb.DBRef, num int) string {
 		return ""
 	}
 	return msg.Subject
+}
+
+// ChannelInfo returns a field value for a channel by name.
+// Requires the caller to be the channel owner or a Wizard.
+func (g *Game) ChannelInfo(player gamedb.DBRef, name, field string) string {
+	if g.Comsys == nil {
+		return ""
+	}
+	ch := g.Comsys.GetChannel(name)
+	if ch == nil {
+		return ""
+	}
+	if !Wizard(g, player) && player != ch.Owner {
+		return "#-1 PERMISSION DENIED"
+	}
+	switch strings.ToLower(field) {
+	case "owner":
+		return fmt.Sprintf("#%d", ch.Owner)
+	case "description", "desc":
+		return ch.Description
+	case "header":
+		return ch.Header
+	case "flags":
+		var flags []string
+		if ch.Flags&gamedb.ChanPublic != 0 {
+			flags = append(flags, "Public")
+		} else {
+			flags = append(flags, "Private")
+		}
+		if ch.Flags&gamedb.ChanLoud != 0 {
+			flags = append(flags, "Loud")
+		}
+		if ch.Flags&gamedb.ChanObject != 0 {
+			flags = append(flags, "Objects")
+		}
+		if ch.Flags&gamedb.ChanNoTitles != 0 {
+			flags = append(flags, "NoTitles")
+		}
+		return strings.Join(flags, " ")
+	case "numsent", "messages":
+		return fmt.Sprintf("%d", ch.NumSent)
+	case "subscribers", "numusers":
+		subs := g.Comsys.ChannelSubscribers(ch.Name)
+		return fmt.Sprintf("%d", len(subs))
+	case "joinlock":
+		return ch.JoinLock
+	case "translock":
+		return ch.TransLock
+	case "recvlock":
+		return ch.RecvLock
+	case "charge":
+		return fmt.Sprintf("%d", ch.Charge)
+	default:
+		return ""
+	}
+}
+
+// ListAttrDefs returns a space-separated list of user-defined attribute names
+// matching the given pattern. Non-wizards only see VISUAL attr definitions.
+// parseObjTypeFilter converts a type name string to an ObjectType int (-1 if none).
+func parseObjTypeFilter(objType string) int {
+	switch strings.ToUpper(strings.TrimSpace(objType)) {
+	case "PLAYER":
+		return int(gamedb.TypePlayer)
+	case "THING", "OBJECT":
+		return int(gamedb.TypeThing)
+	case "ROOM":
+		return int(gamedb.TypeRoom)
+	case "EXIT":
+		return int(gamedb.TypeExit)
+	}
+	return -1
+}
+
+func (g *Game) ListAttrDefs(player gamedb.DBRef, pattern string, objType string) string {
+	isWiz := Wizard(g, player)
+	pat := strings.ToLower(strings.TrimSpace(pattern))
+	if pat == "" {
+		pat = "*"
+	}
+
+	typeFilter := parseObjTypeFilter(objType)
+
+	// Count attrs on relevant objects
+	attrCounts := countAttrsOnObjects(g, player, typeFilter, isWiz)
+
+	showAll := pat != "*" // Only show flagged attrs when no specific pattern given
+	type entry struct {
+		name  string
+		flags string
+		count int
+	}
+	var results []entry
+	for num, def := range g.DB.AttrNames {
+		if !showAll && typeFilter < 0 && def.Flags == 0 {
+			continue
+		}
+		if typeFilter >= 0 {
+			if attrCounts[num] == 0 {
+				continue
+			}
+			if def.Flags == 0 {
+				continue
+			}
+		}
+		if typeFilter < 0 && !isWiz && def.Flags&gamedb.AFVisual == 0 {
+			continue
+		}
+		if !wildMatchSimple(pat, strings.ToLower(def.Name)) {
+			continue
+		}
+		flagStr := attrFlagString(def.Flags)
+		if flagStr == "" {
+			flagStr = "-"
+		}
+		results = append(results, entry{name: def.Name, flags: flagStr, count: attrCounts[num]})
+	}
+	// Sort by name
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].name < results[j].name
+	})
+	// Return as space-separated "name:flags:count" tuples
+	parts := make([]string, len(results))
+	for i, e := range results {
+		parts[i] = fmt.Sprintf("%s:%s:%d", e.name, e.flags, e.count)
+	}
+	return strings.Join(parts, " ")
+}
+
+// AttrDefFlags returns the flag display string for a user-defined attribute.
+func (g *Game) AttrDefFlags(player gamedb.DBRef, attrName string) string {
+	name := strings.ToUpper(strings.TrimSpace(attrName))
+	def, ok := g.DB.AttrByName[name]
+	if !ok {
+		return "#-1 NO SUCH ATTRIBUTE"
+	}
+	// Non-wizards can only see flags on VISUAL attrs
+	if !Wizard(g, player) && def.Flags&gamedb.AFVisual == 0 {
+		return "#-1 PERMISSION DENIED"
+	}
+	return attrFlagString(def.Flags)
+}
+
+// HasAttrDef returns "1" if a user-defined attribute exists, "0" otherwise.
+func (g *Game) HasAttrDef(attrName string) string {
+	name := strings.ToUpper(strings.TrimSpace(attrName))
+	if _, ok := g.DB.AttrByName[name]; ok {
+		return "1"
+	}
+	// Also check well-known attrs
+	for _, wkName := range gamedb.WellKnownAttrs {
+		if strings.EqualFold(wkName, name) {
+			return "1"
+		}
+	}
+	return "0"
+}
+
+// SetAttrDefFlags modifies flags on a user-defined attribute definition.
+// Wizard-only. Returns "" on success, error string on failure.
+func (g *Game) SetAttrDefFlags(player gamedb.DBRef, attrName, flags string) string {
+	if !Wizard(g, player) {
+		return "#-1 PERMISSION DENIED"
+	}
+	name := strings.ToUpper(strings.TrimSpace(attrName))
+	def, ok := g.DB.AttrByName[name]
+	if !ok {
+		return "#-1 NO SUCH ATTRIBUTE"
+	}
+	setFlags, clearFlags, errs := parseAttrAccessFlags(flags)
+	if len(errs) > 0 {
+		return "#-1 UNKNOWN FLAG " + strings.Join(errs, " ")
+	}
+	def.Flags = (def.Flags &^ clearFlags) | setFlags
+	if g.Store != nil {
+		g.Store.PutMeta()
+	}
+	return ""
+}
+
+// IsWizard returns true if the player is an effective wizard.
+func (g *Game) IsWizard(player gamedb.DBRef) bool {
+	return Wizard(g, player)
+}
+
+// sortStrings sorts a slice of strings in place.
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
