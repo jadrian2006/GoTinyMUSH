@@ -1793,16 +1793,25 @@ func (g *Game) LookupAttrDef(attrNum int) *gamedb.AttrDef {
 
 // ShowWho displays the WHO list.
 func (g *Game) ShowWho(d *Descriptor) {
-	d.Send(fmt.Sprintf("%-20s  %-8s  %-8s  %s", "Player Name", "On For", "Idle", "Doing"))
-	d.Send(strings.Repeat("-", 60))
+	isWiz := Wizard(g, d.Player)
 
 	now := time.Now()
 
+	// Header — matches C TinyMUSH dump_users() format
+	if isWiz {
+		d.Send("Player Name        On For Idle   Room    Cmds   Host")
+	} else {
+		d.Send(fmt.Sprintf("%-16s%9s %4s  %s", "Player Name", "On For", "Idle", "Doing"))
+	}
+
 	type whoEntry struct {
-		name    string
-		onFor   string
-		idle    string
-		doing   string
+		name  string
+		onFor string
+		idle  string
+		doing string
+		loc   gamedb.DBRef
+		cmds  int
+		host  string
 	}
 	var entries []whoEntry
 
@@ -1814,7 +1823,13 @@ func (g *Game) ShowWho(d *Descriptor) {
 		name := g.PlayerName(dd.Player)
 		onFor := FormatConnTime(now.Sub(dd.ConnTime))
 		idle := FormatIdleTime(now.Sub(dd.LastCmd))
-		entries = append(entries, whoEntry{name, onFor, idle, dd.DoingStr})
+		// Extract host/IP (strip port)
+		host := dd.Addr
+		if idx := strings.LastIndex(host, ":"); idx >= 0 {
+			host = host[:idx]
+		}
+		loc := g.PlayerLocation(dd.Player)
+		entries = append(entries, whoEntry{name, onFor, idle, dd.DoingStr, loc, dd.CmdCount, host})
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -1822,10 +1837,19 @@ func (g *Game) ShowWho(d *Descriptor) {
 	})
 
 	for _, e := range entries {
-		d.Send(fmt.Sprintf("%-20s  %-8s  %-8s  %s", e.name, e.onFor, e.idle, e.doing))
+		if isWiz {
+			// C format: "%-16s%9s %4s%-3s#%-6d%5d%3s%-25s"
+			// We skip player flags (%-3s) and site flags (%3s) for now
+			d.Send(fmt.Sprintf("%-16s%9s %4s   #%-6d%5d   %-25s",
+				e.name, e.onFor, e.idle, e.loc, e.cmds, e.host))
+		} else {
+			// C format: "%-16s%9s %4s  %s"
+			d.Send(fmt.Sprintf("%-16s%9s %4s  %s", e.name, e.onFor, e.idle, e.doing))
+		}
 	}
 
-	d.Send(fmt.Sprintf("%d player(s) connected.", len(entries)))
+	record := len(entries)
+	d.Send(fmt.Sprintf("%d Players logged in, %d record, no maximum.", record, record))
 }
 
 // MatchObject resolves a name to a dbref, searching contents and location.

@@ -436,10 +436,15 @@ func FormatIdleTime(d time.Duration) string {
 	return fmt.Sprintf("%dd", secs/86400)
 }
 
-// FormatConnTime formats a duration as connection time.
+// FormatConnTime formats a duration as connection time (C time_format_1).
+// Shows "Xd HH:MM" for multi-day, "HH:MM" otherwise.
 func FormatConnTime(d time.Duration) string {
 	secs := int(d.Seconds())
-	hours := secs / 3600
+	days := secs / 86400
+	hours := (secs % 86400) / 3600
 	mins := (secs % 3600) / 60
+	if days > 0 {
+		return fmt.Sprintf("%dd %02d:%02d", days, hours, mins)
+	}
 	return fmt.Sprintf("%02d:%02d", hours, mins)
 }
