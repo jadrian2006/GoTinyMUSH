@@ -19,8 +19,8 @@ import (
 // Grid system: 4 quadrants (NE, NW, SE, SW)
 //   Letters AA-ZZ (W→E within each quadrant), 676 positions per quadrant
 //   Numbers 000-999 (S→N within each quadrant), 1000 positions per quadrant
-//   Altitude 0-100
-//   Address format: LL-NNN-QQ (e.g. EL-453-NE)
+//   Altitude -1000 to +1000 (0 = ground level, negative = underground/underwater)
+//   Address format: LL-NNN-QQ (e.g. EL-453-NE) or LL-NNN-QQ:ALT (e.g. EL-453-NE:500)
 //
 // Absolute coordinates: center of map is origin (0,0)
 //   NE: x = letter_pos (0..675),  y = number (0..999)
@@ -32,6 +32,8 @@ const headingPoints = 32
 const headingStep = 2 * math.Pi / float64(headingPoints) // 11.25 degrees in radians
 const gridLetters = 676                                   // 26*26
 const gridNumbers = 1000
+const altMin = -1000
+const altMax = 1000
 
 // 32-point compass names, indexed by heading (0=E, counterclockwise)
 var headingNames = [32]string{
@@ -183,7 +185,13 @@ func gridToAbs(letters string, number int, quadrant string) (int, int, bool) {
 	return x, y, true
 }
 
-// absToGrid converts absolute x, y to grid location string "LL NNN QQ".
+// absToGridAlt converts absolute x, y, z to grid location string "LL-NNN-QQ:ALT".
+func absToGridAlt(x, y, z int) string {
+	base := absToGrid(x, y)
+	return fmt.Sprintf("%s:%d", base, z)
+}
+
+// absToGrid converts absolute x, y to grid location string "LL-NNN-QQ".
 func absToGrid(x, y int) string {
 	var quad string
 	var lp, num int
@@ -214,20 +222,40 @@ func absToGrid(x, y int) string {
 
 // parseGridLoc parses "LL-NNN-QQ" or "LL NNN QQ" format into absolute x, y.
 func parseGridLoc(s string) (int, int, bool) {
+	x, y, _, ok := parseGridLocFull(s)
+	return x, y, ok
+}
+
+// parseGridLocFull parses "LL-NNN-QQ[:ALT]" or "LL NNN QQ [ALT]" into x, y, z.
+// If altitude is omitted, z defaults to 0.
+func parseGridLocFull(s string) (int, int, int, bool) {
 	s = strings.TrimSpace(s)
+	z := 0
+
+	// Check for :ALT suffix
+	if idx := strings.LastIndex(s, ":"); idx >= 0 {
+		z = toInt(s[idx+1:])
+		s = s[:idx]
+	}
+
 	// Try dash-delimited first: EL-453-NE
 	parts := strings.Split(s, "-")
 	if len(parts) == 3 {
 		num := toInt(parts[1])
-		return gridToAbs(parts[0], num, parts[2])
+		x, y, ok := gridToAbs(parts[0], num, parts[2])
+		return x, y, z, ok
 	}
-	// Try space-delimited: EL 453 NE
+	// Try space-delimited: EL 453 NE [alt]
 	parts = strings.Fields(s)
-	if len(parts) == 3 {
+	if len(parts) >= 3 {
 		num := toInt(parts[1])
-		return gridToAbs(parts[0], num, parts[2])
+		x, y, ok := gridToAbs(parts[0], num, parts[2])
+		if ok && len(parts) >= 4 {
+			z = toInt(parts[3])
+		}
+		return x, y, z, ok
 	}
-	return 0, 0, false
+	return 0, 0, 0, false
 }
 
 // fnGridabs — convert grid location to absolute coordinates.
@@ -334,6 +362,10 @@ func fnGridnav(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		newY += (rand.Float64()*2 - 1) * drift
 		newZ += (rand.Float64()*2 - 1) * drift
 	}
+
+	// Clamp altitude to valid range
+	if newZ < float64(altMin) { newZ = float64(altMin) }
+	if newZ > float64(altMax) { newZ = float64(altMax) }
 
 	writeFloat(buf, newX)
 	buf.WriteByte(' ')
@@ -622,3 +654,320 @@ func fnIntercept(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	h = h % headingPoints
 	writeInt(buf, h)
 }
+
+// --- GPS / Topography / Instance functions ---
+
+// fnAltclamp — clamp a value to the valid altitude range.
+// altclamp(z) → clamped z (-1000 to 1000)
+func fnAltclamp(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 { buf.WriteString("0"); return }
+	z := toInt(args[0])
+	if z < altMin { z = altMin }
+	if z > altMax { z = altMax }
+	writeInt(buf, z)
+}
+
+// fnGridlocfull — convert absolute x, y, z to full grid location with altitude.
+// gridlocfull(x, y, z) → "LL-NNN-QQ:ALT"
+func fnGridlocfull(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 3 { return }
+	x := toInt(args[0])
+	y := toInt(args[1])
+	z := toInt(args[2])
+	buf.WriteString(absToGridAlt(x, y, z))
+}
+
+// fnGridparsefull — parse grid location with optional altitude to x y z.
+// gridparsefull(LL-NNN-QQ[:ALT]) → "x y z"
+func fnGridparsefull(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 { return }
+	x, y, z, ok := parseGridLocFull(args[0])
+	if !ok {
+		buf.WriteString("#-1 INVALID GRID LOCATION")
+		return
+	}
+	writeInt(buf, x)
+	buf.WriteByte(' ')
+	writeInt(buf, y)
+	buf.WriteByte(' ')
+	writeInt(buf, z)
+}
+
+// fnGps — full GPS string for a position: grid address, altitude, and compass heading.
+// gps(x y z[, heading]) → "LL-NNN-QQ ALT:nnn HDG:compass"
+func fnGps(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 { return }
+	pos := parseVector(args[0])
+	if len(pos) < 2 { return }
+	x := int(math.Round(pos[0]))
+	y := int(math.Round(pos[1]))
+	z := 0
+	if len(pos) >= 3 { z = int(math.Round(pos[2])) }
+	grid := absToGrid(x, y)
+	buf.WriteString(grid)
+	buf.WriteString(fmt.Sprintf(" ALT:%d", z))
+	if len(args) > 1 {
+		h := ((toInt(args[1]) % headingPoints) + headingPoints) % headingPoints
+		buf.WriteString(fmt.Sprintf(" HDG:%s", headingNames[h]))
+	}
+}
+
+// fnGriddist3d — 3D distance between two grid locations (with altitude).
+// griddist3d(loc1[:alt1], loc2[:alt2]) → distance
+func fnGriddist3d(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { buf.WriteString("0"); return }
+	x1, y1, z1, ok1 := parseGridLocFull(args[0])
+	x2, y2, z2, ok2 := parseGridLocFull(args[1])
+	if !ok1 || !ok2 {
+		buf.WriteString("#-1 INVALID GRID LOCATION")
+		return
+	}
+	dx := float64(x2 - x1)
+	dy := float64(y2 - y1)
+	dz := float64(z2 - z1)
+	writeFloat(buf, math.Sqrt(dx*dx+dy*dy+dz*dz))
+}
+
+// fnMapinstance — construct an instanced grid location key.
+// mapinstance(instance_id, LL-NNN-QQ[:ALT]) → "instance_id|LL-NNN-QQ[:ALT]"
+// mapinstance(instance_id, x, y[, z]) → "instance_id|LL-NNN-QQ[:ALT]"
+// Used for multi-planet/multi-map systems where each planet has its own grid.
+func fnMapinstance(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { return }
+	instanceID := strings.TrimSpace(args[0])
+	if instanceID == "" { return }
+
+	if len(args) >= 4 {
+		// Numeric form: mapinstance(id, x, y[, z])
+		x := toInt(args[1])
+		y := toInt(args[2])
+		z := 0
+		if len(args) >= 5 { z = toInt(args[3]) }
+		if z != 0 {
+			buf.WriteString(fmt.Sprintf("%s|%s", instanceID, absToGridAlt(x, y, z)))
+		} else {
+			buf.WriteString(fmt.Sprintf("%s|%s", instanceID, absToGrid(x, y)))
+		}
+	} else {
+		// Grid string form: mapinstance(id, LL-NNN-QQ[:ALT])
+		buf.WriteString(fmt.Sprintf("%s|%s", instanceID, strings.TrimSpace(args[1])))
+	}
+}
+
+// fnMapparse — split an instanced grid location key into instance and location.
+// mapparse(key, component) → value
+// component: "instance" → instance ID, "loc" → grid location, "x"/"y"/"z" → coordinate
+func fnMapparse(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { return }
+	key := strings.TrimSpace(args[0])
+	component := strings.ToLower(strings.TrimSpace(args[1]))
+
+	// Split on pipe
+	pipeIdx := strings.Index(key, "|")
+	var instanceID, locStr string
+	if pipeIdx >= 0 {
+		instanceID = key[:pipeIdx]
+		locStr = key[pipeIdx+1:]
+	} else {
+		// No instance prefix — treat whole thing as location
+		locStr = key
+	}
+
+	switch component {
+	case "instance", "id":
+		buf.WriteString(instanceID)
+	case "loc", "location":
+		buf.WriteString(locStr)
+	case "x":
+		x, _, _, ok := parseGridLocFull(locStr)
+		if ok { writeInt(buf, x) } else { buf.WriteString("0") }
+	case "y":
+		_, y, _, ok := parseGridLocFull(locStr)
+		if ok { writeInt(buf, y) } else { buf.WriteString("0") }
+	case "z", "alt":
+		_, _, z, ok := parseGridLocFull(locStr)
+		if ok { writeInt(buf, z) } else { buf.WriteString("0") }
+	default:
+		buf.WriteString("#-1 INVALID COMPONENT")
+	}
+}
+
+// --- Point of Interest (POI) functions ---
+// A POI is stored as an attribute value in the format:
+//   x y z height|instance|name|tags
+// Example: "100 200 50 25|terra|Crystal Tower|landmark quest"
+// - x y z: position on the grid
+// - height: vertical extent (POI occupies z to z+height)
+// - instance: map/planet instance ID (empty = default map)
+// - name: display name
+// - tags: space-separated tags for filtering (e.g., "city quest shop")
+
+// fnPoiformat — format a POI attribute value.
+// poiformat(x, y, z, height, instance, name[, tags]) → "x y z height|instance|name|tags"
+func fnPoiformat(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 6 { return }
+	x := toInt(args[0])
+	y := toInt(args[1])
+	z := toInt(args[2])
+	height := toInt(args[3])
+	instance := strings.TrimSpace(args[4])
+	name := strings.TrimSpace(args[5])
+	tags := ""
+	if len(args) >= 7 { tags = strings.TrimSpace(args[6]) }
+	buf.WriteString(fmt.Sprintf("%d %d %d %d|%s|%s|%s", x, y, z, height, instance, name, tags))
+}
+
+// fnPoiparse — extract a component from a POI attribute value.
+// poiparse(poi_value, component) → value
+// Components: x, y, z, height, instance, name, tags, grid, gps, pos
+func fnPoiparse(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { return }
+	poi := strings.TrimSpace(args[0])
+	component := strings.ToLower(strings.TrimSpace(args[1]))
+
+	// Split on pipes: "x y z h|instance|name|tags"
+	parts := strings.SplitN(poi, "|", 4)
+	if len(parts) < 1 { return }
+
+	// Parse the coordinate part: "x y z height"
+	coords := parseVector(parts[0])
+	x, y, z, h := 0, 0, 0, 0
+	if len(coords) >= 1 { x = int(coords[0]) }
+	if len(coords) >= 2 { y = int(coords[1]) }
+	if len(coords) >= 3 { z = int(coords[2]) }
+	if len(coords) >= 4 { h = int(coords[3]) }
+
+	instance := ""
+	if len(parts) >= 2 { instance = parts[1] }
+	name := ""
+	if len(parts) >= 3 { name = parts[2] }
+	tags := ""
+	if len(parts) >= 4 { tags = parts[3] }
+
+	switch component {
+	case "x":
+		writeInt(buf, x)
+	case "y":
+		writeInt(buf, y)
+	case "z", "alt":
+		writeInt(buf, z)
+	case "height", "h":
+		writeInt(buf, h)
+	case "instance", "id":
+		buf.WriteString(instance)
+	case "name":
+		buf.WriteString(name)
+	case "tags":
+		buf.WriteString(tags)
+	case "pos":
+		// "x y z"
+		writeInt(buf, x)
+		buf.WriteByte(' ')
+		writeInt(buf, y)
+		buf.WriteByte(' ')
+		writeInt(buf, z)
+	case "grid":
+		buf.WriteString(absToGrid(x, y))
+	case "gps":
+		buf.WriteString(absToGridAlt(x, y, z))
+	default:
+		buf.WriteString("#-1 INVALID COMPONENT")
+	}
+}
+
+// fnPoiinrange — check if a position is within range of a POI (4D: x, y, z + height).
+// poiinrange(poi_value, x y z, radius) → 1 or 0
+// Checks horizontal distance <= radius AND altitude overlaps POI's z to z+height.
+func fnPoiinrange(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 3 { buf.WriteString("0"); return }
+	poi := strings.TrimSpace(args[0])
+	parts := strings.SplitN(poi, "|", 4)
+	if len(parts) < 1 { buf.WriteString("0"); return }
+
+	coords := parseVector(parts[0])
+	if len(coords) < 3 { buf.WriteString("0"); return }
+	px, py, pz := coords[0], coords[1], coords[2]
+	ph := 0.0
+	if len(coords) >= 4 { ph = coords[3] }
+
+	pos := parseVector(args[1])
+	if len(pos) < 3 { buf.WriteString("0"); return }
+	radius := toFloat(args[2])
+
+	// Horizontal distance
+	dx := pos[0] - px
+	dy := pos[1] - py
+	hDist := math.Sqrt(dx*dx + dy*dy)
+
+	// Vertical overlap: POI spans pz to pz+ph, position is at pos[2]
+	// Distance from pos[2] to nearest point in [pz, pz+ph]
+	vDist := 0.0
+	if pos[2] < pz {
+		vDist = pz - pos[2]
+	} else if pos[2] > pz+ph {
+		vDist = pos[2] - (pz + ph)
+	}
+
+	totalDist := math.Sqrt(hDist*hDist + vDist*vDist)
+	if totalDist <= radius {
+		buf.WriteString("1")
+	} else {
+		buf.WriteString("0")
+	}
+}
+
+// fnPoidist — distance from a position to the nearest point of a POI (4D).
+// poidist(poi_value, x y z) → distance
+func fnPoidist(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { buf.WriteString("0"); return }
+	poi := strings.TrimSpace(args[0])
+	parts := strings.SplitN(poi, "|", 4)
+	if len(parts) < 1 { buf.WriteString("0"); return }
+
+	coords := parseVector(parts[0])
+	if len(coords) < 3 { buf.WriteString("0"); return }
+	px, py, pz := coords[0], coords[1], coords[2]
+	ph := 0.0
+	if len(coords) >= 4 { ph = coords[3] }
+
+	pos := parseVector(args[1])
+	if len(pos) < 3 { buf.WriteString("0"); return }
+
+	dx := pos[0] - px
+	dy := pos[1] - py
+	hDist := math.Sqrt(dx*dx + dy*dy)
+
+	vDist := 0.0
+	if pos[2] < pz {
+		vDist = pz - pos[2]
+	} else if pos[2] > pz+ph {
+		vDist = pos[2] - (pz + ph)
+	}
+
+	writeFloat(buf, math.Sqrt(hDist*hDist+vDist*vDist))
+}
+
+// fnPoibearing — heading from a position to a POI.
+// poibearing(poi_value, x y z) → heading 0-31
+func fnPoibearing(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { buf.WriteString("0"); return }
+	poi := strings.TrimSpace(args[0])
+	parts := strings.SplitN(poi, "|", 4)
+	if len(parts) < 1 { buf.WriteString("0"); return }
+
+	coords := parseVector(parts[0])
+	if len(coords) < 2 { buf.WriteString("0"); return }
+
+	pos := parseVector(args[1])
+	if len(pos) < 2 { buf.WriteString("0"); return }
+
+	dx := coords[0] - pos[0]
+	dy := coords[1] - pos[1]
+	if dx == 0 && dy == 0 { buf.WriteString("0"); return }
+	angle := math.Atan2(dy, dx)
+	if angle < 0 { angle += 2 * math.Pi }
+	h := int(math.Round(angle / headingStep))
+	h = h % headingPoints
+	writeInt(buf, h)
+}
+

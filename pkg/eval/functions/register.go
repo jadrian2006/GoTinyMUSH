@@ -543,6 +543,18 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("RELVEL", fnRelvel, 4, 0)
 	ctx.RegisterFunction("ETA", fnEta, 4, 0)
 	ctx.RegisterFunction("INTERCEPT", fnIntercept, 5, 0)
+	ctx.RegisterFunction("ALTCLAMP", fnAltclamp, 1, 0)
+	ctx.RegisterFunction("GRIDLOCFULL", fnGridlocfull, 3, 0)
+	ctx.RegisterFunction("GRIDPARSEFULL", fnGridparsefull, 1, 0)
+	ctx.RegisterFunction("GPS", fnGps, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("GRIDDIST3D", fnGriddist3d, 2, 0)
+	ctx.RegisterFunction("MAPINSTANCE", fnMapinstance, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("MAPPARSE", fnMapparse, 2, 0)
+	ctx.RegisterFunction("POIFORMAT", fnPoiformat, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("POIPARSE", fnPoiparse, 2, 0)
+	ctx.RegisterFunction("POIINRANGE", fnPoiinrange, 3, 0)
+	ctx.RegisterFunction("POIDIST", fnPoidist, 2, 0)
+	ctx.RegisterFunction("POIBEARING", fnPoibearing, 2, 0)
 
 	// Mail system
 	ctx.RegisterFunction("MAIL", fnMail, 0, eval.FnVarArgs)
