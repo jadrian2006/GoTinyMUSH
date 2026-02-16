@@ -107,9 +107,9 @@ func newEvalTestEnv(t *testing.T) *evalTestEnv {
 	}
 
 	// Set some attrs on Wizard for testing v(), get(), hasattr()
-	// VA (attr 95) = "hello from VA"
+	// VA (attr 100) = "hello from VA"  — v(a) maps to 100 + ('A'-'A') = 100
 	db.Objects[1].Attrs = append(db.Objects[1].Attrs,
-		gamedb.Attribute{Number: 95, Value: "\x011:0:hello from VA"},
+		gamedb.Attribute{Number: 100, Value: "\x011:0:hello from VA"},
 	)
 
 	// Define a user attr TESTFN on object #2 for u()/map()/filter()/fold()
