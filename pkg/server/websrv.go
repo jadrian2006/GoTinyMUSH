@@ -266,7 +266,19 @@ func (ws *WebServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, wc := newWSDescriptor(ws.game, wsConn, r.RemoteAddr)
+	// Use X-Forwarded-For or X-Real-IP if behind a reverse proxy (e.g. Docker)
+	remoteAddr := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For can be comma-separated; first entry is the real client
+		if idx := strings.Index(xff, ","); idx >= 0 {
+			remoteAddr = strings.TrimSpace(xff[:idx])
+		} else {
+			remoteAddr = strings.TrimSpace(xff)
+		}
+	} else if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		remoteAddr = strings.TrimSpace(xri)
+	}
+	d, wc := newWSDescriptor(ws.game, wsConn, remoteAddr)
 	ws.game.Conns.Add(d)
 
 	if claims != nil {
