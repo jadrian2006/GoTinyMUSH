@@ -26,10 +26,7 @@ const (
 func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) bool {
 	// Objects to search: player itself, inventory, room, room contents, master room contents
 	var searchObjs []gamedb.DBRef
-	debugDollar := strings.HasPrefix(input, "+") // debug + commands
-	if debugDollar {
-		log.Printf("DOLLARDEBUG MatchDollarCommands player=#%d input=%q", player, input)
-	}
+	debugDollar := false // set to true temporarily for debugging $-command matching
 
 	// Player's own attributes
 	searchObjs = append(searchObjs, player)
@@ -108,7 +105,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		return false
 	}
 
-	debugDollar := strings.HasPrefix(input, "+")
+	debugDollar := false // set to true temporarily for debugging $-command matching
 
 	// Skip halted objects
 	if obj.HasFlag(gamedb.FlagHalt) {
@@ -202,15 +199,6 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 		return false
 	}
 
-	if debug && parentRef == 9536 {
-		log.Printf("DOLLARDEBUG parent #9536 total attrs=%d", len(parent.Attrs))
-		for _, a := range parent.Attrs {
-			t := eval.StripAttrPrefix(a.Value)
-			if strings.HasPrefix(t, "$") {
-				log.Printf("DOLLARDEBUG parent #9536 HAS attr %d: value_prefix=%q", a.Number, truncDebug(t, 60))
-			}
-		}
-	}
 	dollarCount := 0
 	for _, attr := range parent.Attrs {
 		text := eval.StripAttrPrefix(attr.Value)
@@ -267,6 +255,14 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		if obj.HasFlag(gamedb.FlagHalt) {
 			return
 		}
+	}
+
+	// When fix_escape_eval is enabled, strip double-escaped specials (\\[ → \[, etc.)
+	// so that data written for C TinyMUSH's extra eval pass displays correctly.
+	// Applied here (not just QueueAttrAction) so ALL queued paths are covered:
+	// $-commands, @trigger, @force, STARTUP, ACONNECT, etc.
+	if g.Conf != nil && g.Conf.FixEscapeEval {
+		entry.Command = stripDoubleEscapeSpecials(entry.Command)
 	}
 
 	ctx := MakeEvalContextWithGame(g, entry.Player, func(c *eval.EvalContext) {
@@ -733,12 +729,12 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "think":
 		// Args arrive already evaluated from queue — send directly to owner
 		if obj, ok := g.DB.Objects[player]; ok {
-			g.Conns.SendToPlayer(obj.Owner, args)
+			g.Conns.SendToPlayer(obj.Owner, stripAllBraces(args))
 		}
 	case "@pemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := args[eqIdx+1:]
+			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
 			log.Printf("OBJEXEC @pemit target=%q message=%q switches=%q", targetStr, truncDebug(message, 120), switches)
 			target := g.ResolveRef(player, targetStr)
 			if target == gamedb.Nothing {
@@ -767,12 +763,12 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@emit":
 		loc := g.PlayerLocation(player)
 		if loc != gamedb.Nothing {
-			g.SendMarkedToRoom(loc, "EMIT", args)
+			g.SendMarkedToRoom(loc, "EMIT", stripAllBraces(args))
 		}
 	case "@oemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := args[eqIdx+1:]
+			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
 			target := g.ResolveRef(player, targetStr)
 			if target != gamedb.Nothing {
 				if tObj, ok := g.DB.Objects[target]; ok {
@@ -783,7 +779,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@remit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			roomStr := strings.TrimSpace(args[:eqIdx])
-			message := args[eqIdx+1:]
+			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
 			room := g.ResolveRef(player, roomStr)
 			if room != gamedb.Nothing {
 				g.SendMarkedToRoom(room, "EMIT", message)
@@ -825,14 +821,8 @@ func (g *Game) doSwitchObj(player, cause gamedb.DBRef, args string) {
 	rest := strings.TrimSpace(args[eqIdx+1:])
 	parts := splitCommaRespectingBraces(rest)
 
-	log.Printf("SWITCHDEBUG doSwitchObj player=#%d expr=%q exprStr=%q parts=%d", player, expr, exprStr, len(parts))
-	for pi, p := range parts {
-		log.Printf("SWITCHDEBUG   part[%d]=%q", pi, truncDebug(p, 120))
-	}
-
 	for i := 0; i+1 < len(parts); i += 2 {
 		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval, nil)
-		log.Printf("SWITCHDEBUG   checking pattern=%q against expr=%q match=%v", pattern, expr, wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)))
 		if wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)) {
 			// In C TinyMUSH, do_switch dispatches the matched action body
 			// to process_cmdline() for execution — it does NOT evaluate the
@@ -841,7 +831,6 @@ func (g *Game) doSwitchObj(player, cause gamedb.DBRef, args string) {
 			// preserved. We strip outer braces and dispatch as command(s).
 			raw := stripOuterBraces(strings.TrimSpace(parts[i+1]))
 			raw = strings.ReplaceAll(raw, "#$", expr)
-			log.Printf("SWITCHDEBUG   MATCHED i=%d, dispatching action=%q", i, truncDebug(raw, 200))
 			g.dispatchSwitchAction(player, cause, raw)
 			return
 		}
@@ -849,7 +838,6 @@ func (g *Game) doSwitchObj(player, cause gamedb.DBRef, args string) {
 	if len(parts)%2 == 1 {
 		raw := stripOuterBraces(strings.TrimSpace(parts[len(parts)-1]))
 		raw = strings.ReplaceAll(raw, "#$", expr)
-		log.Printf("SWITCHDEBUG   DEFAULT, dispatching action=%q", truncDebug(raw, 200))
 		g.dispatchSwitchAction(player, cause, raw)
 	}
 }
@@ -858,15 +846,13 @@ func (g *Game) doSwitchObj(player, cause gamedb.DBRef, args string) {
 // The action may contain semicolons for multiple commands and/or nested braces.
 func (g *Game) dispatchSwitchAction(player, cause gamedb.DBRef, action string) {
 	cmds := splitSemicolonRespectingBraces(action)
-	log.Printf("SWITCHDEBUG dispatchSwitchAction player=#%d cmds=%d action=%q", player, len(cmds), truncDebug(action, 200))
-	for ci, cmd := range cmds {
+	for _, cmd := range cmds {
 		cmd = strings.TrimSpace(cmd)
 		if cmd == "" {
 			continue
 		}
 		// Strip outer braces from sub-commands (brace groups from @dolist etc.)
 		cmd = stripOuterBraces(cmd)
-		log.Printf("SWITCHDEBUG   dispatch cmd[%d]=%q", ci, truncDebug(cmd, 200))
 		g.ExecuteAsObject(player, cause, cmd)
 	}
 }
@@ -915,6 +901,30 @@ func stripOuterBraces(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// stripAllBraces removes all unescaped { and } characters from a string.
+// This matches C TinyMUSH's EV_STRIP_CURLY behavior where braces are
+// stripped during argument evaluation in process_cmdent/parse_arglist.
+func stripAllBraces(s string) string {
+	if !strings.ContainsAny(s, "{}") {
+		return s
+	}
+	var buf strings.Builder
+	buf.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			buf.WriteByte(s[i])
+			i++
+			buf.WriteByte(s[i])
+			continue
+		}
+		if s[i] == '{' || s[i] == '}' {
+			continue
+		}
+		buf.WriteByte(s[i])
+	}
+	return buf.String()
 }
 
 // ObjSay handles say for non-connected objects.
@@ -1228,6 +1238,34 @@ func (g *Game) QueueAttrAction(obj, cause gamedb.DBRef, attrNum int, args []stri
 		Args:    args,
 	}
 	g.Queue.Add(entry)
+}
+
+// stripDoubleEscapeSpecials reduces \\X to \X for special characters X in
+// [ ] { } %. This fixes data written for C TinyMUSH where an extra level of
+// backslash escaping was used to produce literal brackets, braces, and percent
+// signs through C's additional eval/strip pass in the queue path.
+func stripDoubleEscapeSpecials(text string) string {
+	// Quick scan: bail early if no \\ present
+	if !strings.Contains(text, `\\`) {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	i := 0
+	for i < len(text) {
+		if i+2 < len(text) && text[i] == '\\' && text[i+1] == '\\' {
+			switch text[i+2] {
+			case '[', ']', '{', '}', '%':
+				b.WriteByte('\\')      // keep one backslash
+				b.WriteByte(text[i+2]) // then the special char
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(text[i])
+		i++
+	}
+	return b.String()
 }
 
 // FireConnectAttr fires ACONNECT (or ADISCONNECT) on a player, matching C's

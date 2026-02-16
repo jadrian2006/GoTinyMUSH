@@ -22,7 +22,8 @@ func TestDoubleEscapeChecker(t *testing.T) {
 			Name:  "Test Object",
 			Owner: 1,
 			Attrs: []gamedb.Attribute{
-				{Number: 39, Value: `@pemit %#=\\[Monitor\\] connected.`},
+				// \\[Monitor\\] inside ansi() function argument
+				{Number: 39, Value: `@pemit %#=[ansi(c,\\[Monitor\\])] connected.`},
 			},
 		},
 	)
@@ -46,13 +47,34 @@ func TestDoubleEscapeChecker(t *testing.T) {
 	}
 }
 
+func TestDoubleEscapeNotFlaggedOutsideFunction(t *testing.T) {
+	db := makeTestDB(
+		&gamedb.Object{
+			DBRef: 25,
+			Name:  "Test Object",
+			Owner: 1,
+			Attrs: []gamedb.Attribute{
+				// \\[Monitor\\] at top level — NOT inside a function
+				{Number: 39, Value: `@pemit %#=\\[Monitor\\] connected.`},
+			},
+		},
+	)
+
+	c := &DoubleEscapeChecker{}
+	findings := c.Check(db)
+
+	if len(findings) != 0 {
+		t.Fatalf("expected 0 findings for top-level \\\\[...\\\\], got %d", len(findings))
+	}
+}
+
 func TestDoubleEscapeFixApply(t *testing.T) {
 	obj := &gamedb.Object{
 		DBRef: 25,
 		Name:  "Test Object",
 		Owner: 1,
 		Attrs: []gamedb.Attribute{
-			{Number: 39, Value: `@pemit %#=\\[Monitor\\] connected.`},
+			{Number: 39, Value: `@pemit %#=[ansi(c,\\[Monitor\\])] connected.`},
 		},
 	}
 	db := makeTestDB(obj)
@@ -76,9 +98,9 @@ func TestDoubleEscapeFixApply(t *testing.T) {
 		t.Fatalf("ApplyFix failed: %v", err)
 	}
 
-	// Check the attr was fixed
+	// Check the attr was fixed: \\[Monitor\\] → \[Monitor\]
 	got := obj.Attrs[0].Value
-	expected := `@pemit %#=[Monitor] connected.`
+	expected := `@pemit %#=[ansi(c,\[Monitor\])] connected.`
 	if got != expected {
 		t.Errorf("expected %q, got %q", expected, got)
 	}
@@ -90,7 +112,7 @@ func TestDoubleEscapeWithPrefix(t *testing.T) {
 		Name:  "Prefixed Object",
 		Owner: 1,
 		Attrs: []gamedb.Attribute{
-			{Number: 39, Value: "\x019118:0:@pemit %#=\\\\[Monitor\\\\] connected."},
+			{Number: 39, Value: "\x019118:0:@pemit %#=[ansi(c,\\\\[Monitor\\\\])] connected."},
 		},
 	}
 	db := makeTestDB(obj)
@@ -113,12 +135,12 @@ func TestDoubleEscapeWithPrefix(t *testing.T) {
 		t.Fatalf("ApplyFix failed: %v", err)
 	}
 
-	// Check prefix was preserved
+	// Check prefix was preserved and fix applied
 	got := obj.Attrs[0].Value
 	if got[:1] != "\x01" {
 		t.Error("expected \\x01 prefix to be preserved")
 	}
-	if got != "\x019118:0:@pemit %#=[Monitor] connected." {
+	if got != "\x019118:0:@pemit %#=[ansi(c,\\[Monitor\\])] connected." {
 		t.Errorf("unexpected result: %q", got)
 	}
 }
@@ -223,8 +245,8 @@ func TestValidatorApplyAll(t *testing.T) {
 		Name:  "Test Object",
 		Owner: 1,
 		Attrs: []gamedb.Attribute{
-			{Number: 39, Value: `@pemit %#=\\[Monitor\\] connected.`},
-			{Number: 40, Value: `@pemit %#=\\[Monitor\\] disconnected.`},
+			{Number: 39, Value: `@pemit %#=[ansi(c,\\[Monitor\\])] connected.`},
+			{Number: 40, Value: `@pemit %#=[ansi(c,\\[Monitor\\])] disconnected.`},
 		},
 	}
 	db := makeTestDB(obj)
@@ -251,7 +273,7 @@ func TestValidatorSummary(t *testing.T) {
 			Zone:     gamedb.Nothing,
 			Link:     gamedb.Nothing,
 			Attrs: []gamedb.Attribute{
-				{Number: 39, Value: `@pemit %#=\\[Monitor\\] test`},
+				{Number: 39, Value: `@pemit %#=[switch(1,1,\\[test\\])]`},
 			},
 		},
 	)
@@ -286,7 +308,7 @@ func TestSplitAttrPrefix(t *testing.T) {
 	}
 }
 
-func TestFindDoubleEscapes(t *testing.T) {
+func TestFindAllDoubleEscapePairs(t *testing.T) {
 	tests := []struct {
 		input string
 		count int
@@ -298,10 +320,33 @@ func TestFindDoubleEscapes(t *testing.T) {
 		{`\\[nested \\[inner\\] outer\\]`, 1}, // nested
 	}
 	for _, tt := range tests {
-		matches := findDoubleEscapes(tt.input)
+		matches := findAllDoubleEscapePairs(tt.input)
 		if len(matches) != tt.count {
-			t.Errorf("findDoubleEscapes(%q): got %d matches, want %d", tt.input, len(matches), tt.count)
+			t.Errorf("findAllDoubleEscapePairs(%q): got %d matches, want %d", tt.input, len(matches), tt.count)
 		}
+	}
+}
+
+func TestFindDoubleEscapesInFuncArgs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		count int
+	}{
+		{"inside ansi()", `[ansi(c,\\[Monitor\\])]`, 1},
+		{"inside switch()", `switch(1,1,\\[test\\])`, 1},
+		{"inside center()", `center(\\[title\\],78)`, 1},
+		{"top level - not flagged", `@pemit %#=\\[Monitor\\] connected.`, 0},
+		{"bare text - not flagged", `\\[Monitor\\]`, 0},
+		{"nested functions", `[ansi(c,center(\\[Monitor\\],20))]`, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches := findDoubleEscapesInFuncArgs(tt.input)
+			if len(matches) != tt.count {
+				t.Errorf("findDoubleEscapesInFuncArgs(%q): got %d matches, want %d", tt.input, len(matches), tt.count)
+			}
+		})
 	}
 }
 
@@ -310,14 +355,57 @@ func TestFixSpan(t *testing.T) {
 		input string
 		want  string
 	}{
-		{`\\[Monitor\\]`, `[Monitor]`},
-		{`\\[foo\\]`, `[foo]`},
+		{`\\[Monitor\\]`, `\[Monitor\]`},
+		{`\\[foo\\]`, `\[foo\]`},
 		{`hello`, `hello`},
 	}
 	for _, tt := range tests {
 		got := fixSpan(tt.input)
 		if got != tt.want {
 			t.Errorf("fixSpan(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestIsInsideFuncArg(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		pos   int
+		want  bool
+	}{
+		{"inside ansi()", `[ansi(c,\\[Monitor\\])]`, 8, true},
+		{"inside switch()", `switch(x,\\[test\\])`, 9, true},
+		{"top level", `\\[Monitor\\]`, 0, false},
+		{"inside unknown func", `myfunc(\\[test\\])`, 7, false},
+		{"nested inside ansi+center", `ansi(c,center(\\[x\\],5))`, 14, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isInsideFuncArg(tt.text, tt.pos)
+			if got != tt.want {
+				t.Errorf("isInsideFuncArg(%q, %d) = %v, want %v", tt.text, tt.pos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractFuncNameBefore(t *testing.T) {
+	tests := []struct {
+		text     string
+		parenPos int
+		want     string
+	}{
+		{"ansi(c,test)", 4, "ansi"},
+		{"[switch(1,1,test)]", 7, "switch"},
+		{"center(text,78)", 6, "center"},
+		{"(nofunc)", 0, ""},
+		{" (space)", 1, ""},
+	}
+	for _, tt := range tests {
+		got := extractFuncNameBefore(tt.text, tt.parenPos)
+		if got != tt.want {
+			t.Errorf("extractFuncNameBefore(%q, %d) = %q, want %q", tt.text, tt.parenPos, got, tt.want)
 		}
 	}
 }

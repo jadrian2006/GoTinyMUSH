@@ -131,6 +131,9 @@ type GameConf struct {
 	// --- Alias config includes (YAML: list of paths; legacy: from "include" directives) ---
 	AliasFiles []string `yaml:"alias_files"`
 
+	// --- Compatibility ---
+	FixEscapeEval bool `yaml:"fix_escape_eval"` // Strip double-escaped \\[ \\] \\% \\{ \\} in queued attrs (default true)
+
 	// --- Attribute access config ---
 	UserAttrAccess string   `yaml:"user_attr_access"` // Default flags for user-defined attrs
 	AttrTypes      []string `yaml:"attr_types"`       // Pattern-based attr flag assignment
@@ -201,6 +204,7 @@ func DefaultGameConf() *GameConf {
 		JWTExpiry:               86400,
 		CertDir:                 "",
 		ScrollbackRetention:     86400,
+		FixEscapeEval:           true,
 	}
 }
 

@@ -3,19 +3,22 @@ package validate
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
-// DoubleEscapeChecker detects \\[...\\] patterns that were written to compensate
-// for C TinyMUSH's double-evaluation in queue processing. In Go's correct
-// single-eval, these produce \text\ instead of the intended [text].
+// DoubleEscapeChecker detects \\[...\\] patterns inside function arguments
+// that produce \text\ instead of the intended [text].
+// These occur when softcode authors added extra escaping for bracket-containing
+// text inside function calls like ansi(c,\\[Monitor\\]).
+// The fix reduces \\[ to \[ so the eval engine outputs literal brackets.
 type DoubleEscapeChecker struct{}
 
 func (c *DoubleEscapeChecker) Name() string { return "double-escape" }
 
 // knownFunctions are softcode functions whose arguments commonly contain
-// bracket-escaped text that was compensated for C's double-eval.
+// bracket-escaped text where \\[ was used to produce literal brackets.
 var knownFunctions = map[string]bool{
 	"ansi": true, "center": true, "ljust": true, "rjust": true,
 	"printf": true, "pemit": true, "remit": true, "oemit": true,
@@ -31,7 +34,8 @@ var knownFunctions = map[string]bool{
 	"edit": true, "mail": true, "create": true, "open": true,
 }
 
-// Check scans all object attributes for double-escaped bracket patterns.
+// Check scans all object attributes for double-escaped bracket patterns
+// that appear inside known function arguments.
 func (c *DoubleEscapeChecker) Check(db *gamedb.Database) []Finding {
 	var findings []Finding
 	seq := 0
@@ -51,7 +55,7 @@ func (c *DoubleEscapeChecker) Check(db *gamedb.Database) []Finding {
 			}
 
 			_, text := splitAttrPrefix(attr.Value)
-			matches := findDoubleEscapes(text)
+			matches := findDoubleEscapesInFuncArgs(text)
 			if len(matches) == 0 {
 				continue
 			}
@@ -104,7 +108,7 @@ func (c *DoubleEscapeChecker) Check(db *gamedb.Database) []Finding {
 				CurrentHL:   currentHLAdj,
 				ProposedHL:  proposedHLAdj,
 				Effect:      strings.Join(effectParts, "; "),
-				Explanation: `C TinyMUSH evaluates queued commands twice, so game authors wrote \\[text\\] to get [text] after double processing. GoTinyMUSH evaluates correctly in a single pass, so the extra backslashes produce \text\ instead. The fix removes the extra escaping so text displays as originally intended.`,
+				Explanation: `The \\[text\\] pattern inside a function argument like ansi(c,\\[Monitor\\]) causes the eval engine to output \Monitor\ instead of [Monitor]. The extra backslash makes \\ evaluate to a literal \, then [ starts a bracket expression instead of being a literal character. The fix reduces \\[ to \[ so the eval engine treats the bracket as literal text.`,
 				Fixable:     true,
 				fixFunc: func() {
 					prefix, _ := splitAttrPrefix(capturedObj.Attrs[capturedIdx].Value)
@@ -123,16 +127,35 @@ type escapeMatch struct {
 	end   int // index after the ] in \\]
 }
 
-// findDoubleEscapes locates \\[...\\] patterns in text.
-// It uses a heuristic: the pattern should appear in a context likely affected
-// by C's double-eval (inside function args, after @pemit, in command output, etc.).
-func findDoubleEscapes(text string) []escapeMatch {
+// findDoubleEscapesInFuncArgs locates \\[...\\] patterns that appear inside
+// known function arguments. Only flags patterns where a known function name
+// precedes the parenthesized argument containing the double-escaped brackets.
+func findDoubleEscapesInFuncArgs(text string) []escapeMatch {
+	var matches []escapeMatch
+
+	// Find all \\[...\\] pairs first
+	allPairs := findAllDoubleEscapePairs(text)
+	if len(allPairs) == 0 {
+		return nil
+	}
+
+	// For each pair, check if it's inside a known function's argument list
+	for _, pair := range allPairs {
+		if isInsideFuncArg(text, pair.start) {
+			matches = append(matches, pair)
+		}
+	}
+
+	return matches
+}
+
+// findAllDoubleEscapePairs finds all \\[...\\] paired patterns in text.
+func findAllDoubleEscapePairs(text string) []escapeMatch {
 	var matches []escapeMatch
 	i := 0
 	for i < len(text)-3 {
-		// Look for \\[ pattern
+		// Look for \\[ pattern (two backslash chars followed by [)
 		if text[i] == '\\' && i+2 < len(text) && text[i+1] == '\\' && text[i+2] == '[' {
-			// Found \\[ — now find matching \\]
 			bracketStart := i
 			j := i + 3
 			depth := 1
@@ -159,7 +182,6 @@ func findDoubleEscapes(text string) []escapeMatch {
 				j++
 			}
 			if depth > 0 {
-				// No matching \\] found, skip this occurrence
 				i++
 			}
 		} else {
@@ -167,6 +189,57 @@ func findDoubleEscapes(text string) []escapeMatch {
 		}
 	}
 	return matches
+}
+
+// isInsideFuncArg checks whether position pos in text falls inside
+// the argument list of a known function call like funcname(...).
+// Scans backwards from pos to find the nearest unmatched '(' and checks
+// if a known function name precedes it.
+func isInsideFuncArg(text string, pos int) bool {
+	// Scan backwards from pos, tracking paren depth
+	depth := 0
+	for i := pos - 1; i >= 0; i-- {
+		switch text[i] {
+		case ')':
+			depth++
+		case '(':
+			if depth > 0 {
+				depth--
+			} else {
+				// Found an unmatched '(' — check for function name before it
+				funcName := extractFuncNameBefore(text, i)
+				if funcName != "" && knownFunctions[strings.ToLower(funcName)] {
+					return true
+				}
+				// Not a known function, but could be nested; keep scanning
+			}
+		}
+	}
+	return false
+}
+
+// extractFuncNameBefore extracts the function name immediately before position
+// parenPos (which points to '('). Returns empty string if no valid name found.
+func extractFuncNameBefore(text string, parenPos int) string {
+	end := parenPos
+	i := end - 1
+	// Skip trailing whitespace
+	for i >= 0 && text[i] == ' ' {
+		i--
+	}
+	if i < 0 {
+		return ""
+	}
+	nameEnd := i + 1
+	// Collect alphanumeric/underscore chars (function name)
+	for i >= 0 && (unicode.IsLetter(rune(text[i])) || unicode.IsDigit(rune(text[i])) || text[i] == '_') {
+		i--
+	}
+	nameStart := i + 1
+	if nameStart >= nameEnd {
+		return ""
+	}
+	return text[nameStart:nameEnd]
 }
 
 // applyDoubleEscapeFixes applies all fixes to the text.
@@ -186,8 +259,8 @@ func applyDoubleEscapeFixes(text string, matches []escapeMatch) string {
 	return b.String()
 }
 
-// fixSpan converts \\[text\\] to [text] within a matched span.
-// It handles nested \\[ and \\] as well.
+// fixSpan converts \\[text\\] to \[text\] within a matched span.
+// Removes one backslash so \[ is treated as a literal bracket by the eval engine.
 func fixSpan(span string) string {
 	var b strings.Builder
 	b.Grow(len(span))
@@ -195,7 +268,8 @@ func fixSpan(span string) string {
 	for i < len(span) {
 		if i+2 < len(span) && span[i] == '\\' && span[i+1] == '\\' {
 			if span[i+2] == '[' || span[i+2] == ']' {
-				b.WriteByte(span[i+2])
+				b.WriteByte('\\')      // keep one backslash
+				b.WriteByte(span[i+2]) // then the bracket
 				i += 3
 				continue
 			}
