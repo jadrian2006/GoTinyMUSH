@@ -284,6 +284,9 @@ func (ws *WebServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if claims != nil {
 		// Auto-login
 		ws.game.Conns.Login(d, claims.PlayerRef)
+		if pObj, ok := ws.game.DB.Objects[claims.PlayerRef]; ok {
+			pObj.Flags[1] |= gamedb.Flag2Connected
+		}
 		wc.sendJSON(WSMessage{
 			Type: "login",
 			Data: map[string]any{
@@ -395,6 +398,9 @@ func handleWSLogin(ws *WebServer, d *Descriptor, wc *wsConn, input string) {
 			return
 		}
 		ws.game.Conns.Login(d, player)
+		if pObj, ok := ws.game.DB.Objects[player]; ok {
+			pObj.Flags[1] |= gamedb.Flag2Connected
+		}
 		playerName := ws.game.PlayerName(player)
 		wc.sendJSON(WSMessage{
 			Type: "login",

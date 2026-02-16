@@ -394,6 +394,9 @@ func (s *Server) handleConnect(d *Descriptor, user, password string, dark bool) 
 	s.Game.Conns.Login(d, player)
 	playerObj := s.Game.DB.Objects[player]
 
+	// Set CONNECTED flag (C TinyMUSH sets this on login)
+	playerObj.Flags[1] |= gamedb.Flag2Connected
+
 	// Connect dark: set DARK flag if wizard/god requested it
 	if dark && (Wizard(s.Game, player) || player == gamedb.DBRef(1)) {
 		playerObj.Flags[0] |= gamedb.FlagDark

@@ -1075,11 +1075,16 @@ func (g *Game) PersistObjects(objs ...*gamedb.Object) {
 
 // NewGame creates a new Game instance.
 func NewGame(db *gamedb.Database) *Game {
-	// Find the next available dbref
+	// Find the next available dbref and clear stale CONNECTED flags
 	maxRef := gamedb.DBRef(0)
-	for ref := range db.Objects {
+	for ref, obj := range db.Objects {
 		if ref > maxRef {
 			maxRef = ref
+		}
+		// Clear CONNECTED flag — nobody is connected at startup.
+		// The flatfile may have this baked in from when the dump was taken.
+		if obj.Flags[1]&gamedb.Flag2Connected != 0 {
+			obj.Flags[1] &^= gamedb.Flag2Connected
 		}
 	}
 	bus := events.NewBus()
@@ -2611,6 +2616,13 @@ func (g *Game) DisconnectPlayer(d *Descriptor) {
 		// Fire ADISCONNECT triggers (player + master room + master room contents)
 		connCount := len(g.Conns.GetByPlayer(d.Player))
 		g.FireConnectAttr(d.Player, connCount, 40) // A_ADISCONNECT = 40
+
+		// Clear CONNECTED flag on last disconnect (C TinyMUSH behavior)
+		if connCount <= 1 {
+			if obj, ok := g.DB.Objects[d.Player]; ok {
+				obj.Flags[1] &^= gamedb.Flag2Connected
+			}
+		}
 
 		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
 			fmt.Sprintf("%s has disconnected.", playerName))

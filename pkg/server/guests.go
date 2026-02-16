@@ -306,6 +306,9 @@ func (s *Server) handleGuest(d *Descriptor) {
 
 	// Phase 4: Log in
 	s.Game.Conns.Login(d, ref)
+	if guestObj, ok := s.Game.DB.Objects[ref]; ok {
+		guestObj.Flags[1] |= gamedb.Flag2Connected
+	}
 	log.Printf("[%d] Guest %s(#%d) connected from %s", d.ID, name, ref, d.Addr)
 
 	d.Send(fmt.Sprintf("Welcome, %s! You are connected as a guest.", name))
