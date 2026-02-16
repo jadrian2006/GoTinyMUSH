@@ -26,7 +26,6 @@ const (
 func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) bool {
 	// Objects to search: player itself, inventory, room, room contents, master room contents
 	var searchObjs []gamedb.DBRef
-	debugDollar := false // set to true temporarily for debugging $-command matching
 
 	// Player's own attributes
 	searchObjs = append(searchObjs, player)
@@ -64,7 +63,7 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 		}
 	}
 
-	if debugDollar {
+	if IsDebug() {
 		names := make([]string, len(searchObjs))
 		for i, ref := range searchObjs {
 			if o, ok := g.DB.Objects[ref]; ok {
@@ -73,21 +72,17 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 				names[i] = fmt.Sprintf("#%d(?)", ref)
 			}
 		}
-		log.Printf("DOLLARDEBUG search list (%d objs): %v", len(searchObjs), names)
+		DebugLog("DOLLAR search list (%d objs): %v", len(searchObjs), names)
 	}
 
 	// Search each object's attributes
 	for _, objRef := range searchObjs {
 		if g.matchDollarOnObject(objRef, player, cause, input) {
-			if debugDollar {
-				log.Printf("DOLLARDEBUG MATCHED on #%d", objRef)
-			}
+			DebugLog("DOLLAR MATCHED on #%d", objRef)
 			return true
 		}
 	}
-	if debugDollar {
-		log.Printf("DOLLARDEBUG NO MATCH for %q", input)
-	}
+	DebugLog("DOLLAR NO MATCH for %q", input)
 	return false
 }
 
@@ -105,13 +100,9 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		return false
 	}
 
-	debugDollar := false // set to true temporarily for debugging $-command matching
-
 	// Skip halted objects
 	if obj.HasFlag(gamedb.FlagHalt) {
-		if debugDollar {
-			log.Printf("DOLLARDEBUG #%d(%s) HALTED, skipping", objRef, obj.Name)
-		}
+		DebugLog("DOLLAR #%d(%s) HALTED, skipping", objRef, obj.Name)
 		return false
 	}
 
@@ -141,8 +132,8 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 
 		// Match the pattern against input
 		matched, args := matchWild(pattern, input)
-		if debugDollar && dollarCount <= 10 {
-			log.Printf("DOLLARDEBUG #%d(%s) attr %d: pattern=%q input=%q matched=%v", objRef, obj.Name, attr.Number, pattern, input, matched)
+		if IsDebug() && dollarCount <= 10 {
+			DebugLog("DOLLAR #%d(%s) attr %d: pattern=%q input=%q matched=%v", objRef, obj.Name, attr.Number, pattern, input, matched)
 		}
 		if !matched {
 			continue
@@ -168,18 +159,18 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 
 	// Check parent chain
 	parentRef := obj.Parent
-	if debugDollar && parentRef != gamedb.Nothing {
+	if IsDebug() && parentRef != gamedb.Nothing {
 		if pObj, ok := g.DB.Objects[parentRef]; ok {
-			log.Printf("DOLLARDEBUG #%d(%s) checking parent #%d(%s) attrs=%d", objRef, obj.Name, parentRef, pObj.Name, len(pObj.Attrs))
+			DebugLog("DOLLAR #%d(%s) checking parent #%d(%s) attrs=%d", objRef, obj.Name, parentRef, pObj.Name, len(pObj.Attrs))
 		} else {
-			log.Printf("DOLLARDEBUG #%d(%s) parent #%d NOT FOUND in DB", objRef, obj.Name, parentRef)
+			DebugLog("DOLLAR #%d(%s) parent #%d NOT FOUND in DB", objRef, obj.Name, parentRef)
 		}
 	}
 	visited := make(map[gamedb.DBRef]bool)
 	visited[objRef] = true
 	for parentRef != gamedb.Nothing && !visited[parentRef] {
 		visited[parentRef] = true
-		if g.matchDollarOnParent(parentRef, objRef, player, cause, input, debugDollar) {
+		if g.matchDollarOnParent(parentRef, objRef, player, cause, input) {
 			return true
 		}
 		if pObj, ok := g.DB.Objects[parentRef]; ok {
@@ -193,7 +184,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 }
 
 // matchDollarOnParent checks a parent object's attributes, skipping AF_PRIVATE.
-func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBRef, input string, debug bool) bool {
+func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBRef, input string) bool {
 	parent, ok := g.DB.Objects[parentRef]
 	if !ok {
 		return false
@@ -208,9 +199,7 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 		dollarCount++
 		attrFlags := parseAttrFlags(attr.Value)
 		if attrFlags&AFNoProg != 0 || attrFlags&AFPrivate != 0 {
-			if debug {
-				log.Printf("DOLLARDEBUG parent #%d attr %d SKIPPED flags=0x%x (noprog=%v private=%v)", parentRef, attr.Number, attrFlags, attrFlags&AFNoProg != 0, attrFlags&AFPrivate != 0)
-			}
+			DebugLog("DOLLAR parent #%d attr %d SKIPPED flags=0x%x (noprog=%v private=%v)", parentRef, attr.Number, attrFlags, attrFlags&AFNoProg != 0, attrFlags&AFPrivate != 0)
 			continue
 		}
 
@@ -223,16 +212,14 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 		command := rest[colonIdx+1:]
 
 		matched, args := matchWild(pattern, input)
-		if debug && dollarCount <= 10 {
-			log.Printf("DOLLARDEBUG parent #%d attr %d: pattern=%q input=%q matched=%v", parentRef, attr.Number, pattern, input, matched)
+		if IsDebug() && dollarCount <= 10 {
+			DebugLog("DOLLAR parent #%d attr %d: pattern=%q input=%q matched=%v", parentRef, attr.Number, pattern, input, matched)
 		}
 		if !matched {
 			continue
 		}
 
-		if debug {
-			log.Printf("DOLLARDEBUG parent #%d MATCHED for child #%d", parentRef, childRef)
-		}
+		DebugLog("DOLLAR parent #%d MATCHED for child #%d", parentRef, childRef)
 		entry := &QueueEntry{
 			Player:  childRef, // Execute as child, not parent
 			Cause:   cause,
@@ -307,9 +294,7 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		// BEFORE evaluation; we approximate this by preserving braces through eval.
 		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval, entry.Args)
 		evaluated = strings.TrimSpace(evaluated)
-		if strings.Contains(cmd, "trigger") || strings.Contains(cmd, "show_watchers") {
-			log.Printf("EVAL TRIGGER player=#%d cmd=%q evaluated=%q args=%v", entry.Player, truncDebug(cmd, 200), truncDebug(evaluated, 200), entry.Args)
-		}
+		DebugLog("EVAL player=#%d cmd=%q evaluated=%q args=%v", entry.Player, truncDebug(cmd, 200), truncDebug(evaluated, 200), entry.Args)
 		if evaluated == "" {
 			continue
 		}
@@ -580,10 +565,10 @@ func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 // handleSwitchDeferred handles @switch/@swi with split-before-eval.
 // Evaluates LHS (expression), splits raw RHS on commas, matches patterns.
 func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, switches []string, lhs, body string) {
-	log.Printf("DEFERRED @switch player=#%d lhs=%q", entry.Player, truncDebug(lhs, 200))
+	DebugLog("DEFERRED @switch player=#%d lhs=%q", entry.Player, truncDebug(lhs, 200))
 	expr := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval, entry.Args)
 	expr = strings.TrimSpace(expr)
-	log.Printf("DEFERRED @switch player=#%d expr=%q parts_body=%q", entry.Player, truncDebug(expr, 100), truncDebug(body, 200))
+	DebugLog("DEFERRED @switch player=#%d expr=%q parts_body=%q", entry.Player, truncDebug(expr, 100), truncDebug(body, 200))
 
 	parts := splitCommaRespectingBraces(body)
 
@@ -753,11 +738,11 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	g.objExecDepth++
 	defer func() { g.objExecDepth-- }()
 	if g.objExecDepth > maxObjExecDepth {
-		log.Printf("OBJEXEC depth limit (%d) exceeded for player=#%d input=%q — breaking cycle", maxObjExecDepth, player, truncDebug(input, 200))
+		DebugLog("OBJEXEC depth limit (%d) exceeded for player=#%d input=%q — breaking cycle", maxObjExecDepth, player, truncDebug(input, 200))
 		return
 	}
 
-	log.Printf("OBJEXEC ExecuteAsObject player=#%d cause=#%d input=%q", player, cause, truncDebug(input, 200))
+	DebugLog("OBJEXEC ExecuteAsObject player=#%d cause=#%d input=%q", player, cause, truncDebug(input, 200))
 
 	// Handle say/pose prefixes
 	switch input[0] {
@@ -798,7 +783,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
 			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
-			log.Printf("OBJEXEC @pemit target=%q message=%q switches=%q", targetStr, truncDebug(message, 120), switches)
+			DebugLog("OBJEXEC @pemit target=%q message=%q switches=%q", targetStr, truncDebug(message, 120), switches)
 			target := g.ResolveRef(player, targetStr)
 			if target == gamedb.Nothing {
 				target = g.MatchObject(player, targetStr)
@@ -1459,7 +1444,7 @@ func (g *Game) checkListenAttrs(obj, cause gamedb.DBRef, message string) {
 			continue
 		}
 
-		log.Printf("LISTEN MATCH obj=#%d pattern=%q action=%q args=%v", obj, pattern, action, args)
+		DebugLog("LISTEN MATCH obj=#%d pattern=%q action=%q args=%v", obj, pattern, action, args)
 		entry := &QueueEntry{
 			Player:  obj,
 			Cause:   cause,

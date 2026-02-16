@@ -48,7 +48,12 @@ func main() {
 	tlsPort := flag.String("tls-port", envDefault("MUSH_TLS_PORT", ""), "TLS listen port (env: MUSH_TLS_PORT)")
 	restoreArchive := flag.String("restore", envDefault("MUSH_RESTORE", ""), "Restore from archive before boot (env: MUSH_RESTORE)")
 	godPass := flag.String("godpass", envDefault("MUSH_GODPASS", ""), "Set God (#1) password and exit (env: MUSH_GODPASS)")
+	debugFlag := flag.Bool("debug", os.Getenv("MUSH_DEBUG") == "true", "Enable debug logging (env: MUSH_DEBUG)")
 	flag.Parse()
+
+	if *debugFlag {
+		server.SetDebug(true)
+	}
 
 	log.Printf("Welcome to %s", server.VersionString())
 

@@ -2425,6 +2425,9 @@ func getAdminParam(c *GameConf, param string) (string, bool) {
 	case "read_remote_name":
 		if c.ReadRemoteName { return "1", true }
 		return "0", true
+	case "debug":
+		if IsDebug() { return "1", true }
+		return "0", true
 	default:
 		return "", false
 	}
@@ -2495,6 +2498,9 @@ func setAdminParam(c *GameConf, param, value string) bool {
 	case "log":
 		// @admin log=all_commands / @admin log=!all_commands
 		// Currently a no-op placeholder; TinyMUSH uses this for log configuration
+		return true
+	case "debug":
+		SetDebug(parseBoolAdmin(value, negate))
 		return true
 	default:
 		return false
