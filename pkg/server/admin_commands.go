@@ -1188,25 +1188,24 @@ func matchSimple(pattern, str string) bool {
 }
 
 // splitCommaRespectingBraces splits on commas but respects {} nesting.
+// splitCommaRespectingBraces splits on commas at brace depth 0.
+// Only {/} affect depth — [/]/(/), are NOT tracked, matching C TinyMUSH's
+// parse_to behavior. C uses a stack for [/( that tolerates unmatched brackets
+// (e.g., *[* in glob patterns). Our simple depth counter can't replicate that,
+// so we only track braces which are always properly balanced in MUSH code.
 func splitCommaRespectingBraces(s string) []string {
 	var parts []string
 	depth := 0
 	start := 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
-		case '\x1b':
-			// Skip ANSI escape sequences (ESC[...m) to avoid their '['
-			// being counted as depth-increasing brackets.
-			if i+1 < len(s) && s[i+1] == '[' {
-				i += 2 // skip ESC and [
-				for i < len(s) && !((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z')) {
-					i++
-				}
-				// i now points at the terminating letter (e.g., 'm'); loop will i++
-			}
-		case '{', '[', '(':
+		case '{', '(':
 			depth++
-		case '}', ']', ')':
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+		case ')':
 			if depth > 0 {
 				depth--
 			}

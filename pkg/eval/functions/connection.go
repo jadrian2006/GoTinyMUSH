@@ -204,6 +204,12 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		typeFilter = strings.ToUpper(strings.TrimSpace(args[2]))
 	}
 
+	// Handle empty name
+	if name == "" {
+		buf.WriteString("#-1 NOT FOUND")
+		return
+	}
+
 	// Handle special tokens
 	if strings.EqualFold(name, "me") {
 		buf.WriteString(fmt.Sprintf("#%d", looker))

@@ -333,7 +333,11 @@ func fnBefore(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	delim := " "
 	if len(args) > 1 && args[1] != "" { delim = args[1] }
 	idx := strings.Index(args[0], delim)
-	if idx < 0 { return }
+	if idx < 0 {
+		// C TinyMUSH: when delimiter not found, return entire string
+		buf.WriteString(args[0])
+		return
+	}
 	buf.WriteString(args[0][:idx])
 }
 

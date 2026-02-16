@@ -643,23 +643,83 @@ func fnRoom(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	buf.WriteString("#-1")
 }
 
-// fnElock tests the default lock on an object against a player.
-// elock(obj, player) — returns 1 if player passes default lock on obj, 0 otherwise.
-// C TinyMUSH's elock() uses get_obj_and_lock() which defaults to A_LOCK (the default lock),
-// NOT A_LENTER. elock(obj/enterlock, player) would test the enter lock specifically.
+// lockNameToAttr maps lock names (from C TinyMUSH's lock_sw table) to attribute numbers.
+// The key is the full lock name; prefix matching uses the minUniq field.
+var lockNameTable = []struct {
+	name    string
+	minUniq int
+	attr    int
+}{
+	{"chownlock", 2, 59},     // A_LCHOWN
+	{"controllock", 2, 69},   // A_LCONTROL
+	{"defaultlock", 1, 42},   // A_LOCK
+	{"darklock", 2, 85},      // A_LDARK
+	{"droplock", 2, 54},      // A_LDROP
+	{"enterlock", 1, 53},     // A_LENTER
+	{"givelock", 2, 55},      // A_LGIVE
+	{"heardlock", 5, 233},    // A_LHEARD
+	{"hearslock", 5, 234},    // A_LHEARS
+	{"knownlock", 5, 237},    // A_LKNOWN
+	{"knowslock", 5, 238},    // A_LKNOWS
+	{"leavelock", 2, 56},     // A_LLEAVE
+	{"linklock", 2, 57},      // A_LLINK
+	{"movedlock", 5, 235},    // A_LMOVED
+	{"moveslock", 5, 236},    // A_LMOVES
+	{"openlock", 1, 78},      // A_LOPEN
+	{"pagelock", 3, 61},      // A_LPAGE
+	{"parentlock", 3, 98},    // A_LPARENT
+	{"receivelock", 1, 58},   // A_LRECEIVE
+	{"teloutlock", 2, 63},    // A_LTELOUT
+	{"tportlock", 2, 60},     // A_LTPORT
+	{"uselock", 1, 62},       // A_LUSE
+	{"userlock", 4, 86},      // A_LUSER
+	{"speechlock", 1, 209},   // A_LSPEECH
+}
+
+// resolveLockName maps a lock name (possibly abbreviated) to an attribute number.
+// Returns -1 if not found.
+func resolveLockName(name string) int {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, entry := range lockNameTable {
+		if len(lower) >= entry.minUniq && strings.HasPrefix(entry.name, lower) {
+			return entry.attr
+		}
+	}
+	return -1
+}
+
+// fnElock tests a lock on an object against a player.
+// elock(obj, player) — tests default lock.
+// elock(obj/lockname, player) — tests the named lock (e.g., pagelock, enterlock).
+// Returns 1 if player passes, 0 otherwise.
+// C TinyMUSH's elock() uses get_obj_and_lock() to parse obj/lockname.
 func fnElock(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 {
 		buf.WriteString("0")
 		return
 	}
-	obj := resolveDBRef(ctx, args[0])
+
+	// Parse obj/lockname format
+	objStr := args[0]
+	lockAttr := 42 // A_LOCK (default)
+	if slashIdx := strings.IndexByte(objStr, '/'); slashIdx >= 0 {
+		lockName := objStr[slashIdx+1:]
+		objStr = objStr[:slashIdx]
+		lockAttr = resolveLockName(lockName)
+		if lockAttr < 0 {
+			buf.WriteString("#-1 LOCK NOT FOUND")
+			return
+		}
+	}
+
+	obj := resolveDBRef(ctx, objStr)
 	player := resolveDBRef(ctx, args[1])
 	if obj == gamedb.Nothing || player == gamedb.Nothing {
 		buf.WriteString("0")
 		return
 	}
 	if ctx.GameState != nil {
-		if ctx.GameState.EvalObjLock(player, obj, 42) { // A_LOCK = 42 (default lock)
+		if ctx.GameState.EvalObjLock(player, obj, lockAttr) {
 			buf.WriteString("1")
 		} else {
 			buf.WriteString("0")
@@ -669,19 +729,33 @@ func fnElock(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	}
 }
 
-// fnLockFn returns the text of an object's default lock.
-// lock(obj) — returns the lock string.
+// fnLockFn returns the text of an object's lock.
+// lock(obj) — returns the default lock string.
+// lock(obj/lockname) — returns the named lock string.
 func fnLockFn(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 {
 		return
 	}
-	ref := resolveDBRef(ctx, args[0])
+
+	objStr := args[0]
+	lockAttr := 42 // A_LOCK (default)
+	if slashIdx := strings.IndexByte(objStr, '/'); slashIdx >= 0 {
+		lockName := objStr[slashIdx+1:]
+		objStr = objStr[:slashIdx]
+		lockAttr = resolveLockName(lockName)
+		if lockAttr < 0 {
+			buf.WriteString("#-1 LOCK NOT FOUND")
+			return
+		}
+	}
+
+	ref := resolveDBRef(ctx, objStr)
 	if ref == gamedb.Nothing {
 		buf.WriteString("#-1 NOT FOUND")
 		return
 	}
 	if ctx.GameState != nil {
-		text := ctx.GameState.GetAttrTextGS(ref, 38) // A_LOCK = 38
+		text := ctx.GameState.GetAttrTextGS(ref, lockAttr)
 		buf.WriteString(text)
 	}
 }

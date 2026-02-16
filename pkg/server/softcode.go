@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -1156,8 +1157,8 @@ func (g *Game) ProcessQueue() bool {
 func (g *Game) safeExecuteQueueEntry(entry *QueueEntry) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("PANIC in queue entry (player=#%d cmd=%q): %v",
-				entry.Player, entry.Command, r)
+			log.Printf("PANIC in queue entry (player=#%d cmd=%q): %v\n%s",
+				entry.Player, entry.Command, r, debug.Stack())
 		}
 	}()
 
@@ -1417,6 +1418,8 @@ func matchWildHelper(pattern, str string, args *[]string) bool {
 			if len(str) == 0 {
 				return false
 			}
+			// C TinyMUSH captures ? as a single-char arg (like * but one char)
+			*args = append(*args, string(str[0]))
 			pattern = pattern[1:]
 			str = str[1:]
 		default:

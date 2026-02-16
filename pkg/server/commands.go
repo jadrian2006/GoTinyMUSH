@@ -316,8 +316,9 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		switches = parts[1:]
 	}
 
-	// Look up command
-	if cmd, ok := g.Commands[strings.ToLower(cmdName)]; ok {
+	// Look up command (exact match first)
+	lower := strings.ToLower(cmdName)
+	if cmd, ok := g.Commands[lower]; ok {
 		if cmd.NoGuest && g.IsGuest(d.Player) {
 			d.Send("Permission denied.")
 			return
@@ -326,9 +327,29 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	}
 
+	// Prefix matching for @-commands: C TinyMUSH allows abbreviations
+	// (e.g., @fo = @force, @sw = @switch, @tr = @trigger)
+	if len(lower) > 1 && lower[0] == '@' {
+		var matchedCmd *Command
+		matchCount := 0
+		for name, cmd := range g.Commands {
+			if strings.HasPrefix(name, lower) {
+				matchedCmd = cmd
+				matchCount++
+			}
+		}
+		if matchCount == 1 && matchedCmd != nil {
+			if matchedCmd.NoGuest && g.IsGuest(d.Player) {
+				d.Send("Permission denied.")
+				return
+			}
+			matchedCmd.Handler(g, d, args, switches)
+			return
+		}
+	}
+
 	// Unrecognized @<attr> commands: treat as &<attr> (set variable attribute).
 	// Many MUSHes use @va-@vz and similar as shorthand for setting attributes.
-	lower := strings.ToLower(cmdName)
 	if len(lower) > 1 && lower[0] == '@' && args != "" {
 		attrName := lower[1:]
 		// Only do this if it looks like an attribute set (has obj=value)
@@ -1880,6 +1901,25 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 			}
 		}
 		return gamedb.DBRef(n)
+	}
+	// Handle *player — global player name lookup
+	if name[0] == '*' {
+		pName := strings.ToLower(strings.TrimSpace(name[1:]))
+		if pName == "" {
+			return gamedb.Nothing
+		}
+		for ref, obj := range g.DB.Objects {
+			if obj.ObjType() != gamedb.TypePlayer {
+				continue
+			}
+			// Check name and aliases
+			for _, alias := range strings.Split(obj.Name, ";") {
+				if strings.EqualFold(strings.TrimSpace(alias), pName) {
+					return ref
+				}
+			}
+		}
+		return gamedb.Nothing
 	}
 
 	playerObj, ok := g.DB.Objects[player]
