@@ -333,23 +333,12 @@ func (cm *ConnManager) SendToRoom(db *gamedb.Database, room gamedb.DBRef, msg st
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	// Walk the contents chain of the room
-	roomObj, ok := db.Objects[room]
-	if !ok {
-		return
-	}
-	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range db.SafeContents(room) {
 		if descs, ok := cm.byPlayer[next]; ok {
 			for _, d := range descs {
 				d.Send(msg)
 			}
 		}
-		obj, ok := db.Objects[next]
-		if !ok {
-			break
-		}
-		next = obj.Next
 	}
 }
 
@@ -358,12 +347,7 @@ func (cm *ConnManager) SendToRoomExcept(db *gamedb.Database, room gamedb.DBRef, 
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	roomObj, ok := db.Objects[room]
-	if !ok {
-		return
-	}
-	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range db.SafeContents(room) {
 		if next != except {
 			if descs, ok := cm.byPlayer[next]; ok {
 				for _, d := range descs {
@@ -371,11 +355,6 @@ func (cm *ConnManager) SendToRoomExcept(db *gamedb.Database, room gamedb.DBRef, 
 				}
 			}
 		}
-		obj, ok := db.Objects[next]
-		if !ok {
-			break
-		}
-		next = obj.Next
 	}
 }
 

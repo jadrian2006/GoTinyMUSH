@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -41,6 +42,19 @@ func NewCommandQueue() *CommandQueue {
 func (q *CommandQueue) Add(entry *QueueEntry) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	// Enforce per-object queue limit to prevent runaway objects
+	if q.maxPerObj > 0 {
+		count := 0
+		for _, e := range q.immediate {
+			if e.Player == entry.Player {
+				count++
+			}
+		}
+		if count >= q.maxPerObj {
+			log.Printf("QUEUE: dropping entry for #%d — per-object limit (%d) reached", entry.Player, q.maxPerObj)
+			return
+		}
+	}
 	q.immediate = append(q.immediate, entry)
 }
 
@@ -141,7 +155,8 @@ func (q *CommandQueue) DrainObject(obj gamedb.DBRef, semAttr int) int {
 }
 
 // PromoteReady moves entries from the wait queue whose time has come.
-func (q *CommandQueue) PromoteReady() {
+// Returns the number of entries promoted.
+func (q *CommandQueue) PromoteReady() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -157,6 +172,7 @@ func (q *CommandQueue) PromoteReady() {
 		q.immediate = append(q.immediate, q.waitQueue[:cutoff]...)
 		q.waitQueue = q.waitQueue[cutoff:]
 	}
+	return cutoff
 }
 
 // PopImmediate returns and removes the next immediate command, or nil.

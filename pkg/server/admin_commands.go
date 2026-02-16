@@ -604,10 +604,10 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 		}
 	}
 	removed := g.Queue.HaltPlayer(target)
-	if obj, ok := g.DB.Objects[target]; ok {
-		obj.Flags[0] |= gamedb.FlagHalt
-		g.PersistObject(obj)
-	}
+	// Note: C TinyMUSH's @halt only clears queue entries — it does NOT set
+	// the HALT flag. The HALT flag is only set via @set obj=HALT. This is
+	// important because STARTUP patterns like "@halt me; @wait 60=@tr me/loop"
+	// rely on the object still being able to queue new commands after @halt.
 	d.Send(fmt.Sprintf("Halted. %d command(s) removed from queue.", removed))
 }
 
@@ -849,7 +849,7 @@ func cmdSetVAttr(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	targetStr := strings.TrimSpace(rest[:eqIdx])
-	value := rest[eqIdx+1:]
+	value := strings.TrimSpace(rest[eqIdx+1:])
 
 	if attrName == "" {
 		d.Send("Usage: &ATTR object=value")

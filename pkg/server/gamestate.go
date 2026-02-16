@@ -159,6 +159,32 @@ func (g *Game) CouldDoIt(player, thing gamedb.DBRef, lockAttr int) bool {
 	return CouldDoIt(g, player, thing, lockAttr)
 }
 
+// EvalObjLock evaluates the lock on thing against player without wizard bypass.
+// Only Pass_Locks power bypasses. Matches C's fun_elock behavior.
+func (g *Game) EvalObjLock(player, thing gamedb.DBRef, lockAttr int) bool {
+	// Only Pass_Locks bypasses (matches C's fun_elock)
+	if PassLocks(g, player) {
+		return true
+	}
+
+	// Check attribute-stored lock
+	lockText := g.GetAttrText(thing, lockAttr)
+	if lockText != "" {
+		parsed := ParseBoolExp(g, player, lockText)
+		return EvalBoolExp(g, player, thing, thing, parsed, 0)
+	}
+
+	// Check header-based lock
+	if lockAttr == aLock {
+		if tObj, ok := g.DB.Objects[thing]; ok && tObj.Lock != nil {
+			return EvalBoolExp(g, player, thing, thing, tObj.Lock, 0)
+		}
+	}
+
+	// No lock = unlocked
+	return true
+}
+
 // GetAttrTextGS returns the text of an attribute on an object (with parent walk).
 func (g *Game) GetAttrTextGS(obj gamedb.DBRef, attrNum int) string {
 	return g.GetAttrText(obj, attrNum)

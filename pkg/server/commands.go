@@ -626,19 +626,12 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 			d.Send("I don't see that here.")
 			return
 		}
-		obj, ok := g.DB.Objects[target]
-		if !ok {
+		if _, ok := g.DB.Objects[target]; !ok {
 			d.Send("I don't see that here.")
 			return
 		}
-		cur := obj.Contents
-		for cur != gamedb.Nothing {
+		for _, cur := range g.DB.SafeContents(target) {
 			g.SendMarkedToPlayer(cur, "EMIT", message)
-			if cObj, ok := g.DB.Objects[cur]; ok {
-				cur = cObj.Next
-			} else {
-				break
-			}
 		}
 		return
 	}
@@ -835,23 +828,19 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdInventory(g *Game, d *Descriptor, _ string, _ []string) {
-	playerObj, ok := g.DB.Objects[d.Player]
-	if !ok {
+	if _, ok := g.DB.Objects[d.Player]; !ok {
 		return
 	}
-	next := playerObj.Contents
-	if next == gamedb.Nothing {
+	contents := g.DB.SafeContents(d.Player)
+	if len(contents) == 0 {
 		d.Send("You aren't carrying anything.")
 		return
 	}
 	d.Send("You are carrying:")
-	for next != gamedb.Nothing {
-		obj, ok := g.DB.Objects[next]
-		if !ok {
-			break
+	for _, next := range contents {
+		if obj, ok := g.DB.Objects[next]; ok {
+			d.Send(fmt.Sprintf("  %s", DisplayName(obj.Name)))
 		}
-		d.Send(fmt.Sprintf("  %s", DisplayName(obj.Name)))
-		next = obj.Next
 	}
 }
 
@@ -1044,6 +1033,9 @@ type Game struct {
 	ArchiveDir  string   // Path to archive output directory
 	EventBus    *events.Bus // Structured event bus for multi-transport output
 	Guests      *GuestManager // Guest player tracking and cleanup
+	objExecDepth int // Recursion depth counter for ExecuteAsObject
+	objExecCount map[gamedb.DBRef]int // Per-object execution counter for rate limiting
+	objExecCountReset time.Time // When the counter was last reset
 }
 
 // Emit sends an event to the player specified in ev.Player via the event bus.
@@ -1103,6 +1095,32 @@ func NewGame(db *gamedb.Database) *Game {
 		EventBus:  bus,
 		Guests:    NewGuestManager(),
 	}
+}
+
+// stringMatchWord implements C TinyMUSH's string_match: checks if sub is a prefix
+// of any word in src (words separated by non-alphanumeric characters).
+// Both src and sub should already be lowercased.
+func stringMatchWord(src, sub string) bool {
+	if sub == "" || src == "" {
+		return false
+	}
+	i := 0
+	for i < len(src) {
+		if strings.HasPrefix(src[i:], sub) {
+			return true
+		}
+		for i < len(src) && isAlnumByte(src[i]) {
+			i++
+		}
+		for i < len(src) && !isAlnumByte(src[i]) {
+			i++
+		}
+	}
+	return false
+}
+
+func isAlnumByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 // DisplayName returns the display name of an object (before the first semicolon).
@@ -1192,7 +1210,9 @@ func (g *Game) RemoveFromContents(loc gamedb.DBRef, obj gamedb.DBRef) {
 		return
 	}
 	prev := locObj.Contents
-	for prev != gamedb.Nothing {
+	seen := make(map[gamedb.DBRef]bool)
+	for prev != gamedb.Nothing && !seen[prev] {
+		seen[prev] = true
 		prevObj, ok := g.DB.Objects[prev]
 		if !ok {
 			break
@@ -1241,11 +1261,10 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 
 	// Build list of visible content dbrefs (excluding the looking player)
 	var contentRefs []gamedb.DBRef
-	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range g.DB.SafeContents(room) {
 		obj, ok := g.DB.Objects[next]
 		if !ok {
-			break
+			continue
 		}
 		if next != d.Player && !obj.IsGoing() {
 			visible := false
@@ -1411,6 +1430,14 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		d.Send(fmt.Sprintf("Parent: %s(#%d)", g.ObjName(obj.Parent), obj.Parent))
 	}
 
+	// Show default lock ("Key:") if set
+	lockText := g.GetAttrText(target, aLock)
+	if lockText != "" {
+		d.Send(fmt.Sprintf("Key: %s", lockText))
+	} else if obj.Lock != nil {
+		d.Send(fmt.Sprintf("Key: %s", UnparseBoolExp(g, obj.Lock)))
+	}
+
 	// Check per-player TRUNC_LENGTH for attribute display truncation
 	truncLen := 0
 	if ts := g.GetAttrTextByName(d.Player, "TRUNC_LENGTH"); ts != "" {
@@ -1449,15 +1476,12 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 	}
 
 	// Contents section
-	if obj.Contents != gamedb.Nothing {
+	examContents := g.DB.SafeContents(target)
+	if len(examContents) > 0 {
 		d.Send("Contents:")
-		next := obj.Contents
-		for next != gamedb.Nothing {
-			if cObj, ok := g.DB.Objects[next]; ok {
-				d.Send(fmt.Sprintf("%s(#%d%s)", cObj.Name, next, flagString(cObj)))
-				next = cObj.Next
-			} else {
-				break
+		for _, cRef := range examContents {
+			if cObj, ok := g.DB.Objects[cRef]; ok {
+				d.Send(fmt.Sprintf("%s(#%d%s)", cObj.Name, cRef, flagString(cObj)))
 			}
 		}
 	}
@@ -1838,6 +1862,7 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 
 	// matchAliases checks name and semicolon-separated aliases for exact or prefix match.
 	// Returns 2 for exact match, 1 for prefix match, 0 for no match.
+	// Uses word-boundary matching: "bath" matches "Radiant Bath" (C TinyMUSH string_match).
 	matchAliases := func(objName string) int {
 		for _, alias := range strings.Split(objName, ";") {
 			alias = strings.TrimSpace(alias)
@@ -1845,21 +1870,20 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 			if aliasLower == nameLower {
 				return 2 // exact
 			}
-			if strings.HasPrefix(aliasLower, nameLower) {
-				return 1 // prefix
+			if stringMatchWord(aliasLower, nameLower) {
+				return 1 // prefix/word match
 			}
 		}
 		return 0
 	}
 
-	// searchContents searches a contents chain for exact then prefix matches.
-	searchContents := func(first gamedb.DBRef) gamedb.DBRef {
+	// searchContents searches a contents list for exact then prefix matches.
+	searchContents := func(contents []gamedb.DBRef) gamedb.DBRef {
 		var prefixMatch gamedb.DBRef = gamedb.Nothing
-		next := first
-		for next != gamedb.Nothing {
+		for _, next := range contents {
 			obj, ok := g.DB.Objects[next]
 			if !ok {
-				break
+				continue
 			}
 			switch matchAliases(obj.Name) {
 			case 2:
@@ -1869,21 +1893,18 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 					prefixMatch = next // remember first prefix match
 				}
 			}
-			next = obj.Next
 		}
 		return prefixMatch
 	}
 
 	// Search room contents
 	loc := playerObj.Location
-	if locObj, ok := g.DB.Objects[loc]; ok {
-		if found := searchContents(locObj.Contents); found != gamedb.Nothing {
-			return found
-		}
+	if found := searchContents(g.DB.SafeContents(loc)); found != gamedb.Nothing {
+		return found
 	}
 
 	// Search player inventory
-	if found := searchContents(playerObj.Contents); found != gamedb.Nothing {
+	if found := searchContents(g.DB.SafeContents(player)); found != gamedb.Nothing {
 		return found
 	}
 

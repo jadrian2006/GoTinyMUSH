@@ -34,33 +34,15 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 	searchObjs = append(searchObjs, player)
 
 	// Player's inventory
-	if pObj, ok := g.DB.Objects[player]; ok {
-		next := pObj.Contents
-		for next != gamedb.Nothing {
-			searchObjs = append(searchObjs, next)
-			if obj, ok := g.DB.Objects[next]; ok {
-				next = obj.Next
-			} else {
-				break
-			}
-		}
-	}
+	searchObjs = append(searchObjs, g.DB.SafeContents(player)...)
 
 	// Room and room contents
 	loc := g.PlayerLocation(player)
 	if loc != gamedb.Nothing {
 		searchObjs = append(searchObjs, loc)
-		if locObj, ok := g.DB.Objects[loc]; ok {
-			next := locObj.Contents
-			for next != gamedb.Nothing {
-				if next != player { // Skip player (already searched)
-					searchObjs = append(searchObjs, next)
-				}
-				if obj, ok := g.DB.Objects[next]; ok {
-					next = obj.Next
-				} else {
-					break
-				}
+		for _, next := range g.DB.SafeContents(loc) {
+			if next != player { // Skip player (already searched)
+				searchObjs = append(searchObjs, next)
 			}
 		}
 	}
@@ -68,20 +50,10 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 	// Master room contents — global commands live here in heavy softcode games
 	masterRoom := g.MasterRoomRef()
 	if loc != masterRoom {
-		if mrObj, ok := g.DB.Objects[masterRoom]; ok {
-			// Search master room itself
-			searchObjs = append(searchObjs, masterRoom)
-			// Search its contents
-			next := mrObj.Contents
-			for next != gamedb.Nothing {
-				searchObjs = append(searchObjs, next)
-				if obj, ok := g.DB.Objects[next]; ok {
-					next = obj.Next
-				} else {
-					break
-				}
-			}
-		}
+		// Search master room itself
+		searchObjs = append(searchObjs, masterRoom)
+		// Search its contents
+		searchObjs = append(searchObjs, g.DB.SafeContents(masterRoom)...)
 	}
 
 	// Zone-based commands: check player's zone and room's zone
@@ -124,17 +96,7 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 // addZoneObjects appends a zone object and its contents to the search list.
 func (g *Game) addZoneObjects(searchObjs []gamedb.DBRef, zone gamedb.DBRef) []gamedb.DBRef {
 	searchObjs = append(searchObjs, zone)
-	if zObj, ok := g.DB.Objects[zone]; ok {
-		next := zObj.Contents
-		for next != gamedb.Nothing {
-			searchObjs = append(searchObjs, next)
-			if obj, ok := g.DB.Objects[next]; ok {
-				next = obj.Next
-			} else {
-				break
-			}
-		}
-	}
+	searchObjs = append(searchObjs, g.DB.SafeContents(zone)...)
 	return searchObjs
 }
 
@@ -299,6 +261,13 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 // Like TinyMUSH's process_cmdline, it splits on semicolons to handle
 // multi-command strings (e.g. "@drain me;@notify me").
 func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
+	// Check HALT flag — halted objects should not execute queue entries
+	if obj, ok := g.DB.Objects[entry.Player]; ok {
+		if obj.HasFlag(gamedb.FlagHalt) {
+			return
+		}
+	}
+
 	ctx := MakeEvalContextWithGame(g, entry.Player, func(c *eval.EvalContext) {
 		functions.RegisterAll(c)
 	})
@@ -718,6 +687,16 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	if input == "" {
 		return
 	}
+
+	// Recursion depth protection — prevent infinite $-command loops
+	const maxObjExecDepth = 50
+	g.objExecDepth++
+	defer func() { g.objExecDepth-- }()
+	if g.objExecDepth > maxObjExecDepth {
+		log.Printf("OBJEXEC depth limit (%d) exceeded for player=#%d input=%q — breaking cycle", maxObjExecDepth, player, truncDebug(input, 200))
+		return
+	}
+
 	log.Printf("OBJEXEC ExecuteAsObject player=#%d cause=#%d input=%q", player, cause, truncDebug(input, 200))
 
 	// Handle say/pose prefixes
@@ -769,16 +748,8 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 			}
 			if strings.HasPrefix(switches, "content") {
 				// @pemit/contents: send to all contents of target
-				if tObj, ok := g.DB.Objects[target]; ok {
-					cur := tObj.Contents
-					for cur != gamedb.Nothing {
-						g.SendMarkedToPlayer(cur, "EMIT", message)
-						if cObj, ok := g.DB.Objects[cur]; ok {
-							cur = cObj.Next
-						} else {
-							break
-						}
-					}
+				for _, cur := range g.DB.SafeContents(target) {
+					g.SendMarkedToPlayer(cur, "EMIT", message)
 				}
 			} else if strings.HasPrefix(switches, "list") {
 				// @pemit/list: send to multiple targets
@@ -986,7 +957,12 @@ func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
 	}
 
 	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
-	text := g.GetAttrTextByName(target, attrName)
+	attrNum := g.ResolveAttrNum(attrName)
+	if attrNum < 0 {
+		return
+	}
+	// GetAttrText walks the parent chain (like C's atr_pget)
+	text := g.GetAttrText(target, attrNum)
 	if text == "" {
 		return
 	}
@@ -1032,7 +1008,11 @@ func (g *Game) DoTriggerNow(player, cause gamedb.DBRef, args string) {
 	}
 
 	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
-	text := g.GetAttrTextByName(target, attrName)
+	attrNum := g.ResolveAttrNum(attrName)
+	if attrNum < 0 {
+		return
+	}
+	text := g.GetAttrText(target, attrNum)
 	if text == "" {
 		return
 	}
@@ -1138,19 +1118,37 @@ func (g *Game) DoSet(player gamedb.DBRef, args string) {
 }
 
 // ProcessQueue processes queued commands (called periodically).
-func (g *Game) ProcessQueue() {
+func (g *Game) ProcessQueue() bool {
 	// Move ready entries from wait queue
-	g.Queue.PromoteReady()
+	promoted := g.Queue.PromoteReady()
 
-	// Process up to N entries per tick (10ms tick × 500/tick = 50,000 entries/sec max)
-	maxPerTick := 500
+	// Reset per-object execution counters every second
+	now := time.Now()
+	if g.objExecCountReset.IsZero() || now.Sub(g.objExecCountReset) > time.Second {
+		g.objExecCount = make(map[gamedb.DBRef]int)
+		g.objExecCountReset = now
+	}
+
+	// Process up to N entries per tick (10ms tick × 100/tick = 10,000 entries/sec max)
+	maxPerTick := 100
+	const maxPerObjPerSec = 200 // Per-object rate limit
+	processed := 0
 	for i := 0; i < maxPerTick; i++ {
 		entry := g.Queue.PopImmediate()
 		if entry == nil {
 			break
 		}
+		g.objExecCount[entry.Player]++
+		if g.objExecCount[entry.Player] > maxPerObjPerSec {
+			if g.objExecCount[entry.Player] == maxPerObjPerSec+1 {
+				log.Printf("QUEUE: throttling #%d — exceeded %d executions/sec", entry.Player, maxPerObjPerSec)
+			}
+			continue // Drop entry
+		}
 		g.safeExecuteQueueEntry(entry)
+		processed++
 	}
+	return processed > 0 || promoted > 0
 }
 
 // safeExecuteQueueEntry wraps ExecuteQueueEntry with panic recovery and a
@@ -1176,12 +1174,16 @@ func (g *Game) safeExecuteQueueEntry(entry *QueueEntry) {
 }
 
 // StartQueueProcessor starts the background queue processing loop.
+// Uses adaptive tick rate: fast (10ms) when processing, slow (100ms) when idle.
 func (g *Game) StartQueueProcessor() {
 	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
+		const fastTick = 10 * time.Millisecond
+		const idleTick = 100 * time.Millisecond
+		ticker := time.NewTicker(idleTick)
 		defer ticker.Stop()
 		heartbeat := time.NewTicker(60 * time.Second)
 		defer heartbeat.Stop()
+		idle := true
 		for {
 			select {
 			case <-ticker.C:
@@ -1191,7 +1193,14 @@ func (g *Game) StartQueueProcessor() {
 							log.Printf("PANIC in queue processor: %v", r)
 						}
 					}()
-					g.ProcessQueue()
+					hadWork := g.ProcessQueue()
+					if hadWork && idle {
+						idle = false
+						ticker.Reset(fastTick)
+					} else if !hadWork && !idle {
+						idle = true
+						ticker.Reset(idleTick)
+					}
 				}()
 			case <-heartbeat.C:
 				imm, wait, sem := g.Queue.Stats()
@@ -1301,17 +1310,15 @@ func (g *Game) MatchListenPatterns(loc gamedb.DBRef, speaker gamedb.DBRef, messa
 	}
 
 	// Walk contents of the room
-	next := locObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range g.DB.SafeContents(loc) {
 		obj, ok := g.DB.Objects[next]
 		if !ok {
-			break
+			continue
 		}
 		// Check for MONITOR flag (or HAS_LISTEN)
 		if next != speaker && (obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen)) {
 			g.checkListenAttrs(next, speaker, message)
 		}
-		next = obj.Next
 	}
 
 	// Also check the room itself

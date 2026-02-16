@@ -269,50 +269,47 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		return false
 	}
 
-	// Search inventory
-	next := lookerObj.Contents
-	for next != gamedb.Nothing {
-		if obj, ok := ctx.DB.Objects[next]; ok {
-			if strings.EqualFold(obj.Name, name) && matchType(obj) {
-				buf.WriteString(fmt.Sprintf("#%d", next))
-				return
+	// searchChainTyped searches a content/exit chain with alias+prefix matching and type filtering.
+	searchChainTyped := func(first gamedb.DBRef) gamedb.DBRef {
+		var prefixMatch gamedb.DBRef = gamedb.Nothing
+		next := first
+		for next != gamedb.Nothing {
+			obj, ok := ctx.DB.Objects[next]
+			if !ok {
+				break
+			}
+			if matchType(obj) {
+				switch matchNameAlias(obj.Name, name) {
+				case 2:
+					return next // exact match wins
+				case 1:
+					if prefixMatch == gamedb.Nothing {
+						prefixMatch = next
+					}
+				}
 			}
 			next = obj.Next
-		} else {
-			break
 		}
+		return prefixMatch
+	}
+
+	// Search inventory
+	if found := searchChainTyped(lookerObj.Contents); found != gamedb.Nothing {
+		buf.WriteString(fmt.Sprintf("#%d", found))
+		return
 	}
 
 	// Search room contents
 	loc := lookerObj.Location
 	if locObj, ok := ctx.DB.Objects[loc]; ok {
-		next = locObj.Contents
-		for next != gamedb.Nothing {
-			if obj, ok := ctx.DB.Objects[next]; ok {
-				if strings.EqualFold(obj.Name, name) && matchType(obj) {
-					buf.WriteString(fmt.Sprintf("#%d", next))
-					return
-				}
-				next = obj.Next
-			} else {
-				break
-			}
+		if found := searchChainTyped(locObj.Contents); found != gamedb.Nothing {
+			buf.WriteString(fmt.Sprintf("#%d", found))
+			return
 		}
 		// Search exits
-		next = locObj.Exits
-		for next != gamedb.Nothing {
-			if obj, ok := ctx.DB.Objects[next]; ok {
-				exitNames := strings.Split(obj.Name, ";")
-				for _, ename := range exitNames {
-					if strings.EqualFold(strings.TrimSpace(ename), name) && matchType(obj) {
-						buf.WriteString(fmt.Sprintf("#%d", next))
-						return
-					}
-				}
-				next = obj.Next
-			} else {
-				break
-			}
+		if found := searchChainTyped(locObj.Exits); found != gamedb.Nothing {
+			buf.WriteString(fmt.Sprintf("#%d", found))
+			return
 		}
 	}
 

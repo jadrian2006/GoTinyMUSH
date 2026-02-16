@@ -297,6 +297,28 @@ type Database struct {
 	AttrByName    map[string]*AttrDef // attr name -> definition
 }
 
+// SafeContents returns a slice of DBRefs from obj's contents chain,
+// with circular-chain protection. Max 10000 items to prevent runaway.
+func (db *Database) SafeContents(obj DBRef) []DBRef {
+	o, ok := db.Objects[obj]
+	if !ok {
+		return nil
+	}
+	var result []DBRef
+	seen := make(map[DBRef]bool)
+	next := o.Contents
+	for next != Nothing && !seen[next] && len(result) < 10000 {
+		seen[next] = true
+		result = append(result, next)
+		if nObj, ok := db.Objects[next]; ok {
+			next = nObj.Next
+		} else {
+			break
+		}
+	}
+	return result
+}
+
 // NewDatabase creates an empty Database.
 func NewDatabase() *Database {
 	return &Database{

@@ -619,7 +619,7 @@ func (p *Parser) readBoolExp1() (*gamedb.BoolExp, error) {
 		return nil, nil
 
 	case '"':
-		// Quoted attribute lock
+		// Quoted attribute lock: "ATTRNAME":pattern or "ATTRNAME"/pattern
 		str, err := p.readString(true)
 		if err != nil {
 			return nil, err
@@ -628,14 +628,13 @@ func (p *Parser) readBoolExp1() (*gamedb.BoolExp, error) {
 		if ch2 == ':' || ch2 == '/' {
 			p.mustReadByte()
 			val := p.readUntilBoolTerminator()
-			b := &gamedb.BoolExp{Thing: 0, StrVal: val}
+			attrNum := p.resolveAttrName(str)
+			b := &gamedb.BoolExp{Thing: attrNum, StrVal: val}
 			if ch2 == '/' {
 				b.Type = gamedb.BoolEval
 			} else {
 				b.Type = gamedb.BoolAttr
 			}
-			// Store the attr name for now; we'd resolve it in a real implementation
-			_ = str
 			return b, nil
 		}
 		return &gamedb.BoolExp{Type: gamedb.BoolConst}, nil
@@ -681,7 +680,8 @@ func (p *Parser) readBoolExp1() (*gamedb.BoolExp, error) {
 			if ch == ':' || ch == '/' {
 				p.mustReadByte()
 				val := p.readUntilBoolTerminator()
-				b := &gamedb.BoolExp{Thing: 0, StrVal: val}
+				attrNum := p.resolveAttrName(name.String())
+				b := &gamedb.BoolExp{Thing: attrNum, StrVal: val}
 				if ch == '/' {
 					b.Type = gamedb.BoolEval
 				} else {
@@ -693,6 +693,23 @@ func (p *Parser) readBoolExp1() (*gamedb.BoolExp, error) {
 		}
 		return nil, nil
 	}
+}
+
+// resolveAttrName looks up an attribute name and returns its number.
+// Checks well-known attrs first, then user-defined attrs from the database.
+func (p *Parser) resolveAttrName(name string) int {
+	upper := strings.ToUpper(name)
+	for num, n := range gamedb.WellKnownAttrs {
+		if n == upper {
+			return num
+		}
+	}
+	if p.db != nil {
+		if def, ok := p.db.AttrByName[upper]; ok {
+			return def.Number
+		}
+	}
+	return -1
 }
 
 func (p *Parser) readUntilBoolTerminator() string {

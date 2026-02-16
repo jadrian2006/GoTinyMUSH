@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
@@ -317,6 +318,110 @@ func TestFixSpan(t *testing.T) {
 		got := fixSpan(tt.input)
 		if got != tt.want {
 			t.Errorf("fixSpan(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestBraceEscapeChecker(t *testing.T) {
+	db := makeTestDB(
+		&gamedb.Object{
+			DBRef: 25,
+			Name:  "Test Object",
+			Owner: 1,
+			Attrs: []gamedb.Attribute{
+				{Number: 39, Value: `switch(test, 1,,\{[ansi(c,Monitor)] %N connected.})`},
+			},
+		},
+	)
+
+	c := &BraceEscapeChecker{}
+	findings := c.Check(db)
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	if f.Category != CatDoubleEscape {
+		t.Errorf("expected CatDoubleEscape, got %v", f.Category)
+	}
+	if !f.Fixable {
+		t.Error("expected finding to be fixable")
+	}
+}
+
+func TestBraceEscapeFixApply(t *testing.T) {
+	obj := &gamedb.Object{
+		DBRef: 25,
+		Name:  "Test Object",
+		Owner: 1,
+		Attrs: []gamedb.Attribute{
+			{Number: 39, Value: `switch(test, 1,,\{[ansi(c,Monitor)] %N connected.})`},
+		},
+	}
+	db := makeTestDB(obj)
+
+	v := New(db)
+	findings := v.Run()
+
+	var beFindings []Finding
+	for _, f := range findings {
+		if f.Description != "" && len(f.Description) > 0 && f.ID != "" {
+			if f.Category == CatDoubleEscape && f.AttrNum == 39 {
+				// Check if it's a brace-escape finding (has \{ in description)
+				if strings.Contains(f.Description, "Escaped brace") {
+					beFindings = append(beFindings, f)
+				}
+			}
+		}
+	}
+	if len(beFindings) == 0 {
+		t.Fatal("expected at least one brace-escape finding")
+	}
+
+	err := v.ApplyFix(beFindings[0].ID)
+	if err != nil {
+		t.Fatalf("ApplyFix failed: %v", err)
+	}
+
+	got := obj.Attrs[0].Value
+	expected := `switch(test, 1,,{[ansi(c,Monitor)] %N connected.})`
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+func TestFindBraceEscapes(t *testing.T) {
+	tests := []struct {
+		input string
+		count int
+	}{
+		{`\{hello}`, 1},
+		{`\{foo} and \{bar}`, 2},
+		{`no braces here`, 0},
+		{`{normal braces}`, 0},
+		{`\\{double backslash}`, 0}, // \\{ is not a brace escape
+		{`\{nested {inner} outer}`, 1},
+	}
+	for _, tt := range tests {
+		matches := findBraceEscapes(tt.input)
+		if len(matches) != tt.count {
+			t.Errorf("findBraceEscapes(%q): got %d matches, want %d", tt.input, len(matches), tt.count)
+		}
+	}
+}
+
+func TestFixBraceSpan(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`\{hello}`, `{hello}`},
+		{`\{[ansi(c,Monitor)] test}`, `{[ansi(c,Monitor)] test}`},
+	}
+	for _, tt := range tests {
+		got := fixBraceSpan(tt.input)
+		if got != tt.want {
+			t.Errorf("fixBraceSpan(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

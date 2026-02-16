@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -373,6 +374,14 @@ func main() {
 		srv.Game.DictDir = *dictDir
 	}
 	srv.Game.ArchiveDir = gc.ArchiveDir
+
+	// Start pprof debug endpoint on port 6060
+	go func() {
+		log.Printf("pprof debug endpoint at http://0.0.0.0:6060/debug/pprof/")
+		if err := http.ListenAndServe(":6060", nil); err != nil {
+			log.Printf("pprof server error: %v", err)
+		}
+	}()
 
 	// Run @startup actions
 	srv.Game.RunStartup()

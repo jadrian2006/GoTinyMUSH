@@ -108,6 +108,77 @@ func fnObjmem(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	writeInt(buf, size)
 }
 
+// matchNameAlias checks if searchName matches an object's name or any alias.
+// Returns 2 for exact match, 1 for prefix match, 0 for no match.
+// Object names use semicolons for aliases: "Radiant Bath;bath;rb"
+// Matching follows C TinyMUSH's string_match: search term can match the
+// beginning of any word in the name (e.g., "bath" matches "Radiant Bath").
+func matchNameAlias(objName, searchName string) int {
+	searchLower := strings.ToLower(searchName)
+	for _, alias := range strings.Split(objName, ";") {
+		alias = strings.TrimSpace(alias)
+		aliasLower := strings.ToLower(alias)
+		if aliasLower == searchLower {
+			return 2 // exact match
+		}
+		if stringMatch(aliasLower, searchLower) {
+			return 1 // prefix/word match
+		}
+	}
+	return 0
+}
+
+// stringMatch implements C TinyMUSH's string_match: checks if sub is a prefix
+// of any word in src (words separated by non-alphanumeric characters).
+// Both src and sub should already be lowercased.
+func stringMatch(src, sub string) bool {
+	if sub == "" || src == "" {
+		return false
+	}
+	i := 0
+	for i < len(src) {
+		if strings.HasPrefix(src[i:], sub) {
+			return true
+		}
+		// Skip to end of current word (alphanumeric chars)
+		for i < len(src) && isAlnum(src[i]) {
+			i++
+		}
+		// Skip non-alphanumeric chars to start of next word
+		for i < len(src) && !isAlnum(src[i]) {
+			i++
+		}
+	}
+	return false
+}
+
+func isAlnum(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+// searchContentChain searches a linked list of objects for name/alias/prefix matches.
+// Returns the best match (exact wins over prefix, first prefix wins).
+func searchContentChain(db *gamedb.Database, first gamedb.DBRef, name string) gamedb.DBRef {
+	var prefixMatch gamedb.DBRef = gamedb.Nothing
+	next := first
+	for next != gamedb.Nothing {
+		obj, ok := db.Objects[next]
+		if !ok {
+			break
+		}
+		switch matchNameAlias(obj.Name, name) {
+		case 2:
+			return next // exact match wins immediately
+		case 1:
+			if prefixMatch == gamedb.Nothing {
+				prefixMatch = next
+			}
+		}
+		next = obj.Next
+	}
+	return prefixMatch
+}
+
 func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 	s = strings.TrimSpace(s)
 	// Handle "me" and "here"
@@ -124,26 +195,30 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 		n, err := strconv.Atoi(s[1:])
 		if err == nil { return gamedb.DBRef(n) }
 	}
-	// Try matching by player name
+	// Try matching by player name (exact only for *name syntax)
 	if strings.HasPrefix(s, "*") { s = s[1:] }
 	for _, obj := range ctx.DB.Objects {
 		if obj.ObjType() == gamedb.TypePlayer && strings.EqualFold(obj.Name, s) {
 			return obj.DBRef
 		}
 	}
-	// Try matching in current location
+	// Try matching in current location (room contents, inventory, exits)
 	if ctx.Player != gamedb.Nothing {
 		if pObj, ok := ctx.DB.Objects[ctx.Player]; ok {
+			// Search room contents
 			loc := pObj.Location
 			if locObj, ok := ctx.DB.Objects[loc]; ok {
-				// Search contents
-				next := locObj.Contents
-				for next != gamedb.Nothing {
-					if nObj, ok := ctx.DB.Objects[next]; ok {
-						if strings.EqualFold(nObj.Name, s) { return next }
-						next = nObj.Next
-					} else { break }
+				if found := searchContentChain(ctx.DB, locObj.Contents, s); found != gamedb.Nothing {
+					return found
 				}
+				// Search exits
+				if found := searchContentChain(ctx.DB, locObj.Exits, s); found != gamedb.Nothing {
+					return found
+				}
+			}
+			// Search inventory
+			if found := searchContentChain(ctx.DB, pObj.Contents, s); found != gamedb.Nothing {
+				return found
 			}
 		}
 	}
@@ -557,8 +632,10 @@ func fnRoom(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	buf.WriteString("#-1")
 }
 
-// fnElock tests the enter lock on an object against a player.
-// elock(obj, player) — returns 1 if player passes enter lock on obj, 0 otherwise.
+// fnElock tests the default lock on an object against a player.
+// elock(obj, player) — returns 1 if player passes default lock on obj, 0 otherwise.
+// C TinyMUSH's elock() uses get_obj_and_lock() which defaults to A_LOCK (the default lock),
+// NOT A_LENTER. elock(obj/enterlock, player) would test the enter lock specifically.
 func fnElock(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 {
 		buf.WriteString("0")
@@ -571,7 +648,7 @@ func fnElock(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		return
 	}
 	if ctx.GameState != nil {
-		if ctx.GameState.CouldDoIt(player, obj, 55) { // A_LENTER = 55
+		if ctx.GameState.EvalObjLock(player, obj, 42) { // A_LOCK = 42 (default lock)
 			buf.WriteString("1")
 		} else {
 			buf.WriteString("0")

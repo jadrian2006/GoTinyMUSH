@@ -111,6 +111,7 @@ func New(db *gamedb.Database) *Validator {
 		db: db,
 		checkers: []Checker{
 			&DoubleEscapeChecker{},
+			&BraceEscapeChecker{},
 			&AttrFlagChecker{},
 			&EscapeSeqChecker{},
 			&PercentChecker{},

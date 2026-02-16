@@ -12,7 +12,7 @@ import (
 
 // Lock attribute numbers (from attrs.go well-known attrs)
 const (
-	aLock   = 38 // A_LOCK — default lock
+	aLock   = 42 // A_LOCK — default lock
 	aFail   = 3  // A_FAIL
 	aOFail  = 2  // A_OFAIL
 	aAFail  = 13 // A_AFAIL
@@ -278,18 +278,10 @@ func EvalBoolExp(g *Game, player, thing, from gamedb.DBRef, b *gamedb.BoolExp, d
 			return true
 		}
 		// Check inventory items
-		if pObj, ok := g.DB.Objects[player]; ok {
-			next := pObj.Contents
-			for next != gamedb.Nothing {
-				iText := g.GetAttrText(next, b.Thing)
-				if wildMatchCI(pattern, iText) {
-					return true
-				}
-				if nObj, ok := g.DB.Objects[next]; ok {
-					next = nObj.Next
-				} else {
-					break
-				}
+		for _, next := range g.DB.SafeContents(player) {
+			iText := g.GetAttrText(next, b.Thing)
+			if wildMatchCI(pattern, iText) {
+				return true
 			}
 		}
 		return false
@@ -340,18 +332,10 @@ func EvalBoolExp(g *Game, player, thing, from gamedb.DBRef, b *gamedb.BoolExp, d
 				return false
 			}
 			// Check ONLY contents, not the player
-			if pObj, ok := g.DB.Objects[player]; ok {
-				next := pObj.Contents
-				for next != gamedb.Nothing {
-					iText := g.GetAttrText(next, b.Sub1.Thing)
-					if wildMatchCI(b.Sub1.StrVal, iText) {
-						return true
-					}
-					if nObj, ok := g.DB.Objects[next]; ok {
-						next = nObj.Next
-					} else {
-						break
-					}
+			for _, next := range g.DB.SafeContents(player) {
+				iText := g.GetAttrText(next, b.Sub1.Thing)
+				if wildMatchCI(b.Sub1.StrVal, iText) {
+					return true
 				}
 			}
 			return false
@@ -394,22 +378,58 @@ func EvalBoolExp(g *Game, player, thing, from gamedb.DBRef, b *gamedb.BoolExp, d
 
 // playerCarries returns true if player has target in their contents chain.
 func playerCarries(g *Game, player, target gamedb.DBRef) bool {
-	pObj, ok := g.DB.Objects[player]
-	if !ok {
-		return false
-	}
-	next := pObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range g.DB.SafeContents(player) {
 		if next == target {
 			return true
 		}
-		if nObj, ok := g.DB.Objects[next]; ok {
-			next = nObj.Next
-		} else {
-			break
-		}
 	}
 	return false
+}
+
+// UnparseBoolExp converts a BoolExp tree back to a human-readable lock string.
+func UnparseBoolExp(g *Game, b *gamedb.BoolExp) string {
+	if b == nil {
+		return ""
+	}
+	switch b.Type {
+	case gamedb.BoolAnd:
+		return UnparseBoolExp(g, b.Sub1) + "&" + UnparseBoolExp(g, b.Sub2)
+	case gamedb.BoolOr:
+		return UnparseBoolExp(g, b.Sub1) + "|" + UnparseBoolExp(g, b.Sub2)
+	case gamedb.BoolNot:
+		return "!" + UnparseBoolExp(g, b.Sub1)
+	case gamedb.BoolConst:
+		ref := gamedb.DBRef(b.Thing)
+		if ref == gamedb.Nothing {
+			return "#-1"
+		}
+		name := g.ObjName(ref)
+		if name != "" {
+			return name + "(#" + strconv.Itoa(b.Thing) + ")"
+		}
+		return "#" + strconv.Itoa(b.Thing)
+	case gamedb.BoolAttr:
+		name := g.DB.GetAttrName(b.Thing)
+		if name == "" {
+			name = strconv.Itoa(b.Thing)
+		}
+		return name + ":" + b.StrVal
+	case gamedb.BoolEval:
+		name := g.DB.GetAttrName(b.Thing)
+		if name == "" {
+			name = strconv.Itoa(b.Thing)
+		}
+		return name + "/" + b.StrVal
+	case gamedb.BoolIndir:
+		return "@" + UnparseBoolExp(g, b.Sub1)
+	case gamedb.BoolCarry:
+		return "+" + UnparseBoolExp(g, b.Sub1)
+	case gamedb.BoolIs:
+		return "=" + UnparseBoolExp(g, b.Sub1)
+	case gamedb.BoolOwner:
+		return "$" + UnparseBoolExp(g, b.Sub1)
+	}
+	return "?"
 }
 
 // wildMatchCI performs case-insensitive wildcard matching.

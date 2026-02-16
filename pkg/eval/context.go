@@ -104,7 +104,11 @@ type GameState interface {
 	// RemoveFromContents removes obj from loc's contents chain.
 	RemoveFromContents(loc gamedb.DBRef, obj gamedb.DBRef)
 	// CouldDoIt checks if player passes the lock on thing for the given lock attribute.
+	// Includes wizard/power bypass — use for physical actions (movement, use).
 	CouldDoIt(player, thing gamedb.DBRef, lockAttr int) bool
+	// EvalObjLock evaluates the lock on thing against player without wizard bypass.
+	// Only Pass_Locks power bypasses. Used by elock() function.
+	EvalObjLock(player, thing gamedb.DBRef, lockAttr int) bool
 	// GetAttrTextGS returns the text of an attribute on an object (with parent walk).
 	GetAttrTextGS(obj gamedb.DBRef, attrNum int) string
 	// CanReadAttrGS checks if player can read a specific attribute on obj.
@@ -286,7 +290,7 @@ func NewEvalContext(db *gamedb.Database) *EvalContext {
 		RData:         NewRegisterData(),
 		FuncNestLim:   50,
 		FuncInvkLim:   2500,
-		SpaceCompress: true,
+		SpaceCompress: false,
 		AnsiColors:    true,
 		UFunctions:    make(map[string]*UFunction),
 		Functions:     make(map[string]*Function),

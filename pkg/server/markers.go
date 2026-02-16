@@ -32,40 +32,20 @@ func (g *Game) SendMarkedToPlayer(player gamedb.DBRef, markerType string, msg st
 // SendMarkedToRoom sends a message to all connected players in a room,
 // wrapping per-player with their configured marker.
 func (g *Game) SendMarkedToRoom(room gamedb.DBRef, markerType string, msg string) {
-	roomObj, ok := g.DB.Objects[room]
-	if !ok {
-		return
-	}
-	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range g.DB.SafeContents(room) {
 		if g.Conns.IsConnected(next) {
 			g.SendMarkedToPlayer(next, markerType, msg)
 		}
-		obj, ok := g.DB.Objects[next]
-		if !ok {
-			break
-		}
-		next = obj.Next
 	}
 }
 
 // SendMarkedToRoomExcept sends a message to all connected players in a room
 // except the specified player, wrapping per-player with their configured marker.
 func (g *Game) SendMarkedToRoomExcept(room gamedb.DBRef, except gamedb.DBRef, markerType string, msg string) {
-	roomObj, ok := g.DB.Objects[room]
-	if !ok {
-		return
-	}
-	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range g.DB.SafeContents(room) {
 		if next != except && g.Conns.IsConnected(next) {
 			g.SendMarkedToPlayer(next, markerType, msg)
 		}
-		obj, ok := g.DB.Objects[next]
-		if !ok {
-			break
-		}
-		next = obj.Next
 	}
 }
 
@@ -80,39 +60,19 @@ func (g *Game) EmitEvent(player gamedb.DBRef, markerType string, ev events.Event
 // EmitEventToRoom sends a structured event to all connected players in a room.
 // Each player's copy has marker-wrapped text.
 func (g *Game) EmitEventToRoom(room gamedb.DBRef, markerType string, ev events.Event) {
-	roomObj, ok := g.DB.Objects[room]
-	if !ok {
-		return
-	}
-	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range g.DB.SafeContents(room) {
 		if g.Conns.IsConnected(next) {
 			g.EmitEvent(next, markerType, ev)
 		}
-		obj, ok := g.DB.Objects[next]
-		if !ok {
-			break
-		}
-		next = obj.Next
 	}
 }
 
 // EmitEventToRoomExcept sends a structured event to all connected players in a
 // room except one. Each player's copy has marker-wrapped text.
 func (g *Game) EmitEventToRoomExcept(room gamedb.DBRef, except gamedb.DBRef, markerType string, ev events.Event) {
-	roomObj, ok := g.DB.Objects[room]
-	if !ok {
-		return
-	}
-	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for _, next := range g.DB.SafeContents(room) {
 		if next != except && g.Conns.IsConnected(next) {
 			g.EmitEvent(next, markerType, ev)
 		}
-		obj, ok := g.DB.Objects[next]
-		if !ok {
-			break
-		}
-		next = obj.Next
 	}
 }
