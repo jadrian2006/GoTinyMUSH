@@ -12,13 +12,49 @@ import (
 
 func toFloat(s string) float64 {
 	s = strings.TrimSpace(s)
-	f, _ := strconv.ParseFloat(s, 64)
+	// Match C atof() behavior: parse leading numeric characters (including
+	// decimal point), ignore trailing non-numeric text.
+	end := 0
+	if end < len(s) && (s[end] == '-' || s[end] == '+') {
+		end++
+	}
+	sawDot := false
+	for end < len(s) {
+		if s[end] == '.' && !sawDot {
+			sawDot = true
+			end++
+		} else if s[end] >= '0' && s[end] <= '9' {
+			end++
+		} else {
+			break
+		}
+	}
+	f, _ := strconv.ParseFloat(s[:end], 64)
 	return f
 }
 
 func toInt(s string) int {
 	s = strings.TrimSpace(s)
-	i, _ := strconv.Atoi(s)
+	// Match C atoi() behavior: parse leading digits, ignore trailing non-digits.
+	// This is critical for MUSHcode like div(get(obj/attr), N) where the attr
+	// value may contain trailing text (e.g. "9832 Raimier").
+	neg := false
+	i := 0
+	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
+		if s[0] == '-' {
+			neg = true
+		}
+		s = s[1:]
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			break
+		}
+		i = i*10 + int(c-'0')
+	}
+	if neg {
+		return -i
+	}
 	return i
 }
 

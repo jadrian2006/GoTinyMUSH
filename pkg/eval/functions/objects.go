@@ -343,7 +343,7 @@ func fnV(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	if len(s) == 1 {
 		ch := strings.ToUpper(s)[0]
 		if ch >= 'A' && ch <= 'Z' {
-			attrNum := 95 + int(ch-'A') // A_VA
+			attrNum := 100 + int(ch-'A') // A_VA = 100 (matches C TinyMUSH constants.h)
 			text := ctx.GetAttrText(ctx.Player, attrNum)
 			buf.WriteString(text)
 			return

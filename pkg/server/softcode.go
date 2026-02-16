@@ -315,13 +315,6 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 	// to split BEFORE evaluation, preserving brace-protected content for @wait etc.
 	cmds := splitSemicolonRespectingBraces(entry.Command)
 
-	if entry.Player == 9118 {
-		log.Printf("ACONDBG ExecuteQueueEntry player=#%d command=%q", entry.Player, entry.Command)
-		for i, c := range cmds {
-			log.Printf("ACONDBG   split[%d]=%q", i, c)
-		}
-	}
-
 	// Snapshot q-registers onto descriptors so @program can capture them.
 	descs := g.Conns.GetByPlayer(entry.Player)
 
@@ -348,14 +341,8 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		// BEFORE evaluation; we approximate this by preserving braces through eval.
 		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval, entry.Args)
 		evaluated = strings.TrimSpace(evaluated)
-		if entry.Player == 9118 {
-			log.Printf("ACONDBG   cmd=%q -> evaluated=%q", cmd, evaluated)
-		}
 		if evaluated == "" {
 			continue
-		}
-		if strings.Contains(strings.ToLower(evaluated), "@switch") || strings.Contains(strings.ToLower(evaluated), "@pemit") {
-			log.Printf("QUEUEDEBUG ExecuteQueueEntry player=#%d evaluated=%q", entry.Player, truncDebug(evaluated, 300))
 		}
 
 		// If the original command was a brace-wrapped group (from @dolist, @wait,
@@ -601,7 +588,6 @@ func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 	for i, elem := range elements {
 		cmd := strings.ReplaceAll(body, "##", elem)
 		cmd = strings.ReplaceAll(cmd, "#@", fmt.Sprintf("%d", i+1))
-
 		if immediate {
 			g.evalAndDispatch(ctx, entry, descs, cmd)
 		} else {
@@ -631,7 +617,6 @@ func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 	firstOnly := HasSwitch(switches, "first")
 	matched := false
 
-	log.Printf("SWITCHDEBUG handleSwitchDeferred player=#%d expr=%q parts=%d firstOnly=%v", entry.Player, expr, len(parts), firstOnly)
 
 	for i := 0; i+1 < len(parts); i += 2 {
 		// Evaluate the pattern
@@ -640,7 +625,6 @@ func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 			action := strings.TrimSpace(parts[i+1])
 			action = stripOuterBraces(action)
 			action = strings.ReplaceAll(action, "#$", expr)
-			log.Printf("SWITCHDEBUG   MATCHED pattern=%q action=%q", pattern, truncDebug(action, 200))
 			g.dispatchActionBody(ctx, entry, descs, action)
 			matched = true
 			if firstOnly {
@@ -654,7 +638,6 @@ func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 		action := strings.TrimSpace(parts[len(parts)-1])
 		action = stripOuterBraces(action)
 		action = strings.ReplaceAll(action, "#$", expr)
-		log.Printf("SWITCHDEBUG   DEFAULT action=%q", truncDebug(action, 200))
 		g.dispatchActionBody(ctx, entry, descs, action)
 	}
 }

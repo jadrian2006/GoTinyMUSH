@@ -230,14 +230,20 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			}
 			pos = newPos + 1
 
-			// Evaluate arguments (unless FN_NO_EVAL)
+			// Evaluate arguments (unless FN_NO_EVAL).
+			// Trim leading spaces from each raw arg before evaluation to match
+			// C TinyMUSH's EV_STRIP_LS behavior in parse_arglist — "func(a, b)"
+			// should pass "b" not " b".
 			var evaledArgs []string
 			if fn.Flags&FnNoEval != 0 {
-				evaledArgs = args
+				evaledArgs = make([]string, len(args))
+				for i, arg := range args {
+					evaledArgs[i] = strings.TrimLeft(arg, " ")
+				}
 			} else {
 				evaledArgs = make([]string, len(args))
 				for i, arg := range args {
-					evaledArgs[i] = ctx.Exec(arg, evalFlags|EvFCheck, cargs)
+					evaledArgs[i] = ctx.Exec(strings.TrimLeft(arg, " "), evalFlags|EvFCheck, cargs)
 				}
 			}
 
@@ -317,13 +323,29 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			}
 
 		default:
-			// Mundane character - copy runs of them at once
+			// Mundane character - copy runs of them at once.
+			// Track function name boundaries: after any character that cannot
+			// be part of a function name (not alphanumeric/underscore), reset
+			// oldLen so the next '(' only captures the immediately preceding
+			// word as the function name. This matches C TinyMUSH's behavior
+			// where args are split before eval, giving each piece its own
+			// fresh function name tracking.
 			atSpace = false
 			start := pos
 			for pos < len(input) && !isSpecial(input[pos]) {
 				pos++
 			}
+			// Scan the mundane run for function name boundaries.
+			// After any non-function-name character (not a-z, A-Z, 0-9, _),
+			// reset oldLen to that position in the output buffer.
+			runStart := buf.Len()
 			buf.WriteString(input[start:pos])
+			for ri := 0; ri < pos-start; ri++ {
+				c := input[start+ri]
+				if !isFuncNameChar(c) {
+					oldLen = runStart + ri + 1
+				}
+			}
 		}
 
 		// Track where the next potential function name starts
@@ -480,7 +502,7 @@ func (ctx *EvalContext) handlePercent(buf *strings.Builder, input string, pos in
 		}
 		ch2 := unicode.ToUpper(rune(input[pos]))
 		if ch2 >= 'A' && ch2 <= 'Z' {
-			attrNum := 95 + int(ch2-'A') // A_VA = 95
+			attrNum := 100 + int(ch2-'A') // A_VA = 100 (matches C TinyMUSH constants.h)
 			text := ctx.GetAttrText(ctx.Player, attrNum)
 			buf.WriteString(text)
 		}
@@ -743,6 +765,13 @@ func isSpecial(ch byte) bool {
 
 func isDigit(ch byte) bool {
 	return ch >= '0' && ch <= '9'
+}
+
+// isFuncNameChar returns true for characters that can be part of a function name
+// (alphanumeric or underscore). Used to track function name boundaries.
+func isFuncNameChar(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9') || ch == '_'
 }
 
 // qidxChar converts a register character (0-9, a-z) to an index (0-35).
