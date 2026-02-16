@@ -270,9 +270,10 @@ func fnSecure(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	for _, ch := range args[0] {
 		switch ch {
 		case '%', '$', '\\', '[', ']', '(', ')', '{', '}', ',', ';':
-			buf.WriteByte('\\')
+			buf.WriteByte(' ')
+		default:
+			buf.WriteRune(ch)
 		}
-		buf.WriteRune(ch)
 	}
 }
 

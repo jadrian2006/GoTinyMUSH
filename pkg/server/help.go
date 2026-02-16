@@ -27,29 +27,43 @@ func LoadHelpFile(path string) *HelpFile {
 	hf := &HelpFile{Entries: make(map[string]string)}
 	scanner := bufio.NewScanner(f)
 
-	var currentTopic string
+	// Topics can have multiple "& TOPIC" aliases (e.g. & ESCAPE() / & NESCAPE())
+	// that all share the same content body. Collect all topic names for each entry.
+	var currentTopics []string
 	var buf strings.Builder
+
+	saveEntry := func() {
+		if len(currentTopics) == 0 {
+			return
+		}
+		text := strings.TrimRight(buf.String(), "\n ")
+		for _, topic := range currentTopics {
+			hf.Entries[strings.ToLower(topic)] = text
+		}
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "& ") {
-			// Save previous entry
-			if currentTopic != "" {
-				hf.Entries[strings.ToLower(currentTopic)] = strings.TrimRight(buf.String(), "\n ")
+			topic := strings.TrimSpace(line[2:])
+			if buf.Len() == 0 && len(currentTopics) > 0 {
+				// Another alias for the same entry (no content yet)
+				currentTopics = append(currentTopics, topic)
+			} else {
+				// New entry — save the previous one
+				saveEntry()
+				currentTopics = []string{topic}
+				buf.Reset()
 			}
-			currentTopic = strings.TrimSpace(line[2:])
-			buf.Reset()
 		} else {
-			if currentTopic != "" {
+			if len(currentTopics) > 0 {
 				buf.WriteString(line)
 				buf.WriteByte('\n')
 			}
 		}
 	}
 	// Save last entry
-	if currentTopic != "" {
-		hf.Entries[strings.ToLower(currentTopic)] = strings.TrimRight(buf.String(), "\n ")
-	}
+	saveEntry()
 
 	return hf
 }

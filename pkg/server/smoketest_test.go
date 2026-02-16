@@ -1,6 +1,7 @@
 package server
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -480,5 +481,235 @@ func TestSplitCommaRespectingBraces(t *testing.T) {
 					tt.input, i, got[i], w)
 			}
 		}
+	}
+}
+
+// ============================================================================
+// secure() replaces special characters with spaces (not backslash-escape)
+// Bug: Go's secure() was escaping chars like \$ instead of replacing with space.
+// C TinyMUSH help: "Returns <string> after replacing [](){};,%\$ with spaces."
+// This broke modal room "Obvious Commands" display: hangar$door → hangar\$door
+// ============================================================================
+
+func TestFnSecure_ReplacesWithSpaces(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	// Use setq/r to pass raw strings to secure() without eval interference
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"hangar$door", "hangar door"},
+		{"plain text", "plain text"},
+		{"$$$", "   "},
+		{"abc", "abc"},
+	}
+	for _, tt := range tests {
+		// Store raw value in %q0, then secure(%q0)
+		got := e.eval("[setq(0," + tt.input + ")][secure(%q0)]")
+		if got != tt.want {
+			t.Errorf("secure(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// ============================================================================
+// Help file multi-alias parser
+// Bug: When help.txt has consecutive "& TOPIC" lines (aliases for same entry),
+// the first alias got saved with empty content because the parser treated each
+// "& " line as a new entry boundary.
+// Example: "& ESCAPE()" / "& NESCAPE()" should share the same help text.
+// ============================================================================
+
+func TestHelpFileMultiAlias(t *testing.T) {
+	// Create a temporary help file with multi-alias entries
+	content := `& ESCAPE()
+& NESCAPE()
+  escape(<string>)
+  Prefixes special characters with backslash.
+& OTHER
+  Some other topic.
+`
+	dir := t.TempDir()
+	path := dir + "/test_help.txt"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	hf := LoadHelpFile(path)
+	if hf == nil {
+		t.Fatal("LoadHelpFile returned nil")
+	}
+
+	// Both aliases should have the same non-empty content
+	escText := hf.Lookup("escape()")
+	nescText := hf.Lookup("nescape()")
+
+	if escText == "" {
+		t.Error("escape() help entry is empty")
+	}
+	if nescText == "" {
+		t.Error("nescape() help entry is empty")
+	}
+	if escText != nescText {
+		t.Errorf("escape() and nescape() should have same content:\n  escape()=%q\n  nescape()=%q", escText, nescText)
+	}
+	if !strings.Contains(escText, "Prefixes special characters") {
+		t.Errorf("escape() content wrong: %q", escText)
+	}
+
+	// Other entry should still work
+	otherText := hf.Lookup("other")
+	if otherText == "" {
+		t.Error("other help entry is empty")
+	}
+}
+
+// ============================================================================
+// Help coverage: every registered () function should have a help entry
+// ============================================================================
+
+func TestHelpCoverage_Functions(t *testing.T) {
+	hf := LoadHelpFile("../../data/text/help.txt")
+	if hf == nil {
+		t.Skip("help.txt not found at ../../data/text/help.txt")
+	}
+
+	// All registered softcode functions that players can call.
+	// We check that each has a help topic of the form "FUNCNAME()"
+	// in either help.txt or wizhelp.txt.
+	wizHf := LoadHelpFile("../../data/text/wizhelp.txt")
+
+	functions := []string{
+		// Math
+		"ADD", "SUB", "MUL", "DIV", "FDIV", "MOD", "ABS", "SIGN",
+		"INC", "DEC", "ROUND", "TRUNC", "FLOOR", "CEIL", "SQRT", "POWER",
+		"MAX", "MIN", "PI", "E",
+		// Trig
+		"SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN",
+		// Exp/Log
+		"EXP", "LN", "LOG",
+		// Bitwise
+		"SHL", "SHR", "BAND", "BOR", "BNAND",
+		// Comparison
+		"GT", "GTE", "LT", "LTE", "EQ", "NEQ", "COMP", "NCOMP",
+		// Logic
+		"AND", "OR", "XOR", "NOT", "T",
+		// Conditional
+		"IFELSE", "SWITCH", "SWITCHALL",
+		// Strings
+		"CAT", "STRCAT", "STRLEN", "MID", "LEFT", "RIGHT", "LCSTR", "UCSTR",
+		"CAPSTR", "POS", "LPOS", "EDIT", "REPLACE", "TRIM", "SQUISH",
+		"LJUST", "RJUST", "CENTER", "REPEAT", "SPACE",
+		"ESCAPE", "SECURE", "ANSI", "STRIPANSI",
+		"BEFORE", "AFTER", "REVERSE", "SCRAMBLE",
+		"STRMATCH", "MATCH", "DELETE",
+		// Type checks
+		"ISNUM", "ISDBREF",
+		// Lists
+		"WORDS", "FIRST", "REST", "LAST", "EXTRACT", "ELEMENTS", "LNUM",
+		"MEMBER", "REMOVE", "INSERT", "LDELETE", "SORT",
+		"SETUNION", "SETDIFF", "SETINTER",
+		"REVWORDS", "SHUFFLE", "ITEMIZE", "SPLICE",
+		"GRAB", "GRABALL", "MATCHALL", "SORTBY",
+		// Iteration
+		"ITER", "PARSE", "MAP", "FILTER", "FOLD",
+		// Registers
+		"SETQ", "SETR", "R",
+		// Objects
+		"NAME", "NUM", "LOC", "OWNER", "TYPE", "FLAGS",
+		"HASFLAG", "HASATTR", "GET", "XGET", "V", "U", "ULOCAL", "S",
+		"CON", "EXIT", "NEXT", "LCON", "LEXITS", "LATTR", "NATTR",
+		"HOME", "PARENT", "ZONE", "CONTROLS", "ROOM",
+		"CHILDREN", "LPARENT",
+		// Connection
+		"LWHO", "CONN", "IDLE", "DOING", "PMATCH",
+		// Pronouns
+		"SUBJ", "OBJ", "POSS", "APOSS",
+		// Formatting
+		"WRAP", "COLUMNS", "TABLE",
+		// Side effects
+		"PEMIT", "REMIT", "OEMIT",
+		// Misc
+		"RAND", "DIE", "TIME", "SECS",
+		"SEARCH", "STATS",
+	}
+
+	var missing []string
+	for _, fn := range functions {
+		topic := strings.ToLower(fn) + "()"
+		text := hf.Lookup(topic)
+		if text == "" && wizHf != nil {
+			text = wizHf.Lookup(topic)
+		}
+		if text == "" {
+			missing = append(missing, fn+"()")
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("Functions missing help entries (%d):\n  %s",
+			len(missing), strings.Join(missing, "\n  "))
+	}
+}
+
+// ============================================================================
+// Help coverage: every registered @command should have a help entry
+// ============================================================================
+
+func TestHelpCoverage_Commands(t *testing.T) {
+	hf := LoadHelpFile("../../data/text/help.txt")
+	if hf == nil {
+		t.Skip("help.txt not found at ../../data/text/help.txt")
+	}
+
+	wizHf := LoadHelpFile("../../data/text/wizhelp.txt")
+
+	// Commands registered in InitCommands that should have help entries.
+	// Excludes: single-char aliases (", :, ;, -), internal commands (QUIT),
+	// and comsys/mail that may use separate help files.
+	commands := []string{
+		"say", "pose", "page", "@emit", "think", "@pemit",
+		"go", "home",
+		"look", "examine", "inventory", "WHO", "score",
+		"@dig", "@open", "@describe", "@name", "@set",
+		"@create", "@destroy", "@link", "@unlink", "@parent",
+		"@chown", "@clone", "@wipe", "@lock", "@unlock",
+		"@teleport", "@force", "@trigger", "@wait", "@notify",
+		"@halt", "@boot", "@wall", "@newpassword", "@find", "@stats", "@ps",
+		"@switch", "@dolist",
+		"get", "drop", "give", "enter", "leave", "whisper", "use", "kill",
+		"@oemit",
+		"@password", "@chzone", "@search", "@decompile", "@power",
+		"@success", "@osuccess", "@asuccess",
+		"@fail", "@afail",
+		"@drop", "@odrop", "@adrop",
+		"@describe", "@odescribe", "@adescribe",
+		"@enter", "@oenter", "@aenter",
+		"@leave", "@oleave", "@aleave",
+		"@listen",
+		"@sex", "@alias",
+		"@teleport",
+		"@startup",
+		"@conformat", "@exitformat", "@nameformat",
+		"@ealias", "@lalias",
+		"@filter",
+	}
+
+	var missing []string
+	for _, cmd := range commands {
+		topic := strings.ToLower(cmd)
+		text := hf.Lookup(topic)
+		if text == "" && wizHf != nil {
+			text = wizHf.Lookup(topic)
+		}
+		if text == "" {
+			missing = append(missing, cmd)
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("Commands missing help entries (%d):\n  %s",
+			len(missing), strings.Join(missing, "\n  "))
 	}
 }
