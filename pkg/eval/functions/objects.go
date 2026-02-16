@@ -344,9 +344,20 @@ var knownFlags = map[string][2]int{
 }
 
 // objHasFlag checks if an object has a named flag.
+// Supports prefix matching like C TinyMUSH (e.g. "CONNECT" matches "CONNECTED").
 func objHasFlag(obj *gamedb.Object, flagName string) bool {
 	info, ok := knownFlags[flagName]
-	if !ok { return false }
+	if !ok {
+		// Try prefix match: C TinyMUSH allows partial flag names
+		for name, fi := range knownFlags {
+			if strings.HasPrefix(name, flagName) {
+				info = fi
+				ok = true
+				break
+			}
+		}
+		if !ok { return false }
+	}
 	if info[0] == -1 {
 		return obj.ObjType() == gamedb.ObjectType(info[1])
 	}

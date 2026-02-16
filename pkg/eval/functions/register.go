@@ -12,7 +12,8 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("MUL", fnMul, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("DIV", fnDiv, 2, 0)
 	ctx.RegisterFunction("FDIV", fnFdiv, 2, 0)
-	ctx.RegisterFunction("MODULO", fnModulo, 2, 0)
+	ctx.RegisterFunction("MOD", fnModulo, 2, 0)
+	ctx.RegisterFunction("MODULO", fnModulo, 2, 0)    // alias
 	ctx.RegisterFunction("REMAINDER", fnModulo, 2, 0) // alias
 	ctx.RegisterFunction("ABS", fnAbs, 1, 0)
 	ctx.RegisterFunction("SIGN", fnSign, 1, 0)
