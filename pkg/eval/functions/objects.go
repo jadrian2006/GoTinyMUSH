@@ -160,8 +160,10 @@ func isAlnum(c byte) bool {
 // Returns the best match (exact wins over prefix, first prefix wins).
 func searchContentChain(db *gamedb.Database, first gamedb.DBRef, name string) gamedb.DBRef {
 	var prefixMatch gamedb.DBRef = gamedb.Nothing
+	seen := make(map[gamedb.DBRef]bool)
 	next := first
-	for next != gamedb.Nothing {
+	for next != gamedb.Nothing && !seen[next] {
+		seen[next] = true
 		obj, ok := db.Objects[next]
 		if !ok {
 			break
@@ -195,11 +197,18 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 		n, err := strconv.Atoi(s[1:])
 		if err == nil { return gamedb.DBRef(n) }
 	}
-	// Try matching by player name (exact only for *name syntax)
+	// Try matching by player name (for *name syntax or bare name fallback).
+	// Player names may have semicolon-separated aliases: "Name;alias1;alias2"
 	if strings.HasPrefix(s, "*") { s = s[1:] }
 	for _, obj := range ctx.DB.Objects {
-		if obj.ObjType() == gamedb.TypePlayer && strings.EqualFold(obj.Name, s) {
-			return obj.DBRef
+		if obj.ObjType() != gamedb.TypePlayer {
+			continue
+		}
+		// Check each alias in the semicolon-separated name
+		for _, alias := range strings.Split(obj.Name, ";") {
+			if strings.EqualFold(strings.TrimSpace(alias), s) {
+				return obj.DBRef
+			}
 		}
 	}
 	// Try matching in current location (room contents, inventory, exits)
@@ -459,8 +468,11 @@ func fnUlocal(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 
 func fnS(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
-	// s() just evaluates its argument - it's already evaluated by the time we get here
-	buf.WriteString(args[0])
+	// s() re-evaluates its argument to resolve %q registers, %0-%9 args, and [brackets].
+	// The argument has already been through one eval pass (function arg evaluation),
+	// but may contain %q0-%q9 or other substitutions that need a second pass.
+	result := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
+	buf.WriteString(result)
 }
 
 func fnObjeval(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -520,11 +532,12 @@ func fnLcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
 	var refs []string
+	seen := make(map[gamedb.DBRef]bool)
 	next := obj.Contents
-	for next != gamedb.Nothing {
+	for next != gamedb.Nothing && !seen[next] {
+		seen[next] = true
 		refs = append(refs, fmt.Sprintf("#%d", next))
 		if nObj, ok := ctx.DB.Objects[next]; ok { next = nObj.Next } else { break }
-		if len(refs) > 50000 { break }
 	}
 	buf.WriteString(strings.Join(refs, " "))
 }
@@ -535,11 +548,12 @@ func fnLexits(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
 	var refs []string
+	seen := make(map[gamedb.DBRef]bool)
 	next := obj.Exits
-	for next != gamedb.Nothing {
+	for next != gamedb.Nothing && !seen[next] {
+		seen[next] = true
 		refs = append(refs, fmt.Sprintf("#%d", next))
 		if nObj, ok := ctx.DB.Objects[next]; ok { next = nObj.Next } else { break }
-		if len(refs) > 50000 { break }
 	}
 	buf.WriteString(strings.Join(refs, " "))
 }
@@ -1149,12 +1163,16 @@ func fnXcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
 	var results []string
+	globalSeen := make(map[gamedb.DBRef]bool)
 	var walk func(gamedb.DBRef)
 	walk = func(r gamedb.DBRef) {
 		o, ok := ctx.DB.Objects[r]
 		if !ok { return }
+		seen := make(map[gamedb.DBRef]bool)
 		next := o.Contents
-		for next != gamedb.Nothing {
+		for next != gamedb.Nothing && !seen[next] && !globalSeen[next] {
+			seen[next] = true
+			globalSeen[next] = true
 			results = append(results, fmt.Sprintf("#%d", next))
 			walk(next)
 			nObj, ok := ctx.DB.Objects[next]
@@ -1162,8 +1180,11 @@ func fnXcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 			next = nObj.Next
 		}
 	}
+	seen := make(map[gamedb.DBRef]bool)
 	next := obj.Contents
-	for next != gamedb.Nothing {
+	for next != gamedb.Nothing && !seen[next] {
+		seen[next] = true
+		globalSeen[next] = true
 		results = append(results, fmt.Sprintf("#%d", next))
 		walk(next)
 		nObj, ok := ctx.DB.Objects[next]

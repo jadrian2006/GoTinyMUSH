@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
@@ -92,6 +93,92 @@ func (g *Game) IsConnected(player gamedb.DBRef) bool {
 	return g.Conns.IsConnected(player)
 }
 
+// RepairContentChains validates and rebuilds contents chains from Location data.
+// It detects orphaned objects (Location set but not reachable via Contents/Next chain)
+// and self-referencing Next pointers, then rebuilds affected chains.
+func (g *Game) RepairContentChains() {
+	modified := make(map[gamedb.DBRef]bool)
+
+	// Phase 1: Fix self-referencing Next pointers
+	selfRefFixed := 0
+	for ref, obj := range g.DB.Objects {
+		if obj.Next == ref {
+			log.Printf("[REPAIR] Object #%d (%s) has self-referencing Next pointer", ref, obj.Name)
+			obj.Next = gamedb.Nothing
+			modified[ref] = true
+			selfRefFixed++
+		}
+	}
+
+	// Phase 2: Build expected contents from Location fields
+	// expectedContents[loc] = set of objects that claim Location=loc
+	expectedContents := make(map[gamedb.DBRef]map[gamedb.DBRef]bool)
+	for ref, obj := range g.DB.Objects {
+		if obj.Location != gamedb.Nothing && !obj.IsGoing() {
+			// Only non-exit objects go in Contents chains
+			if obj.ObjType() != gamedb.TypeExit {
+				if expectedContents[obj.Location] == nil {
+					expectedContents[obj.Location] = make(map[gamedb.DBRef]bool)
+				}
+				expectedContents[obj.Location][ref] = true
+			}
+		}
+	}
+
+	// Phase 3: Walk existing chains and find orphans
+	orphansFixed := 0
+	for loc, expected := range expectedContents {
+		locObj, ok := g.DB.Objects[loc]
+		if !ok {
+			continue
+		}
+
+		// Walk the existing chain, marking what we find
+		inChain := make(map[gamedb.DBRef]bool)
+		seen := make(map[gamedb.DBRef]bool)
+		next := locObj.Contents
+		for next != gamedb.Nothing && !seen[next] {
+			seen[next] = true
+			inChain[next] = true
+			if nObj, ok := g.DB.Objects[next]; ok {
+				next = nObj.Next
+			} else {
+				break
+			}
+		}
+
+		// Find objects that should be in chain but aren't
+		for ref := range expected {
+			if !inChain[ref] {
+				obj := g.DB.Objects[ref]
+				obj.Next = locObj.Contents
+				if obj.Next == ref {
+					obj.Next = gamedb.Nothing
+				}
+				locObj.Contents = ref
+				modified[ref] = true
+				modified[loc] = true
+				log.Printf("[REPAIR] Object #%d (%s) orphaned from #%d (%s) contents, re-linking",
+					ref, obj.Name, loc, locObj.Name)
+				orphansFixed++
+			}
+		}
+	}
+
+	if selfRefFixed > 0 || orphansFixed > 0 {
+		log.Printf("[REPAIR] Fixed %d self-references, %d orphaned objects", selfRefFixed, orphansFixed)
+		var batch []*gamedb.Object
+		for ref := range modified {
+			if obj, ok := g.DB.Objects[ref]; ok {
+				batch = append(batch, obj)
+			}
+		}
+		if len(batch) > 0 {
+			g.PersistObjects(batch...)
+		}
+	}
+}
+
 // Teleport moves victim to destination, updating contents chains and persisting.
 func (g *Game) Teleport(victim, dest gamedb.DBRef) {
 	obj, ok := g.DB.Objects[victim]
@@ -103,10 +190,9 @@ func (g *Game) Teleport(victim, dest gamedb.DBRef) {
 		g.RemoveFromContents(oldLoc, victim)
 	}
 	obj.Location = dest
+	g.AddToContents(dest, victim)
 	persistList := []*gamedb.Object{obj}
 	if destObj, ok := g.DB.Objects[dest]; ok {
-		obj.Next = destObj.Contents
-		destObj.Contents = victim
 		persistList = append(persistList, destObj)
 	}
 	if oldLoc != gamedb.Nothing {

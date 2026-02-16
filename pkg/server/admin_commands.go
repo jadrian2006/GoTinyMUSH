@@ -34,8 +34,7 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 	// Place in player's inventory
 	playerObj := g.DB.Objects[d.Player]
 	obj.Location = d.Player
-	obj.Next = playerObj.Contents
-	playerObj.Contents = ref
+	g.AddToContents(d.Player, ref)
 	obj.Link = g.PlayerLocation(d.Player) // home = current room
 	g.PersistObjects(obj, playerObj)
 	d.Send(fmt.Sprintf("Created: %s(#%d)", name, ref))
@@ -273,8 +272,7 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	// Place in player's inventory (default and /inventory behavior)
 	playerObj := g.DB.Objects[d.Player]
 	newObj.Location = d.Player
-	newObj.Next = playerObj.Contents
-	playerObj.Contents = ref
+	g.AddToContents(d.Player, ref)
 
 	g.PersistObjects(newObj, playerObj)
 	d.Send(fmt.Sprintf("Cloned %s(#%d) to %s(#%d).", srcObj.Name, target, newName, ref))
@@ -494,10 +492,9 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 				fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
 		}
 		obj.Location = dest
+		g.AddToContents(dest, victim)
 		persistList := []*gamedb.Object{obj}
 		if destObj, ok := g.DB.Objects[dest]; ok {
-			obj.Next = destObj.Contents
-			destObj.Contents = victim
 			persistList = append(persistList, destObj)
 		}
 		if oldLoc != gamedb.Nothing {

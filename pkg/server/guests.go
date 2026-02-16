@@ -188,9 +188,8 @@ func (g *Game) CreateGuest() (gamedb.DBRef, string) {
 	guestObj.Link = startRoom // home = start room
 
 	// Add to room contents
+	g.AddToContents(startRoom, ref)
 	if roomObj, ok := g.DB.Objects[startRoom]; ok {
-		guestObj.Next = roomObj.Contents
-		roomObj.Contents = ref
 		g.PersistObjects(guestObj, roomObj)
 	}
 

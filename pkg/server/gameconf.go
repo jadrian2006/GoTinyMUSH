@@ -200,7 +200,7 @@ func DefaultGameConf() *GameConf {
 		WebEnabled:              true,
 		WebPort:                 8443,
 		WebStaticDir:            "web/dist",
-		WebRateLimit:            60,
+		WebRateLimit:            120,
 		JWTExpiry:               86400,
 		CertDir:                 "",
 		ScrollbackRetention:     86400,

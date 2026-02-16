@@ -95,8 +95,10 @@ func (b *Bus) EmitToRoom(db *gamedb.Database, room gamedb.DBRef, ev Event) {
 	globals := b.global
 	b.mu.RUnlock()
 
+	seen := make(map[gamedb.DBRef]bool)
 	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for next != gamedb.Nothing && !seen[next] {
+		seen[next] = true
 		obj, ok := db.Objects[next]
 		if !ok {
 			break
@@ -137,8 +139,10 @@ func (b *Bus) EmitToRoomExcept(db *gamedb.Database, room gamedb.DBRef, except ga
 	globals := b.global
 	b.mu.RUnlock()
 
+	seen := make(map[gamedb.DBRef]bool)
 	next := roomObj.Contents
-	for next != gamedb.Nothing {
+	for next != gamedb.Nothing && !seen[next] {
+		seen[next] = true
 		obj, ok := db.Objects[next]
 		if !ok {
 			break

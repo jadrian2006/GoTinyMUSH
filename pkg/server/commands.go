@@ -376,6 +376,13 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	}
 
+	// Check enter/leave aliases (C TinyMUSH: A_LALIAS/A_EALIAS on objects)
+	// When inside an object, its LALIAS lists aliases that trigger "leave".
+	// EALIAS on objects in the room lists aliases that trigger "enter <obj>".
+	if tryEnterLeaveAlias(g, d, input) {
+		return
+	}
+
 	// Try $-command matching on objects in room/inventory
 	if g.MatchDollarCommands(d.Player, d.Player, input) {
 		return
@@ -704,8 +711,10 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 	}
 
 	// Walk exits chain
+	seenExits := make(map[gamedb.DBRef]bool)
 	exitRef := locObj.Exits
-	for exitRef != gamedb.Nothing {
+	for exitRef != gamedb.Nothing && !seenExits[exitRef] {
+		seenExits[exitRef] = true
 		exitObj, ok := g.DB.Objects[exitRef]
 		if !ok {
 			break
@@ -733,12 +742,100 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 					HandleLockFailure(g, d, exitRef, aFail, aOFail, aAFail, "You can't go that way.")
 					return true
 				}
+				// Exit SUCC (4) to player, OSUCC (1) to room, ASUCC (12) action
+				if succ := g.GetAttrText(exitRef, 4); succ != "" {
+					ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
+						functions.RegisterAll(c)
+					})
+					msg := ctx.Exec(succ, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+					if msg != "" {
+						d.Send(msg)
+					}
+				}
+				if osucc := g.GetAttrText(exitRef, 1); osucc != "" {
+					ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
+						functions.RegisterAll(c)
+					})
+					msg := ctx.Exec(osucc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+					if msg != "" {
+						g.Conns.SendToRoomExcept(g.DB, loc, d.Player, msg)
+					}
+				}
+				g.QueueAttrAction(exitRef, d.Player, 12, nil) // exit ASUCC
 				g.MovePlayer(d, dest)
 				return true
 			}
 		}
 		exitRef = exitObj.Next
 	}
+	return false
+}
+
+// matchesExitFromList checks if cmd matches any alias in a semicolon-separated
+// alias list (like EALIAS/LALIAS values). Uses case-insensitive prefix matching,
+// matching C TinyMUSH's matches_exit_from_list behavior.
+func matchesExitFromList(cmd, aliasList string) bool {
+	if aliasList == "" {
+		return false
+	}
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return false
+	}
+	for _, alias := range strings.Split(aliasList, ";") {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		if len(cmd) <= len(alias) && strings.EqualFold(alias[:len(cmd)], cmd) {
+			return true
+		}
+	}
+	return false
+}
+
+// tryEnterLeaveAlias checks enter/leave aliases on objects.
+// C TinyMUSH checks A_LALIAS on the player's location (for "leave" triggers)
+// and A_EALIAS on objects in the room (for "enter" triggers).
+func tryEnterLeaveAlias(g *Game, d *Descriptor, cmd string) bool {
+	playerObj, ok := g.DB.Objects[d.Player]
+	if !ok {
+		return false
+	}
+	loc := playerObj.Location
+	locObj, ok := g.DB.Objects[loc]
+	if !ok {
+		return false
+	}
+
+	// Check LALIAS on current location (leave alias)
+	if lalias := g.GetAttrText(loc, 65); lalias != "" { // A_LALIAS = 65
+		if matchesExitFromList(cmd, lalias) {
+			cmdLeave(g, d, "", nil)
+			return true
+		}
+	}
+
+	// Check EALIAS on objects in the room (enter alias)
+	seen := make(map[gamedb.DBRef]bool)
+	next := locObj.Contents
+	for next != gamedb.Nothing && !seen[next] {
+		seen[next] = true
+		obj, ok := g.DB.Objects[next]
+		if !ok {
+			break
+		}
+		if next != d.Player {
+			if ealias := g.GetAttrText(next, 64); ealias != "" { // A_EALIAS = 64
+				if matchesExitFromList(cmd, ealias) {
+					cmdEnter(g, d, fmt.Sprintf("#%d", next), nil)
+					return true
+				}
+			}
+		}
+		next = obj.Next
+	}
+
 	return false
 }
 
@@ -1185,24 +1282,31 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 
 	oldLoc := playerObj.Location
 
-	// Remove from old location's contents chain
+	// Source room: ALEAVE action (52), OLEAVE to room (51)
 	if oldLoc != gamedb.Nothing {
+		g.QueueAttrAction(oldLoc, player, 52, nil) // ALEAVE
+		if oleave := g.GetAttrText(oldLoc, 51); oleave != "" {
+			ctx := MakeEvalContextForObj(g, oldLoc, player, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+			if msg != "" {
+				g.Conns.SendToRoomExcept(g.DB, oldLoc, player, msg)
+			}
+		} else {
+			g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
+				fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
+		}
 		g.RemoveFromContents(oldLoc, player)
-		// Announce departure
-		g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
-			fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
 	}
 
 	// Set new location
 	playerObj.Location = dest
 
 	// Add to new location's contents chain
-	if destObj, ok := g.DB.Objects[dest]; ok {
-		playerObj.Next = destObj.Contents
-		destObj.Contents = player
-	}
+	g.AddToContents(dest, player)
 
-	// Announce arrival
+	// Announce arrival (default, before ShowRoom evaluates OSUCC)
 	g.Conns.SendToRoomExcept(g.DB, dest, player,
 		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 
@@ -1218,8 +1322,25 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	}
 	g.PersistObjects(persistList...)
 
-	// Show the room to the player
+	// Show the room to the player (DESC + SUCC + CONFORMAT/EXITFORMAT)
+	// ShowRoom handles SUCC/OSUCC/ASUCC display via the lock-check path.
 	g.ShowRoom(d, dest)
+
+	// Dest room: AENTER action (35), OENTER to room (53)
+	g.QueueAttrAction(dest, player, 35, nil) // AENTER
+	if oenter := g.GetAttrText(dest, 53); oenter != "" {
+		ctx := MakeEvalContextForObj(g, dest, player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+		if msg != "" {
+			g.Conns.SendToRoomExcept(g.DB, dest, player, msg)
+		}
+	}
+
+	// Notify listeners on arrival
+	g.MatchListenPatterns(dest, player,
+		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 }
 
 // RemoveFromContents removes an object from a location's contents chain.
@@ -1254,6 +1375,34 @@ func (g *Game) RemoveFromContents(loc gamedb.DBRef, obj gamedb.DBRef) {
 	}
 }
 
+// AddToContents adds obj to dest's contents chain safely.
+// Like C TinyMUSH's move_object, it ensures no cycles by checking
+// if the object is already in the chain before inserting.
+func (g *Game) AddToContents(dest, obj gamedb.DBRef) {
+	destObj, ok := g.DB.Objects[dest]
+	if !ok {
+		return
+	}
+	o, ok := g.DB.Objects[obj]
+	if !ok {
+		return
+	}
+	// Check if obj is already in this contents chain — prevent cycles
+	next := destObj.Contents
+	for next != gamedb.Nothing {
+		if next == obj {
+			return // already in chain
+		}
+		if nObj, ok := g.DB.Objects[next]; ok {
+			next = nObj.Next
+		} else {
+			break
+		}
+	}
+	o.Next = destObj.Contents
+	destObj.Contents = obj
+}
+
 // ShowRoom displays a room to a player.
 func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	roomObj, ok := g.DB.Objects[room]
@@ -1283,6 +1432,36 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		ctx := makeCtx()
 		evaluated := ctx.Exec(desc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 		d.Send(evaluated)
+	}
+
+	// C TinyMUSH's look_in shows SUCC/FAIL after DESC, conditional on A_LOCK.
+	// For rooms, if the player passes the lock → show SUCC (4), OSUCC (1), ASUCC (12).
+	// If the player fails the lock → show FAIL (3), OFAIL (2), AFAIL (13).
+	// Many rooms use SUCC for content/exit display (modal rooms, custom formatting).
+	// When SUCC provides non-empty output, it typically includes Players/Contents/Exits,
+	// so we skip the default CONFORMAT/EXITFORMAT fallback to avoid duplication.
+	succShown := false
+	if roomObj.ObjType() == gamedb.TypeRoom {
+		if CouldDoIt(g, d.Player, room, aLock) {
+			if succ := g.GetAttrText(room, 4); succ != "" { // A_SUCC
+				ctx := makeCtx()
+				msg := ctx.Exec(succ, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+				if msg != "" {
+					d.Send(msg)
+					succShown = true
+				}
+			}
+			if osucc := g.GetAttrText(room, 1); osucc != "" { // A_OSUCC
+				ctx := makeCtx()
+				msg := ctx.Exec(osucc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+				if msg != "" {
+					g.Conns.SendToRoomExcept(g.DB, room, d.Player, msg)
+				}
+			}
+			g.QueueAttrAction(room, d.Player, 12, nil) // A_ASUCC
+		} else {
+			HandleLockFailure(g, d, room, aFail, aOFail, aAFail, "")
+		}
 	}
 
 	// Build list of visible content dbrefs (excluding the looking player)
@@ -1316,15 +1495,21 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 
 	// Contents — use CONFORMAT (214) if set, otherwise default "Contents:" list
 	conFmt := g.GetAttrText(room, 214) // A_LCON_FMT
-	if conFmt != "" && len(contentRefs) > 0 {
+	conFmtHandled := false
+	if conFmt != "" {
 		// Build space-separated dbref list for %0
 		var refStrs []string
 		for _, ref := range contentRefs {
 			refStrs = append(refStrs, fmt.Sprintf("#%d", ref))
 		}
 		ctx := makeCtx()
-		d.Send(ctx.Exec(conFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{strings.Join(refStrs, " ")}))
-	} else if len(contentRefs) > 0 {
+		result := ctx.Exec(conFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{strings.Join(refStrs, " ")})
+		if result != "" {
+			d.Send(result)
+			conFmtHandled = true
+		}
+	}
+	if !succShown && !conFmtHandled && len(contentRefs) > 0 {
 		d.Send("Contents:")
 		for _, ref := range contentRefs {
 			if obj, ok := g.DB.Objects[ref]; ok {
@@ -1361,14 +1546,20 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 
 	// Exits — use EXITFORMAT (215) if set, otherwise default "Obvious exits:" list
 	exitFmt := g.GetAttrText(room, 215) // A_LEXITS_FMT
-	if exitFmt != "" && len(exitRefs) > 0 {
+	exitFmtHandled := false
+	if exitFmt != "" {
 		var refStrs []string
 		for _, ref := range exitRefs {
 			refStrs = append(refStrs, fmt.Sprintf("#%d", ref))
 		}
 		ctx := makeCtx()
-		d.Send(ctx.Exec(exitFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{strings.Join(refStrs, " ")}))
-	} else if len(exitRefs) > 0 {
+		result := ctx.Exec(exitFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{strings.Join(refStrs, " ")})
+		if result != "" {
+			d.Send(result)
+			exitFmtHandled = true
+		}
+	}
+	if !succShown && !exitFmtHandled && len(exitRefs) > 0 {
 		d.Send("Obvious exits:")
 		var exitNames []string
 		for _, ref := range exitRefs {
@@ -1515,8 +1706,10 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 	// Exits section (only for rooms — for exits, Exits field is the source room, already shown above)
 	if obj.ObjType() != gamedb.TypeExit && obj.Exits != gamedb.Nothing {
 		d.Send("Exits:")
+		seenEx := make(map[gamedb.DBRef]bool)
 		exitRef := obj.Exits
-		for exitRef != gamedb.Nothing {
+		for exitRef != gamedb.Nothing && !seenEx[exitRef] {
+			seenEx[exitRef] = true
 			if eObj, ok := g.DB.Objects[exitRef]; ok {
 				d.Send(fmt.Sprintf("%s(#%d%s)", eObj.Name, exitRef, flagString(eObj)))
 				exitRef = eObj.Next
@@ -2289,10 +2482,9 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 
 	// Remove from room contents, add to player inventory
 	g.RemoveFromContents(loc, target)
-	playerObj := g.DB.Objects[d.Player]
 	obj.Location = d.Player
-	obj.Next = playerObj.Contents
-	playerObj.Contents = target
+	g.AddToContents(d.Player, target)
+	playerObj := g.DB.Objects[d.Player]
 	g.PersistObjects(obj, playerObj)
 
 	d.Send(fmt.Sprintf("You pick up %s.", DisplayName(obj.Name)))
@@ -2332,8 +2524,7 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	obj.Location = loc
-	obj.Next = locObj.Contents
-	locObj.Contents = target
+	g.AddToContents(loc, target)
 	g.PersistObjects(obj, locObj)
 
 	d.Send(fmt.Sprintf("You drop %s.", DisplayName(obj.Name)))
@@ -2397,8 +2588,7 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 	// Move from player inventory to target inventory
 	g.RemoveFromContents(d.Player, thing)
 	thingObj.Location = target
-	thingObj.Next = targetObj.Contents
-	targetObj.Contents = thing
+	g.AddToContents(target, thing)
 	g.PersistObjects(thingObj, targetObj)
 
 	d.Send(fmt.Sprintf("You give %s to %s.", DisplayName(thingObj.Name), DisplayName(targetObj.Name)))
@@ -2447,8 +2637,7 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 
 	// Move inside target
 	playerObj.Location = target
-	playerObj.Next = obj.Contents
-	obj.Contents = d.Player
+	g.AddToContents(target, d.Player)
 	g.PersistObjects(playerObj, obj)
 
 	d.Send(fmt.Sprintf("You enter %s.", DisplayName(obj.Name)))
@@ -2494,8 +2683,7 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 		return
 	}
 	playerObj.Location = dest
-	playerObj.Next = destObj.Contents
-	destObj.Contents = d.Player
+	g.AddToContents(dest, d.Player)
 	g.PersistObjects(playerObj, destObj)
 
 	d.Send("You leave.")
@@ -2611,10 +2799,9 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 		g.RemoveFromContents(loc, target)
 		g.Conns.SendToRoomExcept(g.DB, loc, target,
 			fmt.Sprintf("%s has left.", DisplayName(targetObj.Name)))
+		targetObj.Location = home
+		g.AddToContents(home, target)
 		if destObj, ok := g.DB.Objects[home]; ok {
-			targetObj.Location = home
-			targetObj.Next = destObj.Contents
-			destObj.Contents = target
 			g.PersistObjects(targetObj, destObj)
 		}
 		g.Conns.SendToRoomExcept(g.DB, home, target,

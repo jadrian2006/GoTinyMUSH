@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/eval"
@@ -99,6 +100,7 @@ func (ws *WebServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Command string `json:"command"`
+		Wait    int    `json:"wait"` // ms to wait for async queue results (default 500, max 5000)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -108,11 +110,18 @@ func (ws *WebServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"command is required"}`, http.StatusBadRequest)
 		return
 	}
+	if req.Wait <= 0 {
+		req.Wait = 500
+	}
+	if req.Wait > 5000 {
+		req.Wait = 5000
+	}
 
-	// Create a capturing descriptor that buffers output
+	// Create a capturing descriptor that buffers output.
+	// Thread-safe because queue processing runs on a separate goroutine.
 	output := &captureBuffer{}
 	d := &Descriptor{
-		ID:        -1,
+		ID:        ws.game.Conns.NextID(),
 		Conn:      nullConn{},
 		State:     ConnConnected,
 		Player:    claims.PlayerRef,
@@ -122,18 +131,56 @@ func (ws *WebServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		Transport: TransportWebSocket,
 	}
 	d.SendFunc = func(msg string) {
+		output.mu.Lock()
 		output.lines = append(output.lines, msg)
+		output.mu.Unlock()
 	}
+
+	// Register the descriptor in the connection pool so the game treats this
+	// player as "connected". This is critical for queued commands ($-commands,
+	// @trigger, @force) that send output via @pemit %# — without a registered
+	// descriptor, the output has nowhere to go.
+	ws.game.Conns.Add(d)
+	ws.game.Conns.Login(d, claims.PlayerRef)
+	defer ws.game.Conns.Remove(d)
 
 	DispatchCommand(ws.game, d, req.Command)
 
+	// Wait for async queue entries to process. Queued commands ($-commands,
+	// @trigger, etc.) fire on the game loop's 10ms tick, so we poll briefly
+	// to capture their output.
+	deadline := time.Now().Add(time.Duration(req.Wait) * time.Millisecond)
+	lastLen := len(output.lines)
+	settled := 0
+	for time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		output.mu.Lock()
+		curLen := len(output.lines)
+		output.mu.Unlock()
+		if curLen > lastLen {
+			lastLen = curLen
+			settled = 0 // new output arrived, reset settle counter
+		} else {
+			settled++
+			if settled >= 4 { // 200ms of no new output → done
+				break
+			}
+		}
+	}
+
+	output.mu.Lock()
+	lines := make([]string, len(output.lines))
+	copy(lines, output.lines)
+	output.mu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"output": output.lines,
+		"output": lines,
 	})
 }
 
 type captureBuffer struct {
+	mu    sync.Mutex
 	lines []string
 }
 

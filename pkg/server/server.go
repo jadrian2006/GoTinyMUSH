@@ -488,9 +488,8 @@ func (s *Server) handleCreate(d *Descriptor, user, password string) {
 	playerObj.Link = startHome // home
 
 	// Add to start room contents
+	s.Game.AddToContents(startRoom, ref)
 	if roomObj, ok := s.Game.DB.Objects[startRoom]; ok {
-		playerObj.Next = roomObj.Contents
-		roomObj.Contents = ref
 		s.Game.PersistObjects(playerObj, roomObj)
 	}
 	if s.Game.Store != nil {

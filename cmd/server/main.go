@@ -383,6 +383,9 @@ func main() {
 		}
 	}()
 
+	// Repair any corrupted content chains before startup
+	srv.Game.RepairContentChains()
+
 	// Run @startup actions
 	srv.Game.RunStartup()
 

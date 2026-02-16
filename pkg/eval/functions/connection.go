@@ -278,8 +278,10 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	// searchChainTyped searches a content/exit chain with alias+prefix matching and type filtering.
 	searchChainTyped := func(first gamedb.DBRef) gamedb.DBRef {
 		var prefixMatch gamedb.DBRef = gamedb.Nothing
+		seen := make(map[gamedb.DBRef]bool)
 		next := first
-		for next != gamedb.Nothing {
+		for next != gamedb.Nothing && !seen[next] {
+			seen[next] = true
 			obj, ok := ctx.DB.Objects[next]
 			if !ok {
 				break

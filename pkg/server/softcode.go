@@ -307,6 +307,9 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		// BEFORE evaluation; we approximate this by preserving braces through eval.
 		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval, entry.Args)
 		evaluated = strings.TrimSpace(evaluated)
+		if strings.Contains(cmd, "trigger") || strings.Contains(cmd, "show_watchers") {
+			log.Printf("EVAL TRIGGER player=#%d cmd=%q evaluated=%q args=%v", entry.Player, truncDebug(cmd, 200), truncDebug(evaluated, 200), entry.Args)
+		}
 		if evaluated == "" {
 			continue
 		}
@@ -443,7 +446,7 @@ func splitDeferredBody(cmd, prefix string) (lhs, body string, ok bool) {
 // The LHS (before '=') is evaluated; the RHS body is preserved raw.
 // Returns true if the command was handled.
 func (g *Game) handleDeferredBodyCmd(cmd string, ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor) bool {
-	for _, prefix := range []string{"@wait", "@dolist", "@switch", "@swi"} {
+	for _, prefix := range []string{"@wait", "@dolist", "@switch", "@swi", "@trigger", "@tr"} {
 		if lhs, body, ok := splitDeferredBody(cmd, prefix); ok {
 			// Extract /switches from the command prefix
 			switches := extractDeferredSwitches(cmd, prefix)
@@ -454,6 +457,8 @@ func (g *Game) handleDeferredBodyCmd(cmd string, ctx *eval.EvalContext, entry *Q
 				g.handleDolistDeferred(ctx, entry, descs, switches, lhs, body)
 			case "@switch", "@swi":
 				g.handleSwitchDeferred(ctx, entry, descs, switches, lhs, body)
+			case "@trigger", "@tr":
+				g.handleTriggerDeferred(ctx, entry, descs, switches, lhs, body)
 			}
 			return true
 		}
@@ -575,8 +580,10 @@ func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 // handleSwitchDeferred handles @switch/@swi with split-before-eval.
 // Evaluates LHS (expression), splits raw RHS on commas, matches patterns.
 func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, switches []string, lhs, body string) {
+	log.Printf("DEFERRED @switch player=#%d lhs=%q", entry.Player, truncDebug(lhs, 200))
 	expr := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval, entry.Args)
 	expr = strings.TrimSpace(expr)
+	log.Printf("DEFERRED @switch player=#%d expr=%q parts_body=%q", entry.Player, truncDebug(expr, 100), truncDebug(body, 200))
 
 	parts := splitCommaRespectingBraces(body)
 
@@ -605,6 +612,62 @@ func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 		action = stripOuterBraces(action)
 		action = strings.ReplaceAll(action, "#$", expr)
 		g.dispatchActionBody(ctx, entry, descs, action)
+	}
+}
+
+// handleTriggerDeferred handles @trigger with split-before-eval semantics.
+// C TinyMUSH's @trigger has CS_ARGV: the RHS (trigger args) is split on
+// commas, and each piece is evaluated separately with fresh EvFCheck.
+// This prevents EvFCheck clearing in one arg from affecting later args
+// (e.g. "num(me), name(me)" — both get evaluated).
+func (g *Game) handleTriggerDeferred(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, switches []string, lhs, body string) {
+	// Evaluate LHS (obj/attr) with fresh EvFCheck
+	evalLHS := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval, entry.Args)
+	evalLHS = strings.TrimSpace(evalLHS)
+
+	// Parse obj/attr
+	parts := strings.SplitN(evalLHS, "/", 2)
+	if len(parts) != 2 {
+		return
+	}
+
+	target := g.ResolveRef(entry.Player, parts[0])
+	if target == gamedb.Nothing {
+		return
+	}
+
+	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
+	attrNum := g.ResolveAttrNum(attrName)
+	if attrNum < 0 {
+		return
+	}
+	text := g.GetAttrText(target, attrNum)
+	if text == "" {
+		return
+	}
+
+	// RHS: split on commas (CS_ARGV), evaluate each piece with fresh EvFCheck.
+	// Each arg gets its own evaluation pass so bare function calls work.
+	var trigArgs []string
+	if body != "" {
+		rawArgs := splitCommaRespectingBraces(body)
+		for _, arg := range rawArgs {
+			evaluated := ctx.Exec(strings.TrimSpace(arg), eval.EvFCheck|eval.EvEval, entry.Args)
+			trigArgs = append(trigArgs, evaluated)
+		}
+	}
+
+	qe := &QueueEntry{
+		Player:  target,
+		Cause:   entry.Cause,
+		Caller:  entry.Player,
+		Command: text,
+		Args:    trigArgs,
+	}
+	if HasSwitch(switches, "now") {
+		g.ExecuteQueueEntry(qe)
+	} else {
+		g.Queue.Add(qe)
 	}
 }
 
@@ -1289,16 +1352,15 @@ func (g *Game) FireConnectAttr(player gamedb.DBRef, connCount int, attrNum int) 
 	if !ok {
 		return
 	}
-	for obj := mrObj.Contents; obj != gamedb.Nothing; {
+	seen := make(map[gamedb.DBRef]bool)
+	for obj := mrObj.Contents; obj != gamedb.Nothing && !seen[obj]; {
+		seen[obj] = true
 		o, exists := g.DB.Objects[obj]
 		if !exists {
 			break
 		}
 		g.QueueAttrAction(obj, player, attrNum, args)
 		obj = o.Next
-		if obj == mrObj.Contents {
-			break // avoid infinite loop
-		}
 	}
 }
 
@@ -1397,6 +1459,7 @@ func (g *Game) checkListenAttrs(obj, cause gamedb.DBRef, message string) {
 			continue
 		}
 
+		log.Printf("LISTEN MATCH obj=#%d pattern=%q action=%q args=%v", obj, pattern, action, args)
 		entry := &QueueEntry{
 			Player:  obj,
 			Cause:   cause,
@@ -1428,25 +1491,30 @@ func findUnescapedColon(s string) int {
 // Returns (matched, captured_args).
 func matchWild(pattern, str string) (bool, []string) {
 	var args []string
-	matched := matchWildHelper(strings.ToLower(pattern), strings.ToLower(str), &args)
+	// Match case-insensitively but capture original-case text.
+	// We pass both lowered versions (for comparison) and the original str
+	// (for capturing matched segments).
+	matched := matchWildHelper(strings.ToLower(pattern), strings.ToLower(str), str, 0, &args)
 	return matched, args
 }
 
-func matchWildHelper(pattern, str string, args *[]string) bool {
+// matchWildHelper matches lowered pattern against lowered str, but captures
+// from origStr at the corresponding offset to preserve original case.
+func matchWildHelper(pattern, str, origStr string, origOff int, args *[]string) bool {
 	for len(pattern) > 0 {
 		switch pattern[0] {
 		case '*':
 			pattern = pattern[1:]
 			if len(pattern) == 0 {
-				*args = append(*args, str)
+				*args = append(*args, origStr[origOff:origOff+len(str)])
 				return true
 			}
 			// Try matching the rest of the pattern at every position
 			for i := len(str); i >= 0; i-- {
 				testArgs := make([]string, len(*args))
 				copy(testArgs, *args)
-				testArgs = append(testArgs, str[:i])
-				if matchWildHelper(pattern, str[i:], &testArgs) {
+				testArgs = append(testArgs, origStr[origOff:origOff+i])
+				if matchWildHelper(pattern, str[i:], origStr, origOff+i, &testArgs) {
 					*args = testArgs
 					return true
 				}
@@ -1457,15 +1525,17 @@ func matchWildHelper(pattern, str string, args *[]string) bool {
 				return false
 			}
 			// C TinyMUSH captures ? as a single-char arg (like * but one char)
-			*args = append(*args, string(str[0]))
+			*args = append(*args, string(origStr[origOff]))
 			pattern = pattern[1:]
 			str = str[1:]
+			origOff++
 		default:
 			if len(str) == 0 || pattern[0] != str[0] {
 				return false
 			}
 			pattern = pattern[1:]
 			str = str[1:]
+			origOff++
 		}
 	}
 	return len(str) == 0
