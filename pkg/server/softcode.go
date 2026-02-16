@@ -331,6 +331,16 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 			continue
 		}
 
+		// C TinyMUSH splits command args BEFORE evaluation (process_cmdent).
+		// For commands whose RHS body is stored for deferred execution
+		// (@wait, @dolist, @switch, @trigger), we split on '=' first,
+		// evaluate only the LHS, and preserve the body raw. The body is
+		// evaluated later in the appropriate context (e.g. per-iteration
+		// for @dolist, when wait fires for @wait).
+		if handled := g.handleDeferredBodyCmd(cmd, ctx, entry, descs); handled {
+			continue
+		}
+
 		// Evaluate each individual command with args as %0-%9.
 		// We do NOT use EvStrip here so that brace grouping is preserved for
 		// commands like @switch that need to split on commas respecting braces.
@@ -348,14 +358,25 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 			log.Printf("QUEUEDEBUG ExecuteQueueEntry player=#%d evaluated=%q", entry.Player, truncDebug(evaluated, 300))
 		}
 
-		// If the result is a brace-wrapped command group (from @dolist, @wait,
-		// etc.), strip the outer braces and re-split on semicolons.
-		// This matches C's process_cmdline behavior where brace-grouped
-		// action lists are unwrapped before command dispatch.
-		if len(evaluated) >= 2 && evaluated[0] == '{' && evaluated[len(evaluated)-1] == '}' {
+		// If the original command was a brace-wrapped group (from @dolist, @wait,
+		// etc.), strip the outer braces and dispatch each semicolon-separated
+		// piece individually. Each piece gets its own eval+dispatch cycle,
+		// matching C TinyMUSH's process_cmdline which splits on ';' then
+		// evaluates each command separately.
+		// NOTE: We check the RAW cmd for leading '{', not 'evaluated', because
+		// the evaluator strips outer braces during eval.
+		if len(cmd) >= 2 && cmd[0] == '{' && cmd[len(cmd)-1] == '}' {
 			inner := evaluated[1 : len(evaluated)-1]
 			innerCmds := splitSemicolonRespectingBraces(inner)
 			for _, ic := range innerCmds {
+				ic = strings.TrimSpace(ic)
+				if ic == "" {
+					continue
+				}
+				// Re-evaluate each piece with EvFCheck so bare function
+				// calls (like add(), parse()) that were protected by the
+				// outer braces now get evaluated.
+				ic = ctx.Exec(ic, eval.EvFCheck|eval.EvEval, entry.Args)
 				ic = strings.TrimSpace(ic)
 				if ic == "" {
 					continue
@@ -403,6 +424,267 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		default:
 			g.Conns.SendToPlayer(n.Target, n.Message)
 		}
+	}
+}
+
+// splitDeferredBody detects commands like "@wait <spec>={body}" where the body
+// should be stored raw (not evaluated). It matches the given prefix (case-insensitive),
+// finds the first '=' at brace-depth 0, and returns:
+//   - cmdPrefix: the command name with any /switches (e.g. "@switch/first")
+//   - lhs: the argument before '=' (e.g. expression or time spec)
+//   - body: everything after '=' (preserved raw)
+//
+// This implements C TinyMUSH's split-before-eval behavior for deferred commands.
+func splitDeferredBody(cmd, prefix string) (lhs, body string, ok bool) {
+	lower := strings.ToLower(strings.TrimSpace(cmd))
+	pfx := strings.ToLower(prefix)
+	if !strings.HasPrefix(lower, pfx) {
+		return "", "", false
+	}
+	// Must be followed by space or /
+	rest := cmd[len(pfx):]
+	if len(rest) == 0 || (rest[0] != ' ' && rest[0] != '/') {
+		return "", "", false
+	}
+	// Skip /switches and find the first space (start of args)
+	argsStart := 0
+	for argsStart < len(rest) && rest[argsStart] != ' ' {
+		argsStart++
+	}
+	// Skip spaces to get to actual args
+	for argsStart < len(rest) && rest[argsStart] == ' ' {
+		argsStart++
+	}
+	if argsStart >= len(rest) {
+		return "", "", false
+	}
+	argsStr := rest[argsStart:]
+
+	// Find the '=' at brace depth 0 within the args portion
+	depth := 0
+	for i := 0; i < len(argsStr); i++ {
+		switch argsStr[i] {
+		case '\\':
+			i++ // skip escaped char
+		case '{':
+			depth++
+		case '}':
+			depth--
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case '=':
+			if depth == 0 {
+				lhs = strings.TrimSpace(argsStr[:i])
+				body = strings.TrimSpace(argsStr[i+1:])
+				return lhs, body, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// handleDeferredBodyCmd checks if cmd is a deferred-body command (@wait,
+// @dolist, @switch, @swi) and handles it with split-before-eval semantics.
+// The LHS (before '=') is evaluated; the RHS body is preserved raw.
+// Returns true if the command was handled.
+func (g *Game) handleDeferredBodyCmd(cmd string, ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor) bool {
+	for _, prefix := range []string{"@wait", "@dolist", "@switch", "@swi"} {
+		if lhs, body, ok := splitDeferredBody(cmd, prefix); ok {
+			// Extract /switches from the command prefix
+			switches := extractDeferredSwitches(cmd, prefix)
+			switch prefix {
+			case "@wait":
+				g.handleWaitDeferred(ctx, entry, descs, lhs, body)
+			case "@dolist":
+				g.handleDolistDeferred(ctx, entry, descs, switches, lhs, body)
+			case "@switch", "@swi":
+				g.handleSwitchDeferred(ctx, entry, descs, switches, lhs, body)
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// extractDeferredSwitches pulls /switch names from a command like "@dolist/now".
+func extractDeferredSwitches(cmd, prefix string) []string {
+	rest := cmd[len(prefix):]
+	if len(rest) == 0 || rest[0] != '/' {
+		return nil
+	}
+	// rest starts with "/something ..." — extract up to space
+	spIdx := strings.IndexByte(rest, ' ')
+	if spIdx < 0 {
+		spIdx = len(rest)
+	}
+	switchStr := rest[1:spIdx] // e.g. "first" or "now"
+	return strings.Split(strings.ToLower(switchStr), "/")
+}
+
+// handleWaitDeferred handles @wait with split-before-eval.
+// Evaluates LHS (time/semaphore spec), preserves body raw for deferred execution.
+func (g *Game) handleWaitDeferred(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, lhs, body string) {
+	evalLHS := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval, entry.Args)
+	evalLHS = strings.TrimSpace(evalLHS)
+
+	body = stripOuterBraces(body)
+	if body == "" {
+		return
+	}
+
+	qe := &QueueEntry{
+		Player:  entry.Player,
+		Cause:   entry.Cause,
+		Caller:  entry.Caller,
+		Command: body,
+		Args:    entry.Args,
+	}
+	if ctx.RData != nil {
+		qe.RData = ctx.RData.Clone()
+	}
+
+	if isNumeric(evalLHS) {
+		secs := toIntSimple(evalLHS)
+		if secs < 0 {
+			secs = 0
+		}
+		qe.WaitUntil = time.Now().Add(time.Duration(secs) * time.Second)
+		g.Queue.AddWait(qe)
+	} else if slashIdx := strings.IndexByte(evalLHS, '/'); slashIdx >= 0 {
+		objStr := evalLHS[:slashIdx]
+		attrStr := evalLHS[slashIdx+1:]
+		target := g.ResolveRef(entry.Player, objStr)
+		if target == gamedb.Nothing {
+			return
+		}
+		qe.SemObj = target
+		qe.SemAttr = g.ResolveAttrNum(attrStr)
+		g.Queue.AddSemaphore(qe)
+	} else {
+		g.Queue.Add(qe)
+	}
+}
+
+// handleDolistDeferred handles @dolist with split-before-eval.
+// Evaluates LHS (list), preserves body raw. Substitutes ## and #@ per element.
+func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, switches []string, lhs, body string) {
+	delim := ""
+	if HasSwitch(switches, "delimit") {
+		// First space-delimited token in lhs is the delimiter
+		trimmed := strings.TrimSpace(lhs)
+		spIdx := strings.IndexByte(trimmed, ' ')
+		if spIdx > 0 {
+			delim = trimmed[:spIdx]
+			lhs = strings.TrimSpace(trimmed[spIdx+1:])
+		}
+	}
+
+	evalLHS := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval, entry.Args)
+	evalLHS = strings.TrimSpace(evalLHS)
+
+	body = stripOuterBraces(body)
+	if body == "" || evalLHS == "" {
+		return
+	}
+
+	var elements []string
+	if delim != "" {
+		elements = strings.Split(evalLHS, delim)
+	} else {
+		elements = strings.Fields(evalLHS)
+	}
+
+	immediate := HasSwitch(switches, "now")
+
+	for i, elem := range elements {
+		cmd := strings.ReplaceAll(body, "##", elem)
+		cmd = strings.ReplaceAll(cmd, "#@", fmt.Sprintf("%d", i+1))
+
+		if immediate {
+			g.evalAndDispatch(ctx, entry, descs, cmd)
+		} else {
+			qe := &QueueEntry{
+				Player:  entry.Player,
+				Cause:   entry.Cause,
+				Caller:  entry.Caller,
+				Command: cmd,
+				Args:    entry.Args,
+			}
+			if ctx.RData != nil {
+				qe.RData = ctx.RData.Clone()
+			}
+			g.Queue.Add(qe)
+		}
+	}
+}
+
+// handleSwitchDeferred handles @switch/@swi with split-before-eval.
+// Evaluates LHS (expression), splits raw RHS on commas, matches patterns.
+func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, switches []string, lhs, body string) {
+	expr := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval, entry.Args)
+	expr = strings.TrimSpace(expr)
+
+	parts := splitCommaRespectingBraces(body)
+
+	firstOnly := HasSwitch(switches, "first")
+	matched := false
+
+	log.Printf("SWITCHDEBUG handleSwitchDeferred player=#%d expr=%q parts=%d firstOnly=%v", entry.Player, expr, len(parts), firstOnly)
+
+	for i := 0; i+1 < len(parts); i += 2 {
+		// Evaluate the pattern
+		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval, entry.Args)
+		if wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)) {
+			action := strings.TrimSpace(parts[i+1])
+			action = stripOuterBraces(action)
+			action = strings.ReplaceAll(action, "#$", expr)
+			log.Printf("SWITCHDEBUG   MATCHED pattern=%q action=%q", pattern, truncDebug(action, 200))
+			g.dispatchActionBody(ctx, entry, descs, action)
+			matched = true
+			if firstOnly {
+				return
+			}
+		}
+	}
+
+	// Default case: odd trailing element (only if no match yet, or @switch/all behavior)
+	if len(parts)%2 == 1 && !matched {
+		action := strings.TrimSpace(parts[len(parts)-1])
+		action = stripOuterBraces(action)
+		action = strings.ReplaceAll(action, "#$", expr)
+		log.Printf("SWITCHDEBUG   DEFAULT action=%q", truncDebug(action, 200))
+		g.dispatchActionBody(ctx, entry, descs, action)
+	}
+}
+
+// dispatchActionBody splits an action body on semicolons and evaluates+dispatches each.
+func (g *Game) dispatchActionBody(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, action string) {
+	cmds := splitSemicolonRespectingBraces(action)
+	for _, cmd := range cmds {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
+		}
+		cmd = stripOuterBraces(cmd)
+		g.evalAndDispatch(ctx, entry, descs, cmd)
+	}
+}
+
+// evalAndDispatch evaluates a raw command body (handling %#, %0-%9, [brackets],
+// functions) then dispatches the result. This matches C's process_cmdline
+// which evaluates before dispatching.
+func (g *Game) evalAndDispatch(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, rawCmd string) {
+	evaluated := ctx.Exec(rawCmd, eval.EvFCheck|eval.EvEval, entry.Args)
+	evaluated = strings.TrimSpace(evaluated)
+	if evaluated == "" {
+		return
+	}
+	if len(descs) > 0 {
+		DispatchCommand(g, descs[0], evaluated)
+	} else {
+		g.ExecuteAsObject(entry.Player, entry.Cause, evaluated)
 	}
 }
 
