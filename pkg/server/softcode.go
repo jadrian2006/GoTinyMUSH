@@ -573,7 +573,7 @@ func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 // Evaluates LHS (expression), splits raw RHS on commas, matches patterns.
 func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, switches []string, lhs, body string) {
 	DebugLog("DEFERRED @switch player=#%d lhs=%q", entry.Player, truncDebug(lhs, 200))
-	expr := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval, entry.Args)
+	expr := ctx.Exec(lhs, eval.EvFCheck|eval.EvEval|eval.EvStrip, entry.Args)
 	expr = strings.TrimSpace(expr)
 	DebugLog("DEFERRED @switch player=#%d expr=%q parts_body=%q", entry.Player, truncDebug(expr, 100), truncDebug(body, 200))
 
@@ -584,8 +584,9 @@ func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 
 
 	for i := 0; i+1 < len(parts); i += 2 {
-		// Evaluate the pattern
-		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval, entry.Args)
+		// Evaluate the pattern — EvStrip strips {} so {* has arrived.} → * has arrived.
+		// This matches C TinyMUSH's parse_arglist which uses EV_STRIP_CURLY.
+		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval|eval.EvStrip, entry.Args)
 		if wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)) {
 			action := strings.TrimSpace(parts[i+1])
 			action = stripOuterBraces(action)
@@ -900,13 +901,13 @@ func (g *Game) doSwitchObj(player, cause gamedb.DBRef, args string) {
 	ctx.Caller = cause
 
 	exprStr := strings.TrimSpace(args[:eqIdx])
-	expr := ctx.Exec(exprStr, eval.EvFCheck|eval.EvEval, nil)
+	expr := ctx.Exec(exprStr, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 
 	rest := strings.TrimSpace(args[eqIdx+1:])
 	parts := splitCommaRespectingBraces(rest)
 
 	for i := 0; i+1 < len(parts); i += 2 {
-		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval, nil)
+		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 		if wildMatchSimple(strings.ToLower(pattern), strings.ToLower(expr)) {
 			// In C TinyMUSH, do_switch dispatches the matched action body
 			// to process_cmdline() for execution — it does NOT evaluate the
@@ -1506,14 +1507,16 @@ func (g *Game) MatchListenPatterns(loc gamedb.DBRef, speaker gamedb.DBRef, messa
 		if !ok {
 			continue
 		}
-		// Check for MONITOR flag (or HAS_LISTEN)
-		if obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen) {
+		// Check for MONITOR flag, HAS_LISTEN flag, or presence of LISTEN attr.
+		// The LISTEN attr check is a fallback for imported objects that may not
+		// have HAS_LISTEN set (C TinyMUSH auto-sets it; our import may not).
+		if obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen) || g.hasListenAttr(obj) {
 			g.checkListenAttrs(next, speaker, message)
 		}
 	}
 
 	// Also check the room itself
-	if loc != speaker && !excludeSet[loc] && (locObj.HasFlag(gamedb.FlagMonitor) || locObj.HasFlag2(gamedb.Flag2HasListen)) {
+	if loc != speaker && !excludeSet[loc] && (locObj.HasFlag(gamedb.FlagMonitor) || locObj.HasFlag2(gamedb.Flag2HasListen) || g.hasListenAttr(locObj)) {
 		g.checkListenAttrs(loc, speaker, message)
 	}
 }
@@ -1526,8 +1529,8 @@ func (g *Game) CheckPemitListen(target, cause gamedb.DBRef, message string) {
 	if !ok {
 		return
 	}
-	// Fire ^-pattern listen triggers (includes game's WATCH system)
-	if obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen) {
+	// Fire ^-pattern and LISTEN+AHEAR triggers (includes game's WATCH system)
+	if obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen) || g.hasListenAttr(obj) {
 		g.checkListenAttrs(target, cause, message)
 	}
 }
@@ -1635,37 +1638,86 @@ func (g *Game) checkListenAttrs(obj, cause gamedb.DBRef, message string) {
 		return
 	}
 
-	for _, attr := range o.Attrs {
-		text := eval.StripAttrPrefix(attr.Value)
-		if !strings.HasPrefix(text, "^") {
-			continue
+	// 1. Check ^pattern:action attributes (inline listen patterns).
+	//    Walk the parent chain like C TinyMUSH's atr_match.
+	current := obj
+	visited := make(map[gamedb.DBRef]bool)
+	for depth := 0; depth <= 10 && current != gamedb.Nothing && !visited[current]; depth++ {
+		visited[current] = true
+		cur, ok := g.DB.Objects[current]
+		if !ok {
+			break
 		}
+		for _, attr := range cur.Attrs {
+			text := eval.StripAttrPrefix(attr.Value)
+			if !strings.HasPrefix(text, "^") {
+				continue
+			}
 
-		// Parse "^pattern:action"
-		rest := text[1:] // skip ^
-		colonIdx := findUnescapedColon(rest)
-		if colonIdx < 0 {
-			continue
-		}
-		pattern := rest[:colonIdx]
-		action := rest[colonIdx+1:]
+			// Parse "^pattern:action"
+			rest := text[1:] // skip ^
+			colonIdx := findUnescapedColon(rest)
+			if colonIdx < 0 {
+				continue
+			}
+			pattern := rest[:colonIdx]
+			action := rest[colonIdx+1:]
 
-		// Match the message against the pattern
-		matched, args := matchWild(pattern, message)
-		if !matched {
-			continue
-		}
+			// Match the message against the pattern
+			matched, args := matchWild(pattern, message)
+			if !matched {
+				continue
+			}
 
-		DebugLog("LISTEN MATCH obj=#%d pattern=%q action=%q args=%v", obj, pattern, action, args)
-		entry := &QueueEntry{
-			Player:  obj,
-			Cause:   cause,
-			Caller:  cause,
-			Command: action,
-			Args:    args,
+			DebugLog("LISTEN MATCH obj=#%d pattern=%q action=%q args=%v", obj, pattern, action, args)
+			entry := &QueueEntry{
+				Player:  obj, // executor is always the child object, not the parent
+				Cause:   cause,
+				Caller:  cause,
+				Command: action,
+				Args:    args,
+			}
+			g.Queue.Add(entry)
 		}
-		g.Queue.Add(entry)
+		current = cur.Parent
 	}
+
+	// 2. Check LISTEN attr (26) + AHEAR attr (29) combo.
+	//    C TinyMUSH: if the object has a LISTEN pattern that matches,
+	//    fire AHEAR as a queued action with the full message in %0.
+	listenPattern := g.GetAttrText(obj, 26) // A_LISTEN
+	if listenPattern != "" {
+		matched, _ := matchWild(listenPattern, message)
+		if matched {
+			ahear := g.GetAttrText(obj, 29) // A_AHEAR
+			if ahear != "" {
+				DebugLog("LISTEN+AHEAR obj=#%d pattern=%q ahear=%q msg=%q", obj, listenPattern, truncDebug(ahear, 200), truncDebug(message, 200))
+				entry := &QueueEntry{
+					Player:  obj,
+					Cause:   cause,
+					Caller:  cause,
+					Command: ahear,
+					Args:    []string{message},
+				}
+				g.Queue.Add(entry)
+			}
+		}
+	}
+}
+
+// hasListenAttr returns true if an object has a LISTEN attr (26) or any ^-prefix attr.
+// Used as a fallback when HAS_LISTEN flag may not be set (e.g. imported data).
+func (g *Game) hasListenAttr(obj *gamedb.Object) bool {
+	for _, attr := range obj.Attrs {
+		if attr.Number == 26 { // A_LISTEN
+			return true
+		}
+		text := eval.StripAttrPrefix(attr.Value)
+		if strings.HasPrefix(text, "^") {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Helper functions ---
