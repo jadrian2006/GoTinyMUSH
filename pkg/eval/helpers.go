@@ -6,6 +6,44 @@ import (
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
+// CallIterFun calls a user-defined function specified as "obj/attr" for iteration functions
+// (filter, map, fold, step, mix, foreach, while, until, munge, filterbool).
+// Unlike CallUFun (used by u()/ulocal()), iteration functions in C TinyMUSH evaluate the
+// fetched attr text with the CALLING object as executor (%!), not the target object.
+// This means v() inside the callback resolves on the caller, not on obj.
+func (ctx *EvalContext) CallIterFun(objAttr string, callArgs []string) string {
+	parts := strings.SplitN(objAttr, "/", 2)
+
+	var ref gamedb.DBRef
+	var attrName string
+
+	if len(parts) == 2 {
+		objStr := strings.TrimSpace(parts[0])
+		attrName = strings.ToUpper(strings.TrimSpace(parts[1]))
+		ref = ctx.resolveDBRefSimple(objStr)
+		if ref == gamedb.Nothing {
+			return "#-1 NOT FOUND"
+		}
+	} else {
+		attrName = strings.ToUpper(strings.TrimSpace(objAttr))
+		ref = ctx.Player
+	}
+
+	if attrName == "" {
+		return "#-1 NO SUCH ATTRIBUTE"
+	}
+
+	text := ctx.GetAttrByNameHelper(ref, attrName)
+	if text == "" {
+		return ""
+	}
+
+	// Do NOT change ctx.Player — evaluate in the caller's context.
+	// C TinyMUSH's filter/map/etc pass 'player' (the executor) to eval_expression_string,
+	// not 'thing' (the object where the attr lives).
+	return ctx.Exec(text, EvFCheck|EvEval, callArgs)
+}
+
 // CallUFun calls a user-defined function specified as "obj/attr" with the given arguments.
 // It fetches the attribute text, sets up %0-%9 from callArgs, evaluates it, and returns the result.
 func (ctx *EvalContext) CallUFun(objAttr string, callArgs []string) string {

@@ -74,7 +74,7 @@ func fnMap(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 
 	var results []string
 	for _, word := range words {
-		result := ctx.CallUFun(objAttr, []string{word})
+		result := ctx.CallIterFun(objAttr, []string{word})
 		results = append(results, result)
 	}
 	buf.WriteString(strings.Join(results, odelim))
@@ -93,7 +93,7 @@ func fnFilter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 
 	var results []string
 	for _, word := range words {
-		result := ctx.CallUFun(objAttr, []string{word})
+		result := ctx.CallIterFun(objAttr, []string{word})
 		if isTrue(result) {
 			results = append(results, word)
 		}
@@ -120,7 +120,7 @@ func fnFold(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	}
 
 	for _, word := range words {
-		acc = ctx.CallUFun(objAttr, []string{acc, word})
+		acc = ctx.CallIterFun(objAttr, []string{acc, word})
 	}
 	buf.WriteString(acc)
 }
@@ -129,7 +129,7 @@ func fnFold(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 func fnForeach(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	for _, ch := range args[0] {
-		result := ctx.CallUFun(args[1], []string{string(ch)})
+		result := ctx.CallIterFun(args[1], []string{string(ch)})
 		buf.WriteString(result)
 	}
 }
@@ -147,9 +147,9 @@ func fnWhile(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	var results []string
 	limit := 10000
 	for i := 0; i < limit; i++ {
-		cond := ctx.CallUFun(condFn, []string{current})
+		cond := ctx.CallIterFun(condFn, []string{current})
 		if !isTrue(cond) { break }
-		current = ctx.CallUFun(bodyFn, []string{current})
+		current = ctx.CallIterFun(bodyFn, []string{current})
 		results = append(results, current)
 	}
 	buf.WriteString(strings.Join(results, delim))
@@ -197,7 +197,7 @@ func fnStep(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 		end := i + step
 		if end > len(words) { end = len(words) }
 		chunk := words[i:end]
-		result := ctx.CallUFun(objAttr, chunk)
+		result := ctx.CallIterFun(objAttr, chunk)
 		results = append(results, result)
 	}
 	buf.WriteString(strings.Join(results, odelim))
@@ -224,7 +224,7 @@ func fnMix(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 		for _, w := range words {
 			if i < len(w) { callArgs = append(callArgs, w[i]) } else { callArgs = append(callArgs, "") }
 		}
-		result := ctx.CallUFun(objAttr, callArgs)
+		result := ctx.CallIterFun(objAttr, callArgs)
 		results = append(results, result)
 	}
 	buf.WriteString(strings.Join(results, " "))
@@ -332,7 +332,7 @@ func fnFilterbool(ctx *eval.EvalContext, args []string, buf *strings.Builder, _,
 	words := splitList(args[1], delim)
 	var results []string
 	for _, word := range words {
-		result := ctx.CallUFun(objAttr, []string{word})
+		result := ctx.CallIterFun(objAttr, []string{word})
 		if isTrue(result) {
 			results = append(results, word)
 		}
@@ -352,9 +352,9 @@ func fnUntil(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	var results []string
 	limit := 10000
 	for i := 0; i < limit; i++ {
-		cond := ctx.CallUFun(condFn, []string{current})
+		cond := ctx.CallIterFun(condFn, []string{current})
 		if isTrue(cond) { break }
-		current = ctx.CallUFun(bodyFn, []string{current})
+		current = ctx.CallIterFun(bodyFn, []string{current})
 		results = append(results, current)
 	}
 	buf.WriteString(strings.Join(results, delim))
@@ -515,7 +515,7 @@ func fnMunge(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	list1 := splitList(args[1], delim)
 	list2 := splitList(args[2], delim)
 	// Call ufun with list1
-	reordered := ctx.CallUFun(args[0], []string{strings.Join(list1, delim)})
+	reordered := ctx.CallIterFun(args[0], []string{strings.Join(list1, delim)})
 	reorderedWords := splitList(reordered, delim)
 	// Map from list1 position to list2
 	indexMap := make(map[string]string)

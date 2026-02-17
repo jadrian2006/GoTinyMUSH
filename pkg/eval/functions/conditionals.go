@@ -202,15 +202,19 @@ func fnIstrue(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 func fnUdefault(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
 	if len(args) < 2 { return }
 	attrSpec := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
-	text := ctx.GetAttrByNameHelper(ctx.Player, attrSpec)
-	if text != "" {
-		var uargs []string
-		for _, a := range args[2:] {
-			uargs = append(uargs, ctx.Exec(a, eval.EvFCheck|eval.EvEval, nil))
+	uParts := strings.SplitN(attrSpec, "/", 2)
+	if len(uParts) == 2 {
+		uRef := resolveDBRef(ctx, uParts[0])
+		text := getAttrByName(ctx, uRef, strings.ToUpper(strings.TrimSpace(uParts[1])))
+		if text != "" {
+			var uargs []string
+			for _, a := range args[2:] {
+				uargs = append(uargs, ctx.Exec(a, eval.EvFCheck|eval.EvEval, nil))
+			}
+			result := ctx.CallUFun(attrSpec, uargs)
+			buf.WriteString(result)
+			return
 		}
-		result := ctx.CallUFun(attrSpec, uargs)
-		buf.WriteString(result)
-		return
 	}
 	buf.WriteString(ctx.Exec(args[1], eval.EvFCheck|eval.EvEval, nil))
 }

@@ -464,7 +464,10 @@ func fnReadStruct(ctx *eval.EvalContext, args []string, buf *strings.Builder, _,
 	if len(args) < 3 { buf.WriteString("0"); return }
 
 	attrSpec := args[0]
-	text := ctx.GetAttrByNameHelper(ctx.Player, attrSpec)
+	parts := strings.SplitN(attrSpec, "/", 2)
+	if len(parts) != 2 { buf.WriteString("0"); return }
+	ref := resolveDBRef(ctx, parts[0])
+	text := getAttrByName(ctx, ref, strings.ToUpper(strings.TrimSpace(parts[1])))
 	if text == "" { buf.WriteString("0"); return }
 
 	// Replace with load using form-feed delimiter
@@ -505,7 +508,10 @@ func fnWriteStruct(ctx *eval.EvalContext, args []string, buf *strings.Builder, _
 func fnDelimit(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 
-	text := ctx.GetAttrByNameHelper(ctx.Player, args[0])
+	dparts := strings.SplitN(args[0], "/", 2)
+	if len(dparts) != 2 { return }
+	dref := resolveDBRef(ctx, dparts[0])
+	text := getAttrByName(ctx, dref, strings.ToUpper(strings.TrimSpace(dparts[1])))
 	if text == "" { return }
 
 	inputDelim := genericStructDelim

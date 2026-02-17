@@ -864,6 +864,10 @@ func cmdLook(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	// Look at something specific
 	target := g.MatchObject(d.Player, args)
+	if target == gamedb.Ambiguous {
+		d.Send("I don't know which one you mean!")
+		return
+	}
 	if target == gamedb.Nothing {
 		d.Send("I don't see that here.")
 		return
@@ -886,6 +890,10 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	target := g.MatchObject(d.Player, objName)
+	if target == gamedb.Ambiguous {
+		d.Send("I don't know which one you mean!")
+		return
+	}
 	if target == gamedb.Nothing {
 		d.Send("I don't see that here.")
 		return
@@ -955,9 +963,18 @@ func cmdInventory(g *Game, d *Descriptor, _ string, _ []string) {
 		return
 	}
 	d.Send("You are carrying:")
+	// Check for duplicate names across both inventory AND room contents
+	loc := g.PlayerLocation(d.Player)
+	roomContents := g.DB.SafeContents(loc)
+	dupeNames := findDuplicateNames(g, contents, roomContents)
 	for _, next := range contents {
 		if obj, ok := g.DB.Objects[next]; ok {
-			d.Send(fmt.Sprintf("  %s", DisplayName(obj.Name)))
+			dname := DisplayName(obj.Name)
+			if dupeNames[strings.ToLower(dname)] {
+				d.Send(fmt.Sprintf("  %s(#%d)", dname, next))
+			} else {
+				d.Send(fmt.Sprintf("  %s", dname))
+			}
 		}
 	}
 }
@@ -1256,6 +1273,29 @@ func DisplayName(name string) string {
 	return name
 }
 
+// findDuplicateNames returns a set of lowercased display names that appear more
+// than once across all given ref lists. Used to unmask dbrefs when 2+ objects
+// share the same display name so players can distinguish them.
+// Checks across both inventory and room contents so duplicates are detected
+// even when one copy is carried and one is on the ground.
+func findDuplicateNames(g *Game, refLists ...[]gamedb.DBRef) map[string]bool {
+	counts := make(map[string]int)
+	for _, refs := range refLists {
+		for _, ref := range refs {
+			if obj, ok := g.DB.Objects[ref]; ok {
+				counts[strings.ToLower(DisplayName(obj.Name))]++
+			}
+		}
+	}
+	dupes := make(map[string]bool)
+	for name, count := range counts {
+		if count > 1 {
+			dupes[name] = true
+		}
+	}
+	return dupes
+}
+
 // PlayerName returns the name of a player.
 func (g *Game) PlayerName(player gamedb.DBRef) string {
 	if obj, ok := g.DB.Objects[player]; ok {
@@ -1427,7 +1467,16 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	}
 
 	// Description — executor is the room (so v() resolves room attrs), enactor is the player
-	desc := g.GetAttrText(room, 6) // A_DESC = 6
+	// C TinyMUSH: if location is not a room (e.g. a THING you've entered) and player
+	// is inside it, use IDESC (Interior Description, attr 32) instead of DESC.
+	// Falls back to DESC if IDESC is not set.
+	descAttr := 6 // A_DESC
+	if roomObj.ObjType() != gamedb.TypeRoom {
+		if idesc := g.GetAttrText(room, 32); idesc != "" { // A_IDESC = 32
+			descAttr = 32
+		}
+	}
+	desc := g.GetAttrText(room, descAttr)
 	if desc != "" {
 		ctx := makeCtx()
 		evaluated := ctx.Exec(desc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
@@ -1511,9 +1560,18 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	}
 	if !succShown && !conFmtHandled && len(contentRefs) > 0 {
 		d.Send("Contents:")
+		// Check for duplicate names across both room contents AND player inventory
+		// so players can distinguish same-named objects even across locations.
+		playerInv := g.DB.SafeContents(d.Player)
+		dupeNames := findDuplicateNames(g, contentRefs, playerInv)
 		for _, ref := range contentRefs {
 			if obj, ok := g.DB.Objects[ref]; ok {
-				d.Send("  " + DisplayName(obj.Name))
+				dname := DisplayName(obj.Name)
+				if dupeNames[strings.ToLower(dname)] {
+					d.Send(fmt.Sprintf("  %s(#%d)", dname, ref))
+				} else {
+					d.Send("  " + dname)
+				}
 			}
 		}
 	}
@@ -2140,8 +2198,12 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 	}
 
 	// searchContents searches a contents list for exact then prefix matches.
+	// Returns Ambiguous if 2+ objects match at the same confidence level (C TinyMUSH behavior).
 	searchContents := func(contents []gamedb.DBRef) gamedb.DBRef {
+		var exactMatch gamedb.DBRef = gamedb.Nothing
+		exactCount := 0
 		var prefixMatch gamedb.DBRef = gamedb.Nothing
+		prefixCount := 0
 		for _, next := range contents {
 			obj, ok := g.DB.Objects[next]
 			if !ok {
@@ -2149,14 +2211,37 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 			}
 			switch matchAliases(obj.Name) {
 			case 2:
-				return next // exact match wins immediately
+				exactCount++
+				if exactMatch == gamedb.Nothing {
+					exactMatch = next
+				}
 			case 1:
+				prefixCount++
 				if prefixMatch == gamedb.Nothing {
-					prefixMatch = next // remember first prefix match
+					prefixMatch = next
 				}
 			}
 		}
-		return prefixMatch
+		// Exact matches take priority
+		if exactCount == 1 {
+			return exactMatch
+		}
+		if exactCount > 1 {
+			return gamedb.Ambiguous
+		}
+		// Prefix matches
+		if prefixCount == 1 {
+			return prefixMatch
+		}
+		if prefixCount > 1 {
+			return gamedb.Ambiguous
+		}
+		return gamedb.Nothing
+	}
+
+	// Search player inventory first (inventory takes priority over room)
+	if found := searchContents(g.DB.SafeContents(player)); found != gamedb.Nothing {
+		return found
 	}
 
 	// Search room contents
@@ -2165,9 +2250,113 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 		return found
 	}
 
-	// Search player inventory
-	if found := searchContents(g.DB.SafeContents(player)); found != gamedb.Nothing {
-		return found
+	return gamedb.Nothing
+}
+
+// MatchInRoom matches an object name only in the room contents (for get).
+func (g *Game) MatchInRoom(player gamedb.DBRef, name string) gamedb.DBRef {
+	return g.matchInScope(player, name, true, false)
+}
+
+// MatchInInventory matches an object name only in the player's inventory (for drop).
+func (g *Game) MatchInInventory(player gamedb.DBRef, name string) gamedb.DBRef {
+	return g.matchInScope(player, name, false, true)
+}
+
+// matchInScope is the core match logic with configurable search scope.
+func (g *Game) matchInScope(player gamedb.DBRef, name string, searchRoom, searchInv bool) gamedb.DBRef {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return gamedb.Nothing
+	}
+	if strings.EqualFold(name, "me") {
+		return player
+	}
+	if strings.EqualFold(name, "here") {
+		return g.PlayerLocation(player)
+	}
+	if name[0] == '#' {
+		n := 0
+		for _, ch := range name[1:] {
+			if ch >= '0' && ch <= '9' {
+				n = n*10 + int(ch-'0')
+			} else {
+				return gamedb.Nothing
+			}
+		}
+		return gamedb.DBRef(n)
+	}
+
+	playerObj, ok := g.DB.Objects[player]
+	if !ok {
+		return gamedb.Nothing
+	}
+
+	nameLower := strings.ToLower(name)
+
+	matchAliases := func(objName string) int {
+		for _, alias := range strings.Split(objName, ";") {
+			alias = strings.TrimSpace(alias)
+			aliasLower := strings.ToLower(alias)
+			if aliasLower == nameLower {
+				return 2
+			}
+			if stringMatchWord(aliasLower, nameLower) {
+				return 1
+			}
+		}
+		return 0
+	}
+
+	searchContents := func(contents []gamedb.DBRef) gamedb.DBRef {
+		var exactMatch gamedb.DBRef = gamedb.Nothing
+		exactCount := 0
+		var prefixMatch gamedb.DBRef = gamedb.Nothing
+		prefixCount := 0
+		for _, next := range contents {
+			obj, ok := g.DB.Objects[next]
+			if !ok {
+				continue
+			}
+			switch matchAliases(obj.Name) {
+			case 2:
+				exactCount++
+				if exactMatch == gamedb.Nothing {
+					exactMatch = next
+				}
+			case 1:
+				prefixCount++
+				if prefixMatch == gamedb.Nothing {
+					prefixMatch = next
+				}
+			}
+		}
+		if exactCount == 1 {
+			return exactMatch
+		}
+		if exactCount > 1 {
+			return gamedb.Ambiguous
+		}
+		if prefixCount == 1 {
+			return prefixMatch
+		}
+		if prefixCount > 1 {
+			return gamedb.Ambiguous
+		}
+		return gamedb.Nothing
+	}
+
+	if searchRoom {
+		loc := playerObj.Location
+		if found := searchContents(g.DB.SafeContents(loc)); found != gamedb.Nothing {
+			return found
+		}
+	}
+
+	if searchInv {
+		if found := searchContents(g.DB.SafeContents(player)); found != gamedb.Nothing {
+			return found
+		}
 	}
 
 	return gamedb.Nothing
@@ -2453,7 +2642,11 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 		d.Send("Get what?")
 		return
 	}
-	target := g.MatchObject(d.Player, args)
+	target := g.MatchInRoom(d.Player, args)
+	if target == gamedb.Ambiguous {
+		d.Send("I don't know which one you mean!")
+		return
+	}
 	if target == gamedb.Nothing {
 		d.Send("I don't see that here.")
 		return
@@ -2468,12 +2661,7 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 		d.Send("You can't pick that up.")
 		return
 	}
-	// Must be in the same room
 	loc := g.PlayerLocation(d.Player)
-	if obj.Location != loc {
-		d.Send("You can't pick that up.")
-		return
-	}
 	// Check lock
 	if !CouldDoIt(g, d.Player, target, aLock) {
 		HandleLockFailure(g, d, target, aFail, aOFail, aAFail, "You can't pick that up.")
@@ -2500,18 +2688,17 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 		d.Send("Drop what?")
 		return
 	}
-	target := g.MatchObject(d.Player, args)
+	target := g.MatchInInventory(d.Player, args)
+	if target == gamedb.Ambiguous {
+		d.Send("I don't know which one you mean!")
+		return
+	}
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		d.Send("You aren't carrying that.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("I don't see that here.")
-		return
-	}
-	// Must be in player's inventory
-	if obj.Location != d.Player {
 		d.Send("You aren't carrying that.")
 		return
 	}

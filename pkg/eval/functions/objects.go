@@ -811,7 +811,12 @@ func fnFullname(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 // fnGetEval — get(obj/attr) then evaluate the result.
 func fnGetEval(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
-	text := ctx.GetAttrByNameHelper(ctx.Player,args[0])
+	// Parse obj/attr spec like fnGet does
+	parts := strings.SplitN(args[0], "/", 2)
+	if len(parts) != 2 { return }
+	ref := resolveDBRef(ctx, parts[0])
+	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
+	text := getAttrByName(ctx, ref, attrName)
 	if text != "" {
 		result := ctx.Exec(text, eval.EvFCheck|eval.EvEval, nil)
 		buf.WriteString(result)
@@ -822,12 +827,20 @@ func fnGetEval(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 func fnEdefault(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	attrSpec := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
-	text := ctx.GetAttrByNameHelper(ctx.Player,attrSpec)
-	if text != "" {
-		result := ctx.Exec(text, eval.EvFCheck|eval.EvEval, nil)
-		if result != "" {
-			buf.WriteString(result)
-			return
+	// Parse obj/attr spec
+	parts := strings.SplitN(attrSpec, "/", 2)
+	if len(parts) != 2 {
+		// No obj/attr spec — fall through to default
+	} else {
+		ref := resolveDBRef(ctx, parts[0])
+		attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
+		text := getAttrByName(ctx, ref, attrName)
+		if text != "" {
+			result := ctx.Exec(text, eval.EvFCheck|eval.EvEval, nil)
+			if result != "" {
+				buf.WriteString(result)
+				return
+			}
 		}
 	}
 	result := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval, nil)

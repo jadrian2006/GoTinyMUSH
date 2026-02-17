@@ -108,13 +108,25 @@ func fnLpos(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 }
 
 func fnEdit(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 3 { return }
+	if len(args) < 3 {
+		return
+	}
 	result := args[0]
 	from := args[1]
 	to := args[2]
 	if from == "" {
 		buf.WriteString(result)
 		return
+	}
+	// C TinyMUSH edit() has $=append and ^=prepend anchors, with \$/\^ for
+	// literal matching. C's eval preserves backslash escapes (\$ stays as \$),
+	// so edit_string can distinguish anchor $ from escaped \$.
+	// Go's eval CONSUMES backslash escapes (\$ → $), making it impossible to
+	// distinguish anchors from escaped literals. Since literal $ replacement
+	// (e.g. sled paintjob edit(v(paintjob), \\$, %b)) is the common case,
+	// we handle \$ and \^ escape stripping but skip the bare anchor feature.
+	if len(from) == 2 && (from[0] == '\\' || from[0] == '%') && (from[1] == '$' || from[1] == '^') {
+		from = from[1:]
 	}
 	buf.WriteString(strings.ReplaceAll(result, from, to))
 }

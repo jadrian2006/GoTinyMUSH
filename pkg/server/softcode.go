@@ -24,25 +24,26 @@ const (
 // MatchDollarCommands searches objects for $-pattern attributes that match the input.
 // Returns true if a match was found and queued/executed.
 func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) bool {
-	// Objects to search: player itself, inventory, room, room contents, master room contents
+	// Objects to search, matching C TinyMUSH order (command_core.c atr_match):
+	// room → room contents → player → player inventory → master room → zones
 	var searchObjs []gamedb.DBRef
+
+	// Room and room contents first (C checks location before player/inventory)
+	loc := g.PlayerLocation(player)
+	if loc != gamedb.Nothing {
+		searchObjs = append(searchObjs, loc)
+		for _, next := range g.DB.SafeContents(loc) {
+			if next != player { // Skip player (searched separately below)
+				searchObjs = append(searchObjs, next)
+			}
+		}
+	}
 
 	// Player's own attributes
 	searchObjs = append(searchObjs, player)
 
 	// Player's inventory
 	searchObjs = append(searchObjs, g.DB.SafeContents(player)...)
-
-	// Room and room contents
-	loc := g.PlayerLocation(player)
-	if loc != gamedb.Nothing {
-		searchObjs = append(searchObjs, loc)
-		for _, next := range g.DB.SafeContents(loc) {
-			if next != player { // Skip player (already searched)
-				searchObjs = append(searchObjs, next)
-			}
-		}
-	}
 
 	// Master room contents — global commands live here in heavy softcode games
 	masterRoom := g.MasterRoomRef()
@@ -547,6 +548,11 @@ func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 		if immediate {
 			g.evalAndDispatch(ctx, entry, descs, cmd)
 		} else {
+			// Process inline so that subsequent `;`-separated commands
+			// in the same queue entry run AFTER all dolist iterations.
+			// This matches practical C TinyMUSH behavior where @dolist
+			// iterations complete before the next `;` command's visible
+			// effects (e.g. @pemit footer after @dolist rows).
 			qe := &QueueEntry{
 				Player:  entry.Player,
 				Cause:   entry.Cause,
@@ -557,7 +563,7 @@ func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 			if ctx.RData != nil {
 				qe.RData = ctx.RData.Clone()
 			}
-			g.Queue.Add(qe)
+			g.ExecuteQueueEntry(qe)
 		}
 	}
 }
@@ -673,16 +679,30 @@ func (g *Game) dispatchActionBody(ctx *eval.EvalContext, entry *QueueEntry, desc
 // functions) then dispatches the result. This matches C's process_cmdline
 // which evaluates before dispatching.
 func (g *Game) evalAndDispatch(ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor, rawCmd string) {
+	// Check for deferred-body commands (@switch, @dolist, @wait, @trigger)
+	// BEFORE evaluating the full command. In C TinyMUSH, these commands are
+	// handled by splitting LHS/body BEFORE evaluation. The body is preserved
+	// raw and each piece is evaluated separately during dispatch.
+	// This is critical because action bodies like:
+	//   {&current_scan_by me=%0;@pemit %#=...[filter(...)...]...}
+	// contain [bracket] expressions that Go's eval would evaluate prematurely
+	// if the entire command were eval'd first. C treats [] inside {} as literal,
+	// but Go evaluates them — so we must catch @switch before the eval pass.
+	if g.handleDeferredBodyCmd(rawCmd, ctx, entry, descs) {
+		return
+	}
+
 	evaluated := ctx.Exec(rawCmd, eval.EvFCheck|eval.EvEval, entry.Args)
 	evaluated = strings.TrimSpace(evaluated)
 	if evaluated == "" {
 		return
 	}
-	if len(descs) > 0 {
-		DispatchCommand(g, descs[0], evaluated)
-	} else {
-		g.ExecuteAsObject(entry.Player, entry.Cause, evaluated)
-	}
+
+	// Always dispatch through ExecuteAsObject with the queue entry's Player as
+	// executor. This ensures "me" resolves to the executing object (e.g. the sled),
+	// not the connected player. In C TinyMUSH, commands dispatched from within
+	// softcode always execute with the queue entry's player context.
+	g.ExecuteAsObject(entry.Player, entry.Cause, evaluated)
 }
 
 // splitSemicolonRespectingBraces splits a string on semicolons, respecting
@@ -744,13 +764,17 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 
 	DebugLog("OBJEXEC ExecuteAsObject player=#%d cause=#%d input=%q", player, cause, truncDebug(input, 200))
 
-	// Handle say/pose prefixes
+	// Handle say/pose/setvattr prefixes
 	switch input[0] {
 	case '"':
 		g.ObjSay(player, input[1:])
 		return
 	case ':':
 		g.ObjPose(player, input[1:])
+		return
+	case '&':
+		// &ATTR obj=value — set variable attribute
+		g.objSetVAttr(player, input[1:])
 		return
 	}
 
@@ -994,6 +1018,42 @@ func (g *Game) ObjPose(player gamedb.DBRef, msg string) {
 	g.SendMarkedToRoom(loc, "POSE", name+" "+msg)
 }
 
+// objSetVAttr handles &ATTR obj=value for non-connected objects (queue context).
+// This resolves "me" relative to the executor (player), not the connected player.
+func (g *Game) objSetVAttr(player gamedb.DBRef, rest string) {
+	rest = strings.TrimSpace(rest)
+	spaceIdx := strings.IndexByte(rest, ' ')
+	if spaceIdx < 0 {
+		return
+	}
+	attrName := strings.ToUpper(strings.TrimSpace(rest[:spaceIdx]))
+	objVal := strings.TrimSpace(rest[spaceIdx+1:])
+
+	eqIdx := strings.IndexByte(objVal, '=')
+	if eqIdx < 0 {
+		return
+	}
+	targetStr := strings.TrimSpace(objVal[:eqIdx])
+	value := strings.TrimSpace(objVal[eqIdx+1:])
+
+	if attrName == "" {
+		return
+	}
+
+	target := g.ResolveRef(player, targetStr)
+	if target == gamedb.Nothing {
+		target = g.MatchObject(player, targetStr)
+	}
+	if target == gamedb.Nothing {
+		return
+	}
+	if !Controls(g, player, target) {
+		return
+	}
+
+	g.SetAttrByNameChecked(player, target, attrName, value)
+}
+
 // DoTrigger triggers an attribute on an object.
 // Format: @trigger obj/attr [= arg0, arg1, ...]
 func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
@@ -1026,12 +1086,19 @@ func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
 		return
 	}
 
-	// Parse comma-separated args
+	// Parse comma-separated args and evaluate each one (CS_ARGV behavior).
+	// C TinyMUSH's @trigger evaluates each arg via parse_arglist before
+	// storing in the queue entry, so functions like con(me) are resolved.
 	var trigArgs []string
 	if argStr != "" {
-		trigArgs = strings.Split(argStr, ",")
-		for i := range trigArgs {
-			trigArgs[i] = strings.TrimSpace(trigArgs[i])
+		ctx := MakeEvalContextWithGame(g, player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		ctx.Cause = cause
+		rawArgs := splitCommaRespectingBraces(argStr)
+		for _, arg := range rawArgs {
+			evaluated := ctx.Exec(strings.TrimSpace(arg), eval.EvFCheck|eval.EvEval, nil)
+			trigArgs = append(trigArgs, evaluated)
 		}
 	}
 
@@ -1076,12 +1143,17 @@ func (g *Game) DoTriggerNow(player, cause gamedb.DBRef, args string) {
 		return
 	}
 
-	// Parse comma-separated args
+	// Parse comma-separated args and evaluate each one (CS_ARGV behavior)
 	var trigArgs []string
 	if argStr != "" {
-		trigArgs = strings.Split(argStr, ",")
-		for i := range trigArgs {
-			trigArgs[i] = strings.TrimSpace(trigArgs[i])
+		ctx := MakeEvalContextWithGame(g, player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		ctx.Cause = cause
+		rawArgs := splitCommaRespectingBraces(argStr)
+		for _, arg := range rawArgs {
+			evaluated := ctx.Exec(strings.TrimSpace(arg), eval.EvFCheck|eval.EvEval, nil)
+			trigArgs = append(trigArgs, evaluated)
 		}
 	}
 
