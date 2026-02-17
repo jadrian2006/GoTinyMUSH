@@ -889,8 +889,8 @@ func cmdLook(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Examine what?")
-		return
+		// C TinyMUSH: bare "examine" examines the player's location
+		args = "here"
 	}
 
 	// Handle examine obj/attr syntax
