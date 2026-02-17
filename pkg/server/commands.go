@@ -439,6 +439,7 @@ func cmdSay(g *Game, d *Descriptor, args string, _ []string) {
 		Data:   map[string]any{"message": args, "speaker": playerName},
 	})
 	g.MatchListenPatterns(loc, d.Player, msg)
+	g.AudibleRelay(loc, d.Player, msg)
 }
 
 func cmdPose(g *Game, d *Descriptor, args string, _ []string) {
@@ -454,6 +455,7 @@ func cmdPose(g *Game, d *Descriptor, args string, _ []string) {
 		Data:   map[string]any{"pose": args, "player": playerName},
 	})
 	g.MatchListenPatterns(loc, d.Player, msg)
+	g.AudibleRelay(loc, d.Player, msg)
 }
 
 func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
@@ -660,7 +662,14 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		}
 		for _, cur := range g.DB.SafeContents(target) {
 			g.SendMarkedToPlayer(cur, "EMIT", message)
+			g.CheckPemitListen(cur, d.Player, message)
 		}
+		// C TinyMUSH also delivers to the room itself (notify_all_from_inside
+		// uses MSG_ME_ALL), triggering LISTEN/^-patterns on the room.
+		g.CheckPemitListen(target, d.Player, message)
+		// C's notify_all_from_inside also has MSG_F_UP which triggers
+		// AUDIBLE outward relay when the target is an AUDIBLE container.
+		g.AudibleRelay(target, d.Player, message)
 		return
 	}
 
@@ -671,6 +680,7 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 			ref := g.ResolveRef(d.Player, strings.TrimSpace(ts))
 			if ref != gamedb.Nothing {
 				g.SendMarkedToPlayer(ref, "EMIT", message)
+				g.CheckPemitListen(ref, d.Player, message)
 			}
 		}
 		return
@@ -689,6 +699,8 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 	g.SendMarkedToPlayer(target, "EMIT", message)
+	// C TinyMUSH: @pemit to an object triggers its LISTEN/^ patterns
+	g.CheckPemitListen(target, d.Player, message)
 }
 
 // --- Movement Commands ---
@@ -2370,6 +2382,13 @@ func (g *Game) ResolveRef(player gamedb.DBRef, s string) gamedb.DBRef {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return gamedb.Nothing
+	}
+	// Strip *player prefix (used for player lookup in TinyMUSH)
+	if s[0] == '*' {
+		s = s[1:]
+		if s == "" {
+			return gamedb.Nothing
+		}
 	}
 	if s[0] == '#' {
 		n := 0

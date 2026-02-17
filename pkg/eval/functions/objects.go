@@ -348,6 +348,9 @@ var knownFlags = map[string][2]int{
 	"BOUNCE": {1, gamedb.Flag2Bounce}, "STOP": {1, gamedb.Flag2StopMatch},
 	"NO_BLEED": {1, gamedb.Flag2NoBLeed}, "GAGGED": {1, gamedb.Flag2Gagged},
 	"FIXED": {1, gamedb.Flag2Fixed},
+	"HEAR_THROUGH": {0, gamedb.FlagHearThru}, "AUDIBLE": {0, gamedb.FlagHearThru},
+	"SEE_THROUGH": {0, gamedb.FlagSeeThru}, "TRANSPARENT": {0, gamedb.FlagSeeThru},
+	"HAS_STARTUP": {0, gamedb.FlagHasStartup},
 	"PLAYER": {-1, int(gamedb.TypePlayer)}, "ROOM": {-1, int(gamedb.TypeRoom)},
 	"EXIT": {-1, int(gamedb.TypeExit)}, "THING": {-1, int(gamedb.TypeThing)},
 }

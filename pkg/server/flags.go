@@ -44,6 +44,7 @@ var FlagTable = map[string]*FlagDef{
 	"DESTROY_OK": {Name: "DESTROY_OK", Word: 0, Bit: gamedb.FlagDestroyOK},
 	"SEE_THROUGH": {Name: "SEE_THROUGH", Word: 0, Bit: gamedb.FlagSeeThru},
 	"HEAR_THROUGH": {Name: "HEAR_THROUGH", Word: 0, Bit: gamedb.FlagHearThru},
+	"AUDIBLE":      {Name: "HEAR_THROUGH", Word: 0, Bit: gamedb.FlagHearThru}, // alias
 	"IMMORTAL":   {Name: "IMMORTAL", Word: 0, Bit: gamedb.FlagImmortal},
 	"HAS_STARTUP": {Name: "HAS_STARTUP", Word: 0, Bit: gamedb.FlagHasStartup},
 

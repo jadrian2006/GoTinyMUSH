@@ -819,17 +819,27 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 				// @pemit/contents: send to all contents of target
 				for _, cur := range g.DB.SafeContents(target) {
 					g.SendMarkedToPlayer(cur, "EMIT", message)
+					g.CheckPemitListen(cur, player, message)
 				}
+				// C TinyMUSH also delivers to the room itself (notify_all_from_inside
+				// uses MSG_ME_ALL), triggering LISTEN/^-patterns on the room.
+				g.CheckPemitListen(target, player, message)
+				// C's notify_all_from_inside also has MSG_F_UP which triggers
+				// AUDIBLE outward relay when the target is an AUDIBLE container.
+				g.AudibleRelay(target, player, message)
 			} else if strings.HasPrefix(switches, "list") {
 				// @pemit/list: send to multiple targets
 				for _, t := range strings.Fields(targetStr) {
 					ref := g.ResolveRef(player, t)
 					if ref != gamedb.Nothing {
 						g.SendMarkedToPlayer(ref, "EMIT", message)
+						g.CheckPemitListen(ref, player, message)
 					}
 				}
 			} else {
 				g.SendMarkedToPlayer(target, "EMIT", message)
+				// C TinyMUSH: @pemit to an object triggers its LISTEN/^ patterns
+				g.CheckPemitListen(target, player, message)
 			}
 		}
 	case "@emit":
@@ -1007,7 +1017,10 @@ func (g *Game) ObjSay(player gamedb.DBRef, msg string) {
 	}
 	name := g.PlayerName(player)
 	loc := g.PlayerLocation(player)
-	g.SendMarkedToRoom(loc, "SAY", name+" says \""+msg+"\"")
+	fullMsg := name + " says \"" + msg + "\""
+	g.SendMarkedToRoom(loc, "SAY", fullMsg)
+	g.MatchListenPatterns(loc, player, fullMsg)
+	g.AudibleRelay(loc, player, fullMsg)
 }
 
 // ObjPose handles pose for non-connected objects.
@@ -1015,7 +1028,10 @@ func (g *Game) ObjPose(player gamedb.DBRef, msg string) {
 	msg = strings.TrimSpace(msg)
 	name := g.PlayerName(player)
 	loc := g.PlayerLocation(player)
-	g.SendMarkedToRoom(loc, "POSE", name+" "+msg)
+	fullMsg := name + " " + msg
+	g.SendMarkedToRoom(loc, "POSE", fullMsg)
+	g.MatchListenPatterns(loc, player, fullMsg)
+	g.AudibleRelay(loc, player, fullMsg)
 }
 
 // objSetVAttr handles &ATTR obj=value for non-connected objects (queue context).
@@ -1461,27 +1477,145 @@ func (g *Game) RunStartup() {
 
 // MatchListenPatterns checks for ^pattern:action on MONITOR objects in a room.
 // Called when messages are sent to a room (say, pose, emit).
-func (g *Game) MatchListenPatterns(loc gamedb.DBRef, speaker gamedb.DBRef, message string) {
+// Optional exclude refs are skipped (used by AudibleRelay to avoid double-firing
+// ^-patterns on the originating container).
+func (g *Game) MatchListenPatterns(loc gamedb.DBRef, speaker gamedb.DBRef, message string, exclude ...gamedb.DBRef) {
 	locObj, ok := g.DB.Objects[loc]
 	if !ok {
 		return
 	}
 
+	// Build exclude set
+	excludeSet := make(map[gamedb.DBRef]bool, len(exclude))
+	for _, e := range exclude {
+		excludeSet[e] = true
+	}
+
 	// Walk contents of the room
 	for _, next := range g.DB.SafeContents(loc) {
+		if next == speaker || excludeSet[next] {
+			continue
+		}
 		obj, ok := g.DB.Objects[next]
 		if !ok {
 			continue
 		}
 		// Check for MONITOR flag (or HAS_LISTEN)
-		if next != speaker && (obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen)) {
+		if obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen) {
 			g.checkListenAttrs(next, speaker, message)
 		}
 	}
 
 	// Also check the room itself
-	if loc != speaker && (locObj.HasFlag(gamedb.FlagMonitor) || locObj.HasFlag2(gamedb.Flag2HasListen)) {
+	if loc != speaker && !excludeSet[loc] && (locObj.HasFlag(gamedb.FlagMonitor) || locObj.HasFlag2(gamedb.Flag2HasListen)) {
 		g.checkListenAttrs(loc, speaker, message)
+	}
+}
+
+// CheckPemitListen checks LISTEN triggers on a single @pemit target.
+// In C TinyMUSH, @pemit to an object triggers its LISTEN/^ patterns just like
+// say/pose in the room does. This is how listen-based relay objects work.
+func (g *Game) CheckPemitListen(target, cause gamedb.DBRef, message string) {
+	obj, ok := g.DB.Objects[target]
+	if !ok {
+		return
+	}
+	// Fire ^-pattern listen triggers (includes game's WATCH system)
+	if obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen) {
+		g.checkListenAttrs(target, cause, message)
+	}
+}
+
+// AudibleRelay implements the AUDIBLE (HEARTHRU) relay system from C TinyMUSH.
+// When speech occurs in a room, this handles two relay directions:
+//
+// 1. OUTWARD (inside→outside): If the room IS an object with AUDIBLE flag,
+//    relay speech to the object's location with @prefix prepended.
+//    The relayed message also triggers INWARD relay on objects in the outer room
+//    (including the originating container itself), so occupants see what was relayed.
+//
+// 2. INWARD (outside→inside): For each AUDIBLE object in the room with LISTEN
+//    matching the message, relay to the object's contents with @inprefix.
+//
+// The speaker param is who spoke, loc is where they spoke.
+func (g *Game) AudibleRelay(loc, speaker gamedb.DBRef, message string) {
+	locObj, ok := g.DB.Objects[loc]
+	if !ok {
+		return
+	}
+
+	// --- OUTWARD relay: inside container → container's location ---
+	// If we're inside an AUDIBLE object (e.g., a sled), relay to its location.
+	if locObj.HasFlag(gamedb.FlagHearThru) {
+		outerLoc := locObj.Location
+		if outerLoc != gamedb.Nothing {
+			// Get PREFIX attribute (attr 90) and prepend to message
+			prefix := g.GetAttrText(loc, 90) // A_PREFIX
+			if prefix != "" {
+				prefix = evalExpr(g, loc, prefix)
+			}
+			var relayed string
+			if prefix != "" {
+				relayed = prefix + " " + message
+			} else {
+				relayed = message
+			}
+			// Send to all in the outer room (except the originating container)
+			for _, next := range g.DB.SafeContents(outerLoc) {
+				if next != loc {
+					g.SendMarkedToPlayer(next, "EMIT", relayed)
+				}
+			}
+			// Fire listen ^-patterns in the outer room, but exclude
+			// the originating container. In C TinyMUSH, the container is
+			// excluded from the neighbor notification (obj != target check
+			// in _notify_check_va). The container's ^-patterns already
+			// fired on the raw message via MatchListenPatterns(loc, ...).
+			g.MatchListenPatterns(outerLoc, speaker, relayed, loc)
+		}
+	}
+
+	// --- INWARD relay: outside → inside AUDIBLE objects ---
+	g.audibleInwardRelay(loc, speaker, message)
+}
+
+// audibleInwardRelay checks each AUDIBLE object in a room for LISTEN match
+// and relays the message to the object's contents with @inprefix prepended.
+func (g *Game) audibleInwardRelay(room, speaker gamedb.DBRef, message string) {
+	for _, next := range g.DB.SafeContents(room) {
+		if next == speaker {
+			continue
+		}
+		obj, ok := g.DB.Objects[next]
+		if !ok || !obj.HasFlag(gamedb.FlagHearThru) {
+			continue
+		}
+		// Check if LISTEN pattern matches
+		listenText := g.GetAttrText(next, 26) // A_LISTEN
+		if listenText == "" {
+			continue
+		}
+		listenText = evalExpr(g, next, listenText)
+		matched, _ := matchWild(listenText, message)
+		if !matched {
+			continue
+		}
+
+		// Get INPREFIX attribute (attr 89)
+		inprefix := g.GetAttrText(next, 89) // A_INPREFIX
+		if inprefix != "" {
+			inprefix = evalExpr(g, next, inprefix)
+		}
+		var relayed string
+		if inprefix != "" {
+			relayed = inprefix + " " + message
+		} else {
+			relayed = message
+		}
+		// Send to all contents of this AUDIBLE object
+		for _, inner := range g.DB.SafeContents(next) {
+			g.SendMarkedToPlayer(inner, "EMIT", relayed)
+		}
 	}
 }
 
