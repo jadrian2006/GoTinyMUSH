@@ -1427,12 +1427,15 @@ func (g *Game) AddToContents(dest, obj gamedb.DBRef) {
 	if !ok {
 		return
 	}
-	// Check if obj is already in this contents chain — prevent cycles
+	// Check if obj is already in this contents chain — prevent cycles.
+	// Use a seen map to guard against infinite loops from corrupted chains.
 	next := destObj.Contents
-	for next != gamedb.Nothing {
+	seen := make(map[gamedb.DBRef]bool)
+	for next != gamedb.Nothing && !seen[next] {
 		if next == obj {
 			return // already in chain
 		}
+		seen[next] = true
 		if nObj, ok := g.DB.Objects[next]; ok {
 			next = nObj.Next
 		} else {
