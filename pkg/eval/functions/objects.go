@@ -821,7 +821,12 @@ func fnGetEval(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
 	text := getAttrByName(ctx, ref, attrName)
 	if text != "" {
+		// C TinyMUSH evaluates as the target object (thing), not the caller.
+		// Temporarily swap Player to the target so v() resolves against it.
+		savedPlayer := ctx.Player
+		ctx.Player = ref
 		result := ctx.Exec(text, eval.EvFCheck|eval.EvEval, nil)
+		ctx.Player = savedPlayer
 		buf.WriteString(result)
 	}
 }
