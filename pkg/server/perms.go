@@ -198,11 +198,11 @@ func Controls(g *Game, player, target gamedb.DBRef) bool {
 		return true
 	}
 
-	// Ownership-based control
-	_, ok1 := g.DB.Objects[player]
+	// Ownership-based control: same owner AND (player inherits OR target doesn't inherit)
+	// C TinyMUSH: (Owner(p) == Owner(x)) && (Inherits(p) || !Inherits(x))
+	pObj, ok1 := g.DB.Objects[player]
 	tObj, ok2 := g.DB.Objects[target]
-	if ok1 && ok2 && tObj.Owner == player {
-		// Owner controls if player Inherits or target doesn't Inherit
+	if ok1 && ok2 && pObj.Owner == tObj.Owner {
 		if Inherits(g, player) || !Inherits(g, target) {
 			return true
 		}
