@@ -2959,17 +2959,26 @@ func cmdUse(g *Game, d *Descriptor, args string, _ []string) {
 		HandleLockFailure(g, d, target, aUFail, aOUFail, aAUFail, "Permission denied.")
 		return
 	}
-	// Fire A_USE
+	// Fire A_USE — evaluate before sending (percent subs, functions, etc.)
 	useText := g.GetAttrText(target, 45) // A_USE = 45
 	if useText != "" {
-		d.Send(useText)
+		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		d.Send(ctx.Exec(useText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
 	}
-	// Fire A_OUSE to room
+	// Fire A_OUSE to room — evaluate before sending
 	ouText := g.GetAttrText(target, 46) // A_OUSE = 46
 	if ouText != "" {
-		loc := g.PlayerLocation(d.Player)
-		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-			fmt.Sprintf("%s %s", g.PlayerName(d.Player), ouText))
+		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		msg := ctx.Exec(ouText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+		if msg != "" {
+			loc := g.PlayerLocation(d.Player)
+			g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
+				fmt.Sprintf("%s %s", g.PlayerName(d.Player), msg))
+		}
 	}
 	// Fire A_AUSE action
 	g.QueueAttrAction(target, d.Player, 16, nil) // A_AUSE = 16
