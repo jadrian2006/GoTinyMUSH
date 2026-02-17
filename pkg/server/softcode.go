@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -694,6 +695,7 @@ func (g *Game) evalAndDispatch(ctx *eval.EvalContext, entry *QueueEntry, descs [
 
 	evaluated := ctx.Exec(rawCmd, eval.EvFCheck|eval.EvEval, entry.Args)
 	evaluated = strings.TrimSpace(evaluated)
+	DebugLog("DISPATCH player=#%d raw=%q eval=%q", entry.Player, truncDebug(rawCmd, 200), truncDebug(evaluated, 200))
 	if evaluated == "" {
 		return
 	}
@@ -1088,19 +1090,23 @@ func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
 
 	target := g.ResolveRef(player, parts[0])
 	if target == gamedb.Nothing {
+		DebugLog("TRIGGER player=#%d target=%q RESOLVE FAILED", player, parts[0])
 		return
 	}
 
 	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
 	attrNum := g.ResolveAttrNum(attrName)
 	if attrNum < 0 {
+		DebugLog("TRIGGER player=#%d target=#%d attr=%q ATTR NOT FOUND", player, target, attrName)
 		return
 	}
 	// GetAttrText walks the parent chain (like C's atr_pget)
 	text := g.GetAttrText(target, attrNum)
 	if text == "" {
+		DebugLog("TRIGGER player=#%d target=#%d attr=%q (#%d) TEXT EMPTY", player, target, attrName, attrNum)
 		return
 	}
+	DebugLog("TRIGGER player=#%d target=#%d attr=%q (#%d) text=%q", player, target, attrName, attrNum, truncDebug(text, 200))
 
 	// Parse comma-separated args and evaluate each one (CS_ARGV behavior).
 	// C TinyMUSH's @trigger evaluates each arg via parse_arglist before
@@ -1790,4 +1796,15 @@ func toIntSimple(s string) int {
 		return -n
 	}
 	return n
+}
+
+// toFloat converts a string to float64, matching C's atof behavior.
+// Returns 0.0 for non-numeric strings.
+func toFloat(s string) float64 {
+	s = strings.TrimSpace(s)
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0.0
+	}
+	return v
 }

@@ -1154,6 +1154,28 @@ func (g *Game) Controls(player, target gamedb.DBRef) bool {
 
 // wildMatchSimple is a simple glob matcher for internal use.
 func wildMatchSimple(pattern, str string) bool {
+	// C TinyMUSH's wild_match supports numeric comparison operators
+	// in @switch patterns: >N, <N, >=N, <=N
+	if len(pattern) > 0 && (pattern[0] == '>' || pattern[0] == '<') {
+		op := string(pattern[0])
+		rest := pattern[1:]
+		if len(rest) > 0 && rest[0] == '=' {
+			op += "="
+			rest = rest[1:]
+		}
+		pVal := toFloat(rest)
+		sVal := toFloat(str)
+		switch op {
+		case ">":
+			return sVal > pVal
+		case ">=":
+			return sVal >= pVal
+		case "<":
+			return sVal < pVal
+		case "<=":
+			return sVal <= pVal
+		}
+	}
 	return matchSimple(pattern, str)
 }
 
