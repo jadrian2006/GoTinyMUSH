@@ -2953,8 +2953,9 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 		d.Send("You can't leave.")
 		return
 	}
-	// Check leave lock
-	if !CouldDoIt(g, d.Player, loc, aLLeave) {
+	// Check leave lock — use strict check (no wizard bypass) so leave locks
+	// are absolute. Wizards can use @tel to move around if needed.
+	if !CouldDoItStrict(g, d.Player, loc, aLLeave) {
 		HandleLockFailure(g, d, loc, aLFail, aOLFail, aALFail, "You can't leave.")
 		return
 	}

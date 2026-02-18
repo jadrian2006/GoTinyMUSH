@@ -446,12 +446,56 @@ func UnparseBoolExp(g *Game, b *gamedb.BoolExp) string {
 	return "?"
 }
 
+// SerializeBoolExp converts a parsed BoolExp to a storable string using #dbref notation.
+// Unlike UnparseBoolExp which displays names, this produces a form suitable for re-parsing.
+func SerializeBoolExp(b *gamedb.BoolExp) string {
+	if b == nil {
+		return ""
+	}
+	switch b.Type {
+	case gamedb.BoolAnd:
+		return SerializeBoolExp(b.Sub1) + "&" + SerializeBoolExp(b.Sub2)
+	case gamedb.BoolOr:
+		return SerializeBoolExp(b.Sub1) + "|" + SerializeBoolExp(b.Sub2)
+	case gamedb.BoolNot:
+		return "!" + SerializeBoolExp(b.Sub1)
+	case gamedb.BoolConst:
+		return "#" + strconv.Itoa(b.Thing)
+	case gamedb.BoolAttr:
+		return strconv.Itoa(b.Thing) + ":" + b.StrVal
+	case gamedb.BoolEval:
+		return strconv.Itoa(b.Thing) + "/" + b.StrVal
+	case gamedb.BoolIndir:
+		return "@" + SerializeBoolExp(b.Sub1)
+	case gamedb.BoolCarry:
+		return "+" + SerializeBoolExp(b.Sub1)
+	case gamedb.BoolIs:
+		return "=" + SerializeBoolExp(b.Sub1)
+	case gamedb.BoolOwner:
+		return "$" + SerializeBoolExp(b.Sub1)
+	}
+	return "#-1"
+}
+
 // wildMatchCI performs case-insensitive wildcard matching.
 func wildMatchCI(pattern, str string) bool {
 	return wildMatchSimple(strings.ToLower(pattern), strings.ToLower(str))
 }
 
 // ---------- High-Level Lock Check ----------
+
+// CouldDoItStrict checks if player passes the lock without wizard bypass.
+// Used for locks that should be absolute (e.g., leave locks on vehicles).
+// Empty lock = unlocked (pass).
+func CouldDoItStrict(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
+	lockText := g.GetAttrText(thing, lockAttr)
+	if lockText != "" {
+		parsed := ParseBoolExp(g, player, lockText)
+		return EvalBoolExp(g, player, thing, thing, parsed, 0)
+	}
+	// No lock = unlocked
+	return true
+}
 
 // CouldDoIt checks if player passes the lock on thing for the given lock attribute.
 // Wizards always pass (except against God). POW_PASS_LOCKS bypasses all locks.
