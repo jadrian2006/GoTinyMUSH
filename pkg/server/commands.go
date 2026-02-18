@@ -1183,6 +1183,7 @@ type Game struct {
 	objExecDepth int // Recursion depth counter for ExecuteAsObject
 	objExecCount map[gamedb.DBRef]int // Per-object execution counter for rate limiting
 	objExecCountReset time.Time // When the counter was last reset
+	queueWake chan struct{} // Signal to wake queue processor immediately (player input)
 }
 
 // Emit sends an event to the player specified in ev.Player via the event bus.
@@ -1246,6 +1247,7 @@ func NewGame(db *gamedb.Database) *Game {
 		GameFuncs: make(map[string]*eval.UFunction),
 		EventBus:  bus,
 		Guests:    NewGuestManager(),
+		queueWake: make(chan struct{}, 1),
 	}
 }
 

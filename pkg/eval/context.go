@@ -18,8 +18,9 @@ const (
 	EvStripESC    = 0x0080 // Strip backslash escapes
 	EvStripAround = 0x0100 // Strip surrounding {}
 	EvNoFCheck    = 0x0200 // Don't check for functions
-	EvNoTrace     = 0x0400 // Don't trace
-	EvNoLocation  = 0x0800 // Don't resolve %l
+	EvNoTrace        = 0x0400 // Don't trace
+	EvNoLocation     = 0x0800 // Don't resolve %l
+	EvFCheckPersist  = 0x1000 // Don't clear EvFCheck after first bare function call
 )
 
 const MaxGlobalRegs = 36

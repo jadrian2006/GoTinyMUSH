@@ -158,6 +158,7 @@ var WellKnownAttrs = map[int]string{
 }
 
 // Well-known attribute number constants.
+const A_SEMAPHORE = 47
 const A_PROGCMD = 210
 
 // A_USER_START is the first attribute number available for user-defined attrs.

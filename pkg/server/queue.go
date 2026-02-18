@@ -242,6 +242,13 @@ func (q *CommandQueue) CountByOwner(db *gamedb.Database, owner gamedb.DBRef) int
 	return count
 }
 
+// ImmediateCount returns the number of entries in the immediate queue.
+func (q *CommandQueue) ImmediateCount() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.immediate)
+}
+
 // Stats returns queue size info.
 func (q *CommandQueue) Stats() (immediate, waiting, semaphore int) {
 	q.mu.Lock()

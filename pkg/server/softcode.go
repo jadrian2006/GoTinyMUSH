@@ -155,6 +155,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 			g.ExecuteQueueEntry(entry)
 		} else {
 			g.Queue.Add(entry)
+			g.WakeQueue() // Player-initiated: process without waiting for next tick
 		}
 		return true
 	}
@@ -230,6 +231,7 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 			Args:    args,
 		}
 		g.Queue.Add(entry)
+		g.WakeQueue() // Player-initiated: process without waiting for next tick
 		return true
 	}
 	return false
@@ -294,7 +296,11 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		// commands like @switch that need to split on commas respecting braces.
 		// In C TinyMUSH, parse_arglist splits args by parse_to (brace-aware)
 		// BEFORE evaluation; we approximate this by preserving braces through eval.
-		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval, entry.Args)
+		// EvFCheckPersist: C TinyMUSH splits command args BEFORE eval, so
+		// each arg gets its own EvFCheck. Our whole-string eval needs to
+		// keep EvFCheck active throughout to avoid missing subsequent
+		// bare function calls (e.g., "@tel con(me)=loc(%0)").
+		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval|eval.EvFCheckPersist, entry.Args)
 		evaluated = strings.TrimSpace(evaluated)
 		DebugLog("EVAL player=#%d cmd=%q evaluated=%q args=%v", entry.Player, truncDebug(cmd, 200), truncDebug(evaluated, 200), entry.Args)
 		if evaluated == "" {
@@ -319,7 +325,7 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 				// Re-evaluate each piece with EvFCheck so bare function
 				// calls (like add(), parse()) that were protected by the
 				// outer braces now get evaluated.
-				ic = ctx.Exec(ic, eval.EvFCheck|eval.EvEval, entry.Args)
+				ic = ctx.Exec(ic, eval.EvFCheck|eval.EvEval|eval.EvFCheckPersist, entry.Args)
 				ic = strings.TrimSpace(ic)
 				if ic == "" {
 					continue
@@ -504,11 +510,23 @@ func (g *Game) handleWaitDeferred(ctx *eval.EvalContext, entry *QueueEntry, desc
 		if target == gamedb.Nothing {
 			return
 		}
-		qe.SemObj = target
-		qe.SemAttr = g.ResolveAttrNum(attrStr)
-		g.Queue.AddSemaphore(qe)
+		attr := g.ResolveAttrNum(attrStr)
+		if attr <= 0 {
+			attr = gamedb.A_SEMAPHORE
+		}
+		g.semaphoreWait(target, attr, qe)
 	} else {
-		g.Queue.Add(qe)
+		// C TinyMUSH: @wait <obj>={cmd} without /attr defaults to A_SEMAPHORE (47).
+		target := g.ResolveRef(entry.Player, evalLHS)
+		if target == gamedb.Nothing {
+			target = g.MatchObject(entry.Player, evalLHS)
+		}
+		if target != gamedb.Nothing {
+			g.semaphoreWait(target, gamedb.A_SEMAPHORE, qe)
+		} else {
+			// Unrecognized — queue immediate
+			g.Queue.Add(qe)
+		}
 	}
 }
 
@@ -1226,12 +1244,23 @@ func (g *Game) DoWait(player, cause gamedb.DBRef, args string) {
 		if target == gamedb.Nothing {
 			return
 		}
-		entry.SemObj = target
-		entry.SemAttr = g.ResolveAttrNum(attrStr)
-		g.Queue.AddSemaphore(entry)
+		attr := g.ResolveAttrNum(attrStr)
+		if attr <= 0 {
+			attr = gamedb.A_SEMAPHORE
+		}
+		g.semaphoreWait(target, attr, entry)
 	} else {
-		// Treat as timed wait with default 0
-		g.Queue.Add(entry)
+		// C TinyMUSH: @wait <obj>={cmd} without /attr defaults to A_SEMAPHORE (47).
+		target := g.ResolveRef(player, waitSpec)
+		if target == gamedb.Nothing {
+			target = g.MatchObject(player, waitSpec)
+		}
+		if target != gamedb.Nothing {
+			g.semaphoreWait(target, gamedb.A_SEMAPHORE, entry)
+		} else {
+			// Unrecognized — queue immediate
+			g.Queue.Add(entry)
+		}
 	}
 }
 
@@ -1283,8 +1312,16 @@ func (g *Game) ProcessQueue() bool {
 		g.objExecCountReset = now
 	}
 
-	// Process up to N entries per tick (10ms tick × 100/tick = 10,000 entries/sec max)
+	// Only process entries that existed BEFORE this tick started.
+	// Commands executed during this tick may @trigger or @notify new entries;
+	// those go to the back of the immediate queue and won't be processed until
+	// the next tick. This matches C TinyMUSH behavior where each tick processes
+	// only pre-existing queue entries (new entries wait for the next timeslice).
+	available := g.Queue.ImmediateCount()
 	maxPerTick := 100
+	if available < maxPerTick {
+		maxPerTick = available
+	}
 	const maxPerObjPerSec = 200 // Per-object rate limit
 	processed := 0
 	for i := 0; i < maxPerTick; i++ {
@@ -1327,12 +1364,24 @@ func (g *Game) safeExecuteQueueEntry(entry *QueueEntry) {
 	timer.Stop()
 }
 
+// WakeQueue signals the queue processor to run immediately.
+// Used when player input adds entries so they execute without waiting for the next tick.
+// Non-blocking: if a wake is already pending, this is a no-op.
+func (g *Game) WakeQueue() {
+	select {
+	case g.queueWake <- struct{}{}:
+	default:
+	}
+}
+
 // StartQueueProcessor starts the background queue processing loop.
-// Uses adaptive tick rate: fast (10ms) when processing, slow (100ms) when idle.
+// Uses a 1-second tick to match C TinyMUSH's timeslice pacing for queue-spawned
+// commands (@trigger chains, semaphore releases). Player-initiated commands wake
+// the processor immediately via WakeQueue() so they don't wait for the next tick.
 func (g *Game) StartQueueProcessor() {
 	go func() {
-		const fastTick = 10 * time.Millisecond
-		const idleTick = 100 * time.Millisecond
+		const queueTick = 1 * time.Second  // Match C TinyMUSH timeslice (~1 entry/sec queue pacing)
+		const idleTick = 5 * time.Second   // Check less often when idle
 		ticker := time.NewTicker(idleTick)
 		defer ticker.Stop()
 		heartbeat := time.NewTicker(60 * time.Second)
@@ -1350,10 +1399,24 @@ func (g *Game) StartQueueProcessor() {
 					hadWork := g.ProcessQueue()
 					if hadWork && idle {
 						idle = false
-						ticker.Reset(fastTick)
+						ticker.Reset(queueTick)
 					} else if !hadWork && !idle {
 						idle = true
 						ticker.Reset(idleTick)
+					}
+				}()
+			case <-g.queueWake:
+				// Player input added entries — process immediately
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("PANIC in queue processor (wake): %v", r)
+						}
+					}()
+					g.ProcessQueue()
+					if idle {
+						idle = false
+						ticker.Reset(queueTick)
 					}
 				}()
 			case <-heartbeat.C:
@@ -1718,6 +1781,56 @@ func (g *Game) hasListenAttr(obj *gamedb.Object) bool {
 		}
 	}
 	return false
+}
+
+// --- Semaphore support ---
+
+// semaphoreAddTo reads the semaphore count from obj's attr, adds 'amount',
+// writes the new count back, and returns the new count.
+// This matches C TinyMUSH's cque_add_to() function.
+func (g *Game) semaphoreAddTo(obj gamedb.DBRef, attr int, amount int) int {
+	current := 0
+	text := g.GetAttrText(obj, attr)
+	if text != "" {
+		current = toIntSimple(text)
+	}
+	current += amount
+	if current == 0 {
+		g.SetAttr(obj, attr, "")
+	} else {
+		g.SetAttr(obj, attr, fmt.Sprintf("%d", current))
+	}
+	return current
+}
+
+// semaphoreWait implements the semaphore wait logic for @wait obj[/attr]={cmd}.
+// Increments the semaphore count. If count <= 0, the semaphore was pre-notified
+// so the command executes immediately. Otherwise, queue it.
+// This matches C TinyMUSH's behavior in cque_do_wait().
+func (g *Game) semaphoreWait(target gamedb.DBRef, attr int, qe *QueueEntry) {
+	count := g.semaphoreAddTo(target, attr, 1)
+	if count <= 0 {
+		// Pre-notified: execute immediately
+		g.Queue.Add(qe)
+	} else {
+		// Wait for notification
+		qe.SemObj = target
+		qe.SemAttr = attr
+		g.Queue.AddSemaphore(qe)
+	}
+}
+
+// semaphoreNotify implements the semaphore notify logic for @notify obj[/attr].
+// Decrements the semaphore count and wakes a waiter if one exists.
+// This matches C TinyMUSH's cque_nfy_que() behavior.
+func (g *Game) semaphoreNotify(target gamedb.DBRef, attr int, count int) int {
+	woken := 0
+	for i := 0; i < count; i++ {
+		g.semaphoreAddTo(target, attr, -1)
+		w := g.Queue.NotifySemaphore(target, attr, 1)
+		woken += w
+	}
+	return woken
 }
 
 // --- Helper functions ---

@@ -568,7 +568,7 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 
-	attr := 0
+	attr := gamedb.A_SEMAPHORE // Default to A_SEMAPHORE (47), matching C TinyMUSH
 	if len(parts) > 1 {
 		attr = g.ResolveAttrNum(parts[1])
 	}
@@ -581,8 +581,8 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 		count = 1
 	}
 
-	woken := g.Queue.NotifySemaphore(target, attr, count)
-	d.Send(fmt.Sprintf("Notified %d command(s).", woken))
+	woken := g.semaphoreNotify(target, attr, count)
+	_ = woken // C TinyMUSH only shows "Notified." if neither player nor target is QUIET
 }
 
 func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
@@ -2115,7 +2115,7 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	// Drain semaphore entries from the queue
-	semAttr := 47 // A_SEMAPHORE = 47
+	semAttr := gamedb.A_SEMAPHORE
 	if attrName != "" {
 		num := g.LookupAttrNum(attrName)
 		if num >= 0 {
@@ -2125,10 +2125,8 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 
 	count := g.Queue.DrainObject(target, semAttr)
 
-	// Reset the semaphore count on the object
-	if attrName == "" {
-		g.SetAttr(target, 47, "") // Clear A_SEMAPHORE = 47
-	}
+	// Reset the semaphore count on the object (clear attr)
+	g.SetAttr(target, semAttr, "")
 
 	d.Send(fmt.Sprintf("Drained %d entries from %s.", count, objStr))
 }

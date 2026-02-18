@@ -154,7 +154,9 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 						buf.WriteByte('(')
 						pos--
 						pos++
+						if evalFlags&EvFCheckPersist == 0 {
 						evalFlags &^= EvFCheck
+					}
 						break
 					}
 					pos = newPos2 + 1
@@ -195,7 +197,9 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 						}
 					}
 					ctx.FuncNestLev--
-					evalFlags &^= EvFCheck
+					if evalFlags&EvFCheckPersist == 0 {
+						evalFlags &^= EvFCheck
+					}
 					break
 				}
 				// Not a function
@@ -214,7 +218,9 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				}
 				buf.WriteByte('(')
 				pos++
-				evalFlags &^= EvFCheck
+				if evalFlags&EvFCheckPersist == 0 {
+					evalFlags &^= EvFCheck
+				}
 				break
 			}
 
@@ -225,7 +231,9 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				buf.WriteByte('(')
 				pos--
 				pos++
-				evalFlags &^= EvFCheck
+				if evalFlags&EvFCheckPersist == 0 {
+					evalFlags &^= EvFCheck
+				}
 				break
 			}
 			pos = newPos + 1
@@ -275,7 +283,9 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 					fn.Name, fn.NArgs, nfargs))
 			}
 			ctx.FuncNestLev--
-			evalFlags &^= EvFCheck
+			if evalFlags&EvFCheckPersist == 0 {
+				evalFlags &^= EvFCheck
+			}
 
 		case '#':
 			// Loop/switch tokens: ##, #@, #+, #$, #!
