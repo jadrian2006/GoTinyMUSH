@@ -7,6 +7,27 @@ import (
 // A_LCONTROL is the attribute number for the control lock.
 const aLControl = 129
 
+// ResolveOwner walks the ownership chain to find the ultimate player owner,
+// matching C TinyMUSH where Owner() always returns a player dbref.
+// In our Go import, objects may have non-player owners (e.g., a crystal owned
+// by a cutter THING). This resolves transitively: crystal→cutter→Brandy.
+func ResolveOwner(g *Game, obj gamedb.DBRef) gamedb.DBRef {
+	for depth := 0; depth < 10; depth++ {
+		o, ok := g.DB.Objects[obj]
+		if !ok {
+			return obj
+		}
+		if o.ObjType() == gamedb.TypePlayer {
+			return obj
+		}
+		if o.Owner == obj || o.Owner == gamedb.Nothing {
+			return obj // prevent loops
+		}
+		obj = o.Owner
+	}
+	return obj
+}
+
 // IsGod returns true if player is the God player.
 func IsGod(g *Game, player gamedb.DBRef) bool {
 	return player == g.GodPlayer()
@@ -166,11 +187,16 @@ func Examinable(g *Game, player, target gamedb.DBRef) bool {
 		return true
 	}
 
-	// Same owner
-	pObj, ok1 := g.DB.Objects[player]
-	tObj, ok2 := g.DB.Objects[target]
-	if ok1 && ok2 && pObj.Owner == tObj.Owner {
-		return true
+	// Same owner (resolve transitive ownership for imported data
+	// where objects may have non-player owners)
+	pOwner := ResolveOwner(g, player)
+	tOwner := ResolveOwner(g, target)
+	if pO, ok := g.DB.Objects[pOwner]; ok {
+		if tO, ok := g.DB.Objects[tOwner]; ok {
+			if pO.Owner == tO.Owner {
+				return true
+			}
+		}
 	}
 
 	// Zone control
@@ -200,8 +226,13 @@ func Controls(g *Game, player, target gamedb.DBRef) bool {
 
 	// Ownership-based control: same owner AND (player inherits OR target doesn't inherit)
 	// C TinyMUSH: (Owner(p) == Owner(x)) && (Inherits(p) || !Inherits(x))
-	pObj, ok1 := g.DB.Objects[player]
-	tObj, ok2 := g.DB.Objects[target]
+	// Use ResolveOwner to walk transitive ownership chains — in C, Owner()
+	// always returns a player, but our imported data may have non-player owners
+	// (e.g., crystal owned by cutter THING, cutter owned by player Brandy).
+	pOwner := ResolveOwner(g, player)
+	tOwner := ResolveOwner(g, target)
+	pObj, ok1 := g.DB.Objects[pOwner]
+	tObj, ok2 := g.DB.Objects[tOwner]
 	if ok1 && ok2 && pObj.Owner == tObj.Owner {
 		if Inherits(g, player) || !Inherits(g, target) {
 			return true

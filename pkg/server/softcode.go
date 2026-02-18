@@ -1061,6 +1061,7 @@ func (g *Game) objSetVAttr(player gamedb.DBRef, rest string) {
 	rest = strings.TrimSpace(rest)
 	spaceIdx := strings.IndexByte(rest, ' ')
 	if spaceIdx < 0 {
+		DebugLog("OBJSETVATTR player=#%d FAILED: no space in %q", player, truncDebug(rest, 200))
 		return
 	}
 	attrName := strings.ToUpper(strings.TrimSpace(rest[:spaceIdx]))
@@ -1068,12 +1069,14 @@ func (g *Game) objSetVAttr(player gamedb.DBRef, rest string) {
 
 	eqIdx := strings.IndexByte(objVal, '=')
 	if eqIdx < 0 {
+		DebugLog("OBJSETVATTR player=#%d attr=%s FAILED: no = in %q", player, attrName, truncDebug(objVal, 200))
 		return
 	}
 	targetStr := strings.TrimSpace(objVal[:eqIdx])
 	value := strings.TrimSpace(objVal[eqIdx+1:])
 
 	if attrName == "" {
+		DebugLog("OBJSETVATTR player=#%d FAILED: empty attrName", player)
 		return
 	}
 
@@ -1082,12 +1085,15 @@ func (g *Game) objSetVAttr(player gamedb.DBRef, rest string) {
 		target = g.MatchObject(player, targetStr)
 	}
 	if target == gamedb.Nothing {
+		DebugLog("OBJSETVATTR player=#%d attr=%s FAILED: target %q not found", player, attrName, targetStr)
 		return
 	}
 	if !Controls(g, player, target) {
+		DebugLog("OBJSETVATTR player=#%d attr=%s target=#%d FAILED: Controls check", player, attrName, target)
 		return
 	}
 
+	DebugLog("OBJSETVATTR player=#%d setting %s on #%d to %q", player, attrName, target, truncDebug(value, 200))
 	g.SetAttrByNameChecked(player, target, attrName, value)
 }
 
@@ -1220,6 +1226,11 @@ func (g *Game) DoWait(player, cause gamedb.DBRef, args string) {
 	if command == "" {
 		return
 	}
+	// Strip outer braces so the body is treated as multiple semicolon-separated
+	// commands (each evaluated independently), not as a single brace-grouped
+	// expression where all [bracket] calls evaluate before any command dispatches.
+	// This matches handleWaitDeferred's behavior and C TinyMUSH's process_cmdline.
+	command = stripOuterBraces(command)
 
 	entry := &QueueEntry{
 		Player:  player,
@@ -1809,9 +1820,11 @@ func (g *Game) semaphoreAddTo(obj gamedb.DBRef, attr int, amount int) int {
 // This matches C TinyMUSH's behavior in cque_do_wait().
 func (g *Game) semaphoreWait(target gamedb.DBRef, attr int, qe *QueueEntry) {
 	count := g.semaphoreAddTo(target, attr, 1)
+	DebugLog("SEMWAIT target=#%d attr=%d count=%d player=#%d cmd=%q", target, attr, count, qe.Player, truncDebug(qe.Command, 200))
 	if count <= 0 {
 		// Pre-notified: execute immediately
 		g.Queue.Add(qe)
+		g.WakeQueue()
 	} else {
 		// Wait for notification
 		qe.SemObj = target

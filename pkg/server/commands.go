@@ -2747,7 +2747,7 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
-	// give player = amount or give player = object
+	// give recipient = amount or give recipient = object
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		d.Send("Give what to whom?")
@@ -2767,27 +2767,33 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 
-	// Try as penny amount first
-	amount := toIntSimple(whatStr)
-	if amount > 0 {
-		playerObj := g.DB.Objects[d.Player]
-		if playerObj.Pennies < amount {
-			d.Send(fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
+	// Try as penny amount first (only if it's a pure number, not a dbref like #123)
+	if isNumeric(whatStr) {
+		amount := toIntSimple(whatStr)
+		if amount > 0 {
+			playerObj := g.DB.Objects[d.Player]
+			if playerObj.Pennies < amount {
+				d.Send(fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
+				return
+			}
+			playerObj.Pennies -= amount
+			targetObj.Pennies += amount
+			g.PersistObjects(playerObj, targetObj)
+			d.Send(fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
+			g.Conns.SendToPlayer(target,
+				fmt.Sprintf("%s gives you %d %s.", g.PlayerName(d.Player), amount, g.MoneyName(amount)))
 			return
 		}
-		playerObj.Pennies -= amount
-		targetObj.Pennies += amount
-		g.PersistObjects(playerObj, targetObj)
-		d.Send(fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
-		g.Conns.SendToPlayer(target,
-			fmt.Sprintf("%s gives you %d %s.", g.PlayerName(d.Player), amount, g.MoneyName(amount)))
-		return
 	}
 
-	// Try as object
-	thing := g.MatchObject(d.Player, whatStr)
+	// Try as object — match in giver's inventory
+	thing := g.MatchInInventory(d.Player, whatStr)
+	if thing == gamedb.Ambiguous {
+		d.Send("I don't know which one you mean!")
+		return
+	}
 	if thing == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		d.Send("You don't have that!")
 		return
 	}
 	thingObj, ok := g.DB.Objects[thing]
@@ -2796,15 +2802,86 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 
-	// Move from player inventory to target inventory
+	// Validate: can only give THINGs and PLAYERs
+	thingType := thingObj.ObjType()
+	if thingType != gamedb.TypeThing && thingType != gamedb.TypePlayer {
+		d.Send("Permission denied.")
+		return
+	}
+
+	// Recipient must be Enter_OK or controlled by giver
+	if !targetObj.HasFlag(gamedb.FlagEnterOK) && !g.Controls(d.Player, target) {
+		d.Send("Permission denied.")
+		return
+	}
+
+	// Check give-lock (LGIVE) on the thing being given
+	if !CouldDoIt(g, d.Player, thing, aLGive) {
+		HandleLockFailure(g, d, thing, aGFail, aOGFail, aAGFail,
+			fmt.Sprintf("You can't give %s away.", DisplayName(thingObj.Name)))
+		return
+	}
+
+	// Check receive-lock (LRECEIVE) on the recipient
+	if !CouldDoIt(g, thing, target, aLRecv) {
+		HandleLockFailure(g, d, target, aRFail, aORFail, aARFail,
+			fmt.Sprintf("%s doesn't want %s.", DisplayName(targetObj.Name), DisplayName(thingObj.Name)))
+		return
+	}
+
+	// Move from giver's inventory to recipient
 	g.RemoveFromContents(d.Player, thing)
 	thingObj.Location = target
 	g.AddToContents(target, thing)
 	g.PersistObjects(thingObj, targetObj)
 
-	d.Send(fmt.Sprintf("You give %s to %s.", DisplayName(thingObj.Name), DisplayName(targetObj.Name)))
+	// Notify giver, recipient, and thing (matches C's give_thing)
+	d.Send("Given.")
 	g.Conns.SendToPlayer(target,
-		fmt.Sprintf("%s gives you %s.", g.PlayerName(d.Player), DisplayName(thingObj.Name)))
+		fmt.Sprintf("%s gave you %s.", g.PlayerName(d.Player), DisplayName(thingObj.Name)))
+	g.Conns.SendToPlayer(thing,
+		fmt.Sprintf("%s gave you to %s.", g.PlayerName(d.Player), DisplayName(targetObj.Name)))
+
+	// Fire DROP/ODROP/ADROP on the thing with giver as cause (C: did_it line 349)
+	g.DidIt(d.Player, thing, aDrop, aODrop, aADrop)
+
+	// Fire SUCC/OSUCC/ASUCC on the thing with recipient as cause (C: did_it line 350)
+	g.DidIt(target, thing, aSucc, aOSucc, aASucc)
+}
+
+// DidIt evaluates and sends message attributes on an object, then queues the action attr.
+// Matches C TinyMUSH's did_it(): shows msgAttr text to cause, oMsgAttr text to the room
+// (excluding cause), and queues aMsgAttr as an action on the object.
+func (g *Game) DidIt(cause, thing gamedb.DBRef, msgAttr, oMsgAttr, aMsgAttr int) {
+	// Evaluate and show message to cause
+	if msgText := g.GetAttrText(thing, msgAttr); msgText != "" {
+		ctx := MakeEvalContextForObj(g, thing, cause, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		msg := ctx.Exec(msgText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+		if msg != "" {
+			g.Conns.SendToPlayer(cause, msg)
+		}
+	}
+
+	// Evaluate and show O-message to room (excluding cause)
+	if oMsgText := g.GetAttrText(thing, oMsgAttr); oMsgText != "" {
+		loc := g.PlayerLocation(cause)
+		if loc != gamedb.Nothing {
+			ctx := MakeEvalContextForObj(g, thing, cause, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			msg := ctx.Exec(oMsgText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+			if msg != "" {
+				g.Conns.SendToRoomExcept(g.DB, loc, cause, msg)
+			}
+		}
+	}
+
+	// Queue the action attribute
+	if aMsgAttr > 0 {
+		g.QueueAttrAction(thing, cause, aMsgAttr, nil)
+	}
 }
 
 func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {

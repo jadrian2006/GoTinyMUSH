@@ -546,30 +546,37 @@ func fnIsort(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	buf.WriteString(strings.Join(words, delim))
 }
 
-// fnMerge — merge two sorted lists into one sorted list.
-// merge(list1, list2[, sort-type])
+// fnMerge — character-level string merge (C TinyMUSH merge()).
+// merge(str1, str2, char) — walk both strings (must be equal length),
+// where str1 has <char>, output the corresponding character from str2;
+// otherwise output str1's character.
 func fnMerge(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 2 { return }
-	sortType := "a"
-	if len(args) > 2 && args[2] != "" { sortType = strings.ToLower(args[2]) }
-	a := splitList(args[0], " ")
-	b := splitList(args[1], " ")
-	combined := append(a, b...)
-	switch sortType {
-	case "n", "i":
-		sort.SliceStable(combined, func(i, j int) bool {
-			return toFloat(combined[i]) < toFloat(combined[j])
-		})
-	case "d":
-		sort.SliceStable(combined, func(i, j int) bool {
-			return parseDBRefNum(combined[i]) < parseDBRefNum(combined[j])
-		})
-	default:
-		sort.SliceStable(combined, func(i, j int) bool {
-			return strings.ToLower(combined[i]) < strings.ToLower(combined[j])
-		})
+	if len(args) < 3 {
+		return
 	}
-	buf.WriteString(strings.Join(combined, " "))
+	s1 := args[0]
+	s2 := args[1]
+	if len(s1) != len(s2) {
+		buf.WriteString("#-1 STRING LENGTHS MUST BE EQUAL")
+		return
+	}
+	carg := args[2]
+	if len(carg) > 1 {
+		buf.WriteString("#-1 TOO MANY CHARACTERS")
+		return
+	}
+	// Empty char arg treated as space
+	c := byte(' ')
+	if len(carg) == 1 {
+		c = carg[0]
+	}
+	for i := 0; i < len(s1); i++ {
+		if s1[i] == c {
+			buf.WriteByte(s2[i])
+		} else {
+			buf.WriteByte(s1[i])
+		}
+	}
 }
 
 // --- RhostMUSH extension list functions ---

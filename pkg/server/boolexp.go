@@ -12,22 +12,36 @@ import (
 
 // Lock attribute numbers (from attrs.go well-known attrs)
 const (
-	aLock   = 42 // A_LOCK — default lock
-	aFail   = 3  // A_FAIL
-	aOFail  = 2  // A_OFAIL
-	aAFail  = 13 // A_AFAIL
-	aLEnter = 55 // A_LENTER — enter lock
-	aLLeave = 56 // A_LLEAVE — leave lock
-	aLUse   = 58 // A_LUSE — use lock
-	aEFail  = 62 // A_EFAIL
-	aOEFail = 63 // A_OEFAIL
-	aAEFail = 64 // A_AEFAIL
-	aLFail  = 65 // A_LFAIL
-	aOLFail = 66 // A_OLFAIL
-	aALFail = 67 // A_ALFAIL
-	aUFail  = 71 // A_UFAIL
-	aOUFail = 72 // A_OUFAIL
-	aAUFail = 73 // A_AUFAIL
+	aLock    = 42  // A_LOCK — default lock
+	aFail    = 3   // A_FAIL
+	aOFail   = 2   // A_OFAIL
+	aAFail   = 13  // A_AFAIL
+	aSucc    = 4   // A_SUCC
+	aOSucc   = 1   // A_OSUCC
+	aASucc   = 12  // A_ASUCC
+	aDrop    = 9   // A_DROP
+	aODrop   = 8   // A_ODROP
+	aADrop   = 14  // A_ADROP
+	aLEnter  = 59  // A_LENTER — enter lock
+	aLLeave  = 60  // A_LLEAVE — leave lock
+	aLUse    = 62  // A_LUSE — use lock
+	aLGive   = 63  // A_LGIVE — give lock
+	aLRecv   = 87  // A_LRECEIVE — receive lock
+	aEFail   = 66  // A_EFAIL
+	aOEFail  = 67  // A_OEFAIL
+	aAEFail  = 68  // A_AEFAIL
+	aLFail   = 69  // A_LFAIL
+	aOLFail  = 70  // A_OLFAIL
+	aALFail  = 71  // A_ALFAIL
+	aUFail   = 75  // A_UFAIL
+	aOUFail  = 76  // A_OUFAIL
+	aAUFail  = 77  // A_AUFAIL
+	aGFail   = 129 // A_GFAIL
+	aOGFail  = 130 // A_OGFAIL
+	aAGFail  = 131 // A_AGFAIL
+	aRFail   = 132 // A_RFAIL
+	aORFail  = 133 // A_ORFAIL
+	aARFail  = 134 // A_ARFAIL
 )
 
 // Maximum indirection depth for @-locks to prevent infinite loops.

@@ -70,6 +70,8 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 	if obj.Location != gamedb.Nothing {
 		g.RemoveFromContents(obj.Location, target)
 	}
+	// Clear location on the destroyed object
+	obj.Location = gamedb.Nothing
 	g.PersistObject(obj)
 	d.Send(fmt.Sprintf("Destroyed: %s(#%d)", obj.Name, target))
 }
@@ -1136,10 +1138,17 @@ func (g *Game) SetAttrByNameChecked(player, obj gamedb.DBRef, attrName string, v
 	}
 	if attrNum < 0 {
 		// New attr — create it; permission check is just Controls (already done by caller)
+		DebugLog("SETATTR_NEW player=#%d obj=#%d attr=%s value=%q (new attr)", player, obj, attrName, truncDebug(value, 100))
 		g.SetAttrByName(obj, attrName, value)
 		return true, ""
 	}
-	return g.SetAttrChecked(player, obj, attrNum, value)
+	ok, msg := g.SetAttrChecked(player, obj, attrNum, value)
+	if !ok {
+		DebugLog("SETATTR_DENIED player=#%d obj=#%d attr=%s(#%d) msg=%q", player, obj, attrName, attrNum, msg)
+	} else {
+		DebugLog("SETATTR_OK player=#%d obj=#%d attr=%s(#%d) value=%q", player, obj, attrName, attrNum, truncDebug(value, 100))
+	}
+	return ok, msg
 }
 
 // --- Helper methods on Game ---

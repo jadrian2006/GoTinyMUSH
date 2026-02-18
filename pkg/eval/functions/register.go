@@ -225,7 +225,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("LREPLACE", fnLreplace, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("LEDIT", fnLedit, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("ISORT", fnIsort, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("MERGE", fnMerge, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("MERGE", fnMerge, 3, 0)
 	ctx.RegisterFunction("CHOOSE", fnChoose, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("GROUP", fnGroup, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("WILDGREP", fnWildgrep, 3, 0)
