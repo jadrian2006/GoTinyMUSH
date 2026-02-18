@@ -171,9 +171,22 @@ func (wr *writer) writeObject(obj *gamedb.Object) error {
 	wr.writef("%d\n", access)
 	wr.writef("%d\n", mod)
 
+	// Write lock as attribute 42 (A_LOCK) when VAtrKey is set.
+	// This preserves boolean expression locks through export/import cycles.
+	if obj.Lock != nil {
+		lockStr := gamedb.SerializeBoolExp(obj.Lock)
+		if lockStr != "" {
+			wr.writef(">42\n%s\n", quoteString(lockStr))
+		}
+	}
+
 	// Attributes
 	for _, attr := range obj.Attrs {
 		if attr.Number <= 0 {
+			continue
+		}
+		// Skip attr 42 if we already wrote it from obj.Lock above
+		if attr.Number == 42 && obj.Lock != nil {
 			continue
 		}
 		wr.writef(">%d\n%s\n", attr.Number, quoteString(attr.Value))

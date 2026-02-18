@@ -453,32 +453,7 @@ func UnparseBoolExp(g *Game, b *gamedb.BoolExp) string {
 // SerializeBoolExp converts a parsed BoolExp to a storable string using #dbref notation.
 // Unlike UnparseBoolExp which displays names, this produces a form suitable for re-parsing.
 func SerializeBoolExp(b *gamedb.BoolExp) string {
-	if b == nil {
-		return ""
-	}
-	switch b.Type {
-	case gamedb.BoolAnd:
-		return SerializeBoolExp(b.Sub1) + "&" + SerializeBoolExp(b.Sub2)
-	case gamedb.BoolOr:
-		return SerializeBoolExp(b.Sub1) + "|" + SerializeBoolExp(b.Sub2)
-	case gamedb.BoolNot:
-		return "!" + SerializeBoolExp(b.Sub1)
-	case gamedb.BoolConst:
-		return "#" + strconv.Itoa(b.Thing)
-	case gamedb.BoolAttr:
-		return strconv.Itoa(b.Thing) + ":" + b.StrVal
-	case gamedb.BoolEval:
-		return strconv.Itoa(b.Thing) + "/" + b.StrVal
-	case gamedb.BoolIndir:
-		return "@" + SerializeBoolExp(b.Sub1)
-	case gamedb.BoolCarry:
-		return "+" + SerializeBoolExp(b.Sub1)
-	case gamedb.BoolIs:
-		return "=" + SerializeBoolExp(b.Sub1)
-	case gamedb.BoolOwner:
-		return "$" + SerializeBoolExp(b.Sub1)
-	}
-	return "#-1"
+	return gamedb.SerializeBoolExp(b)
 }
 
 // wildMatchCI performs case-insensitive wildcard matching.

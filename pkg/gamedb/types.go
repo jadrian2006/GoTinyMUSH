@@ -1,6 +1,9 @@
 package gamedb
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // DBRef is the fundamental object reference type in MUSH.
 type DBRef int
@@ -228,6 +231,37 @@ type BoolExp struct {
 	Sub2    *BoolExp
 	Thing   int    // dbref or attribute number
 	StrVal  string // for ATR/EVAL lock string values
+}
+
+// SerializeBoolExp converts a parsed BoolExp to a storable string using numeric
+// dbrefs and attribute numbers. The output can be re-parsed by any TinyMUSH parser.
+func SerializeBoolExp(b *BoolExp) string {
+	if b == nil {
+		return ""
+	}
+	switch b.Type {
+	case BoolAnd:
+		return SerializeBoolExp(b.Sub1) + "&" + SerializeBoolExp(b.Sub2)
+	case BoolOr:
+		return SerializeBoolExp(b.Sub1) + "|" + SerializeBoolExp(b.Sub2)
+	case BoolNot:
+		return "!" + SerializeBoolExp(b.Sub1)
+	case BoolConst:
+		return "#" + strconv.Itoa(b.Thing)
+	case BoolAttr:
+		return strconv.Itoa(b.Thing) + ":" + b.StrVal
+	case BoolEval:
+		return strconv.Itoa(b.Thing) + "/" + b.StrVal
+	case BoolIndir:
+		return "@" + SerializeBoolExp(b.Sub1)
+	case BoolCarry:
+		return "+" + SerializeBoolExp(b.Sub1)
+	case BoolIs:
+		return "=" + SerializeBoolExp(b.Sub1)
+	case BoolOwner:
+		return "$" + SerializeBoolExp(b.Sub1)
+	}
+	return "#-1"
 }
 
 // Attribute represents a single attribute on an object.

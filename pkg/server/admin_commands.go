@@ -1258,30 +1258,9 @@ func splitCommaRespectingBraces(s string) []string {
 
 // --- @dump command ---
 
-func cmdDump(g *Game, d *Descriptor, args string, _ []string) {
-	// Only wizards can dump
-	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
-		return
-	}
-
-	d.Send("WARNING: @dump is deprecated. Use @archive for full game backups.")
-
-	path := g.DBPath
-	if path == "" {
-		path = "game.flatfile"
-	}
-
-	d.Send("Saving database...")
-	go func() {
-		if err := flatfile.Save(path, g.DB); err != nil {
-			log.Printf("ERROR: Database save failed: %v", err)
-			g.Conns.SendToPlayer(d.Player, fmt.Sprintf("Save failed: %v", err))
-		} else {
-			log.Printf("Database saved to %s (%d objects)", path, len(g.DB.Objects))
-			g.Conns.SendToPlayer(d.Player, fmt.Sprintf("Save complete. %d objects written to %s.", len(g.DB.Objects), path))
-		}
-	}()
+func cmdDump(g *Game, d *Descriptor, args string, switches []string) {
+	// @dump is an alias for @archive
+	cmdArchive(g, d, args, switches)
 }
 
 // --- @backup command ---
