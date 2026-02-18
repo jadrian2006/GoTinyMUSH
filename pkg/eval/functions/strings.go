@@ -87,7 +87,7 @@ func fnPos(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	if idx < 0 {
 		buf.WriteString("#-1")
 	} else {
-		writeInt(buf, idx)
+		writeInt(buf, idx+1) // C TinyMUSH pos() is 1-based
 	}
 }
 
