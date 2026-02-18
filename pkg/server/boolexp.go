@@ -230,6 +230,10 @@ func (p *boolParser) parseLiteral() *gamedb.BoolExp {
 
 // resolveAttrNum looks up an attribute name and returns its number.
 func (p *boolParser) resolveAttrNum(name string) int {
+	// Try numeric attr number first (from serialized locks like "547:pattern")
+	if n, err := strconv.Atoi(name); err == nil && n >= 0 {
+		return n
+	}
 	upper := strings.ToUpper(name)
 	for num, n := range gamedb.WellKnownAttrs {
 		if n == upper {

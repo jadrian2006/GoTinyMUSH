@@ -361,13 +361,24 @@ func (p *Parser) parseObject() error {
 	}
 	obj.Next = gamedb.DBRef(n)
 
-	// LOCK (conditional - only if lock is in header, not as attribute)
+	// LOCK — read from header if expected, or if a '(' is present (handles
+	// flatfiles patched with header locks even when VAtrKey is set).
 	if p.readKey {
 		boolexp, err := p.readBoolExp()
 		if err != nil {
 			return fmt.Errorf("object #%d lock: %w", ref, err)
 		}
 		obj.Lock = boolexp
+	} else {
+		// VAtrKey is set, but check if a header lock line is present anyway
+		// (e.g., patched flatfiles or format mismatches)
+		if ch, err := p.peekByte(); err == nil && ch == '(' {
+			boolexp, err := p.readBoolExp()
+			if err != nil {
+				return fmt.Errorf("object #%d lock: %w", ref, err)
+			}
+			obj.Lock = boolexp
+		}
 	}
 
 	// OWNER
@@ -455,6 +466,24 @@ func (p *Parser) parseObject() error {
 			return fmt.Errorf("object #%d attrs: %w", ref, err)
 		}
 		obj.Attrs = attrs
+
+		// When VAtrKey is set and no header lock was found, check if attr 42
+		// (A_LOCK) contains a lock expression and promote it to obj.Lock.
+		if obj.Lock == nil {
+			for i, attr := range obj.Attrs {
+				if attr.Number == 42 { // A_LOCK
+					lockText := stripAttrInfoPrefix(attr.Value)
+					if lockText != "" {
+						// Parse inline using a simple boolexp text parser.
+						// The value is stored as text like "#0" or "=SECURED_TYPE:*crystal*"
+						obj.Lock = parseBoolExpText(lockText)
+					}
+					// Remove A_LOCK from attrs since it's now in obj.Lock
+					obj.Attrs = append(obj.Attrs[:i], obj.Attrs[i+1:]...)
+					break
+				}
+			}
+		}
 	}
 
 	p.db.Objects[obj.DBRef] = obj
@@ -731,6 +760,153 @@ func (p *Parser) parseEOF() error {
 	if strings.TrimSpace(line) != "***END OF DUMP***" {
 		return fmt.Errorf("bad EOF marker: %q", line)
 	}
+	return nil
+}
+
+// stripAttrInfoPrefix removes the "\x01owner:flags:value" prefix from a raw
+// attribute value string. This is a local copy to avoid importing pkg/eval.
+func stripAttrInfoPrefix(raw string) string {
+	if len(raw) == 0 {
+		return raw
+	}
+	if raw[0] == '\x01' {
+		// Skip past "owner:flags:" prefix
+		rest := raw[1:]
+		if idx := strings.IndexByte(rest, ':'); idx >= 0 {
+			rest = rest[idx+1:]
+			if idx2 := strings.IndexByte(rest, ':'); idx2 >= 0 {
+				return rest[idx2+1:]
+			}
+		}
+		return raw // malformed prefix, return as-is
+	}
+	// Check for quoted-string format: "owner:flags:value"
+	if raw[0] >= '0' && raw[0] <= '9' {
+		if idx := strings.IndexByte(raw, ':'); idx >= 0 {
+			rest := raw[idx+1:]
+			if idx2 := strings.IndexByte(rest, ':'); idx2 >= 0 {
+				return rest[idx2+1:]
+			}
+		}
+	}
+	return raw
+}
+
+// parseBoolExpText parses a simple boolean expression string (from an A_LOCK
+// attribute value) into a BoolExp tree. This handles common cases like "#0",
+// "=ATTR:pattern", "+ATTR:pattern", "#1|#2", "@#123", etc.
+func parseBoolExpText(text string) *gamedb.BoolExp {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+
+	// Handle OR
+	if idx := strings.IndexByte(text, '|'); idx >= 0 {
+		left := parseBoolExpText(text[:idx])
+		right := parseBoolExpText(text[idx+1:])
+		if left != nil && right != nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolOr, Sub1: left, Sub2: right}
+		}
+		if left != nil {
+			return left
+		}
+		return right
+	}
+
+	// Handle AND
+	if idx := strings.IndexByte(text, '&'); idx >= 0 {
+		left := parseBoolExpText(text[:idx])
+		right := parseBoolExpText(text[idx+1:])
+		if left != nil && right != nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolAnd, Sub1: left, Sub2: right}
+		}
+		if left != nil {
+			return left
+		}
+		return right
+	}
+
+	// Handle prefix operators
+	switch text[0] {
+	case '!':
+		sub := parseBoolExpText(text[1:])
+		if sub != nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolNot, Sub1: sub}
+		}
+		return nil
+	case '+':
+		sub := parseBoolExpText(text[1:])
+		if sub != nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolCarry, Sub1: sub}
+		}
+		return nil
+	case '=':
+		sub := parseBoolExpText(text[1:])
+		if sub != nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolIs, Sub1: sub}
+		}
+		return nil
+	case '$':
+		sub := parseBoolExpText(text[1:])
+		if sub != nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolOwner, Sub1: sub}
+		}
+		return nil
+	case '@':
+		sub := parseBoolExpText(text[1:])
+		if sub != nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolIndir, Sub1: sub}
+		}
+		return nil
+	}
+
+	// Handle attribute lock: "NAME:pattern" or "NUM:pattern"
+	if colonIdx := strings.IndexByte(text, ':'); colonIdx >= 0 {
+		name := text[:colonIdx]
+		pattern := text[colonIdx+1:]
+		attrNum := -1
+		if n, err := strconv.Atoi(name); err == nil && n >= 0 {
+			attrNum = n
+		} else {
+			upper := strings.ToUpper(name)
+			for num, n := range gamedb.WellKnownAttrs {
+				if n == upper {
+					attrNum = num
+					break
+				}
+			}
+		}
+		if attrNum >= 0 {
+			return &gamedb.BoolExp{Type: gamedb.BoolAttr, Thing: attrNum, StrVal: pattern}
+		}
+	}
+
+	// Handle eval lock: "NAME/expression"
+	if slashIdx := strings.IndexByte(text, '/'); slashIdx >= 0 {
+		name := text[:slashIdx]
+		expr := text[slashIdx+1:]
+		attrNum := -1
+		if n, err := strconv.Atoi(name); err == nil && n >= 0 {
+			attrNum = n
+		}
+		if attrNum >= 0 {
+			return &gamedb.BoolExp{Type: gamedb.BoolEval, Thing: attrNum, StrVal: expr}
+		}
+	}
+
+	// Handle #dbref
+	if text[0] == '#' {
+		if n, err := strconv.Atoi(text[1:]); err == nil {
+			return &gamedb.BoolExp{Type: gamedb.BoolConst, Thing: n}
+		}
+	}
+
+	// Plain number = dbref
+	if n, err := strconv.Atoi(text); err == nil {
+		return &gamedb.BoolExp{Type: gamedb.BoolConst, Thing: n}
+	}
+
 	return nil
 }
 
