@@ -45,7 +45,7 @@ var WellKnownAttrs = map[int]string{
 	39:  "ACONNECT",
 	40:  "ADISCONNECT",
 	41:  "ALLOWANCE",
-	42:  "LOCK",
+	42:  "DefaultLock",
 	43:  "NAME",
 	44:  "COMMENT",
 	45:  "USE",
@@ -62,11 +62,11 @@ var WellKnownAttrs = map[int]string{
 	56:  "OMOVE",
 	57:  "AMOVE",
 	58:  "ALIAS",
-	59:  "LENTER",
-	60:  "LLEAVE",
-	61:  "LPAGE",
-	62:  "LUSE",
-	63:  "LGIVE",
+	59:  "EnterLock",
+	60:  "LeaveLock",
+	61:  "PageLock",
+	62:  "UseLock",
+	63:  "GiveLock",
 	64:  "EALIAS",
 	65:  "LALIAS",
 	66:  "EFAIL",
@@ -88,21 +88,21 @@ var WellKnownAttrs = map[int]string{
 	82:  "ATPORT",
 	// 83: unused (formerly A_PRIVS)
 	84:  "LOGINDATA",
-	85:  "LTPORT",
-	86:  "LDROP",
-	87:  "LRECEIVE",
+	85:  "TportLock",
+	86:  "DropLock",
+	87:  "ReceiveLock",
 	88:  "LASTSITE",
 	89:  "INPREFIX",
 	90:  "PREFIX",
 	91:  "INFILTER",
 	92:  "FILTER",
-	93:  "LLINK",
-	94:  "LTELOUT",
+	93:  "LinkLock",
+	94:  "TeloutLock",
 	95:  "FORWARDLIST",
 	96:  "MAILFOLDERS",
-	97:  "LUSER",
-	98:  "LPARENT",
-	99:  "LCONTROL",
+	97:  "UserLock",
+	98:  "ParentLock",
+	99:  "ControlLock",
 	100: "VA",
 	101: "VB",
 	102: "VC",
@@ -145,15 +145,24 @@ var WellKnownAttrs = map[int]string{
 	141: "TOFAIL",
 	142: "OTOFAIL",
 	143: "ATOFAIL",
-	144: "LOPEN",
+	144: "OpenLock",
 	// High-number system attrs
 	202: "AMAIL",
 	204: "DAILYATTRIB",
+	209: "SpeechLock",
 	214: "CONFORMAT",  // A_LCON_FMT
 	215: "EXITFORMAT", // A_LEXITS_FMT
+	217: "ChownLock",
 	218: "LASTIP",
+	219: "DarkLock",
 	221: "HTDESC",
 	222: "NAMEFORMAT", // A_NAME_FMT
+	223: "KnownLock",
+	224: "HeardLock",
+	225: "MovedLock",
+	226: "KnowsLock",
+	227: "HearsLock",
+	228: "MovesLock",
 	231: "PROPDIR",
 }
 
@@ -172,27 +181,36 @@ var WellKnownAttrFlags = map[int]int{
 	30:  AFInternal,                                 // A_LAST — last login time
 	38:  AFInternal | AFGod,                         // A_RQUOTA
 	41:  AFInternal | AFGod,                         // A_ALLOWANCE
-	42:  AFInternal | AFIsLock,                      // A_LOCK — default lock
+	42:  AFInternal | AFNoProg | AFNoCMD | AFIsLock,  // A_LOCK — default lock (shown via Key: line)
 	43:  AFInternal,                                 // A_NAME
 	47:  AFInternal,                                 // A_SEMAPHORE
 	48:  AFInternal,                                 // A_TIMEOUT
 	49:  AFInternal | AFGod,                         // A_QUOTA
-	59:  AFInternal | AFIsLock,                      // A_LENTER
-	60:  AFInternal | AFIsLock,                      // A_LLEAVE
-	61:  AFInternal | AFIsLock,                      // A_LPAGE
-	62:  AFInternal | AFIsLock,                      // A_LUSE
-	63:  AFInternal | AFIsLock,                      // A_LGIVE
+	59:  AFNoProg | AFNoCMD | AFIsLock,               // A_LENTER — EnterLock
+	60:  AFNoProg | AFNoCMD | AFIsLock,               // A_LLEAVE — LeaveLock
+	61:  AFNoProg | AFNoCMD | AFIsLock,               // A_LPAGE — PageLock
+	62:  AFNoProg | AFNoCMD | AFIsLock,               // A_LUSE — UseLock
+	63:  AFNoProg | AFNoCMD | AFIsLock,               // A_LGIVE — GiveLock
 	84:  AFDark | AFNoCMD | AFInternal,              // A_LOGINDATA
-	85:  AFInternal | AFIsLock,                      // A_LTPORT
-	86:  AFInternal | AFIsLock,                      // A_LDROP
-	87:  AFInternal | AFIsLock,                      // A_LRECEIVE
+	85:  AFNoProg | AFNoCMD | AFIsLock,               // A_LTPORT — TportLock
+	86:  AFNoProg | AFNoCMD | AFIsLock,               // A_LDROP — DropLock
+	87:  AFNoProg | AFNoCMD | AFIsLock,               // A_LRECEIVE — ReceiveLock
 	88:  AFDark | AFNoCMD | AFInternal | AFGod,      // A_LASTSITE
-	93:  AFInternal | AFIsLock,                      // A_LLINK
-	94:  AFInternal | AFIsLock,                      // A_LTELOUT
+	93:  AFNoProg | AFNoCMD | AFIsLock,               // A_LLINK — LinkLock
+	94:  AFNoProg | AFNoCMD | AFIsLock,               // A_LTELOUT — TeloutLock
 	96:  AFInternal,                                 // A_MAILFOLDERS
-	97:  AFInternal | AFIsLock,                      // A_LUSER
-	98:  AFInternal | AFIsLock,                      // A_LPARENT
-	99:  AFInternal | AFIsLock,                      // A_LCONTROL
+	97:  AFNoProg | AFNoCMD | AFIsLock,               // A_LUSER — UserLock
+	98:  AFNoProg | AFNoCMD | AFIsLock,               // A_LPARENT — ParentLock
+	99:  AFNoProg | AFNoCMD | AFIsLock,               // A_LCONTROL — ControlLock
+	209: AFNoProg | AFNoCMD | AFIsLock,               // A_LSPEECH — SpeechLock
 	210: AFInternal | AFDark,                        // A_PROGCMD
+	217: AFNoProg | AFNoCMD | AFIsLock,               // A_LCHOWN — ChownLock
 	218: AFDark | AFNoCMD | AFInternal | AFGod,      // A_LASTIP
+	219: AFNoProg | AFNoCMD | AFIsLock,               // A_LDARK — DarkLock
+	223: AFNoProg | AFNoCMD | AFIsLock,               // A_LKNOWN — KnownLock
+	224: AFNoProg | AFNoCMD | AFIsLock,               // A_LHEARD — HeardLock
+	225: AFNoProg | AFNoCMD | AFIsLock,               // A_LMOVED — MovedLock
+	226: AFNoProg | AFNoCMD | AFIsLock,               // A_LKNOWS — KnowsLock
+	227: AFNoProg | AFNoCMD | AFIsLock,               // A_LHEARS — HearsLock
+	228: AFNoProg | AFNoCMD | AFIsLock,               // A_LMOVES — MovesLock
 }

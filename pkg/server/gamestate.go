@@ -276,6 +276,16 @@ func (g *Game) GetAttrTextGS(obj gamedb.DBRef, attrNum int) string {
 	return g.GetAttrText(obj, attrNum)
 }
 
+// GetObjLockStr returns the serialized default lock (obj.Lock BoolExp) for an object.
+// Returns "" if no header lock is set. Used as fallback when attr 42 is empty.
+func (g *Game) GetObjLockStr(obj gamedb.DBRef) string {
+	o, ok := g.DB.Objects[obj]
+	if !ok || o.Lock == nil {
+		return ""
+	}
+	return gamedb.SerializeBoolExp(o.Lock)
+}
+
 // CanReadAttrGS checks if player can read a specific attribute on obj.
 func (g *Game) CanReadAttrGS(player, obj gamedb.DBRef, attrNum int, rawValue string) bool {
 	info := ParseAttrInfo(rawValue)

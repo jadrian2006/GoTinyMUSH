@@ -272,11 +272,10 @@ func SetsWizAttrs(g *Game, player gamedb.DBRef) bool {
 // CanReadAttr checks if player can read an attribute on target.
 // Implements C TinyMUSH's See_attr logic:
 //  1. AF_INTERNAL → never visible
-//  2. AF_IS_LOCK → not visible
-//  3. AF_VISUAL → visible to anyone
-//  4. Not Examinable AND player doesn't own attr → blocked
-//  5. AF_MDARK AND not SeesHiddenAttrs → blocked
-//  6. AF_DARK AND not God → blocked
+//  2. AF_VISUAL → visible to anyone
+//  3. Not Examinable AND player doesn't own attr → blocked
+//  4. AF_MDARK AND not SeesHiddenAttrs → blocked
+//  5. AF_DARK AND not God → blocked
 func CanReadAttr(g *Game, player, target gamedb.DBRef, attrDef *gamedb.AttrDef, instFlags int, attrOwner gamedb.DBRef) bool {
 	// Merge definition flags and per-instance flags
 	defFlags := 0
@@ -287,11 +286,6 @@ func CanReadAttr(g *Game, player, target gamedb.DBRef, attrDef *gamedb.AttrDef, 
 
 	// AF_INTERNAL — never visible to anyone
 	if merged&gamedb.AFInternal != 0 {
-		return false
-	}
-
-	// AF_IS_LOCK — not visible via examine/get
-	if merged&gamedb.AFIsLock != 0 {
 		return false
 	}
 

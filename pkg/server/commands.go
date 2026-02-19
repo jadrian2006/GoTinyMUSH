@@ -100,6 +100,7 @@ func InitCommands() map[string]*Command {
 
 	// Database (no guest)
 	registerNG("@dump", cmdDump)
+	registerNG("@fixdb", cmdFixDB)
 	registerNG("@backup", cmdBackup)
 	registerNG("@readcache", cmdReadCache)
 	registerNG("@archive", cmdArchive)
@@ -943,11 +944,19 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 				continue
 			}
 			text := eval.StripAttrPrefix(attr.Value)
+			// C TinyMUSH: if attr has AF_IS_LOCK, parse through boolexp for human-readable names
+			if def != nil && def.Flags&gamedb.AFIsLock != 0 && text != "" {
+				parsed := ParseBoolExp(g, d.Player, text)
+				if parsed != nil {
+					text = UnparseBoolExp(g, parsed)
+				}
+			}
 			// C TinyMUSH: only show annotation if player controls object or owns attr
 			showAnnotation := Controls(g, d.Player, target) || info.Owner == d.Player
 			annotation := ""
 			if showAnnotation {
-				annotation = attrAnnotation(g, d.Player, info, def)
+				examObjOwner := ResolveOwner(g, target)
+				annotation = attrAnnotation(g, d.Player, target, examObjOwner, info, def)
 			}
 			if annotation != "" {
 				d.Send(fmt.Sprintf("  %s %s: %s", name, annotation, text))
@@ -1696,38 +1705,74 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		d.Send("I don't see that here.")
 		return
 	}
-	d.Send(fmt.Sprintf("%s(#%d%s)", obj.Name, target, flagString(obj)))
-	d.Send(fmt.Sprintf("Type: %s  Flags: %s  Owner: %s(#%d)",
-		obj.ObjType().String(), flagString(obj), g.PlayerName(obj.Owner), obj.Owner))
-	if obj.ObjType() == gamedb.TypeExit {
-		// For exits: Location = destination, Exits = source room
-		if obj.Location != gamedb.Nothing {
-			d.Send(fmt.Sprintf("Destination: %s(#%d)", g.ObjName(obj.Location), obj.Location))
-		}
-		if obj.Exits != gamedb.Nothing {
-			d.Send(fmt.Sprintf("Source: %s(#%d)", g.ObjName(obj.Exits), obj.Exits))
-		}
-	} else {
-		if obj.Location != gamedb.Nothing {
-			d.Send(fmt.Sprintf("Location: %s(#%d)", g.ObjName(obj.Location), obj.Location))
-		}
-		if obj.Link != gamedb.Nothing && obj.Link != gamedb.DBRef(-3) {
-			d.Send(fmt.Sprintf("Home: %s(#%d)", g.ObjName(obj.Link), obj.Link))
-		}
-	}
-	if obj.Zone != gamedb.Nothing {
-		d.Send(fmt.Sprintf("Zone: %s(#%d)", g.ObjName(obj.Zone), obj.Zone))
-	}
-	if obj.Parent != gamedb.Nothing {
-		d.Send(fmt.Sprintf("Parent: %s(#%d)", g.ObjName(obj.Parent), obj.Parent))
-	}
 
-	// Show default lock ("Key:") if set
-	lockText := g.GetAttrText(target, aLock)
-	if lockText != "" {
-		d.Send(fmt.Sprintf("Key: %s", lockText))
-	} else if obj.Lock != nil {
-		d.Send(fmt.Sprintf("Key: %s", UnparseBoolExp(g, obj.Lock)))
+	control := Examinable(g, d.Player, target)
+
+	if control {
+		// 1. Header: Name(#dbref flags)
+		d.Send(g.unparseObject(d.Player, target))
+
+		// 2. Type/Flags line with full flag names (C: if mushconf.ex_flags)
+		d.Send(flagDescription(g, d.Player, obj))
+
+		// 3. Owner/Key/Pennies line
+		// C: "Owner: Name  Key: lockexpr  Pennies: N"
+		// C capitalizes first letter of many_coins for this line
+		coinName := g.MoneyName(obj.Pennies)
+		if len(coinName) > 0 {
+			coinName = strings.ToUpper(coinName[:1]) + coinName[1:]
+		}
+		lockDisplay := ""
+		lockText := g.GetAttrText(target, aLock)
+		if lockText != "" {
+			parsed := ParseBoolExp(g, d.Player, lockText)
+			if parsed != nil {
+				lockDisplay = UnparseBoolExp(g, parsed)
+			} else {
+				lockDisplay = lockText
+			}
+		} else if obj.Lock != nil {
+			lockDisplay = UnparseBoolExp(g, obj.Lock)
+		}
+		if lockDisplay == "" {
+			lockDisplay = "*UNLOCKED*"
+		}
+		d.Send(fmt.Sprintf("Owner: %s  Key: %s %s: %d",
+			g.PlayerName(obj.Owner), lockDisplay, coinName, obj.Pennies))
+
+		// 4. Timestamps
+		if !obj.LastAccess.IsZero() || !obj.LastMod.IsZero() {
+			// C shows "Created:" on its own line, but we don't have CreatedTime in our struct.
+			// C shows "Accessed: <time>    Modified: <time>" on one line.
+			accessStr := ""
+			modStr := ""
+			if !obj.LastAccess.IsZero() {
+				accessStr = obj.LastAccess.Format("Mon Jan 02 15:04:05 2006")
+			}
+			if !obj.LastMod.IsZero() {
+				modStr = obj.LastMod.Format("Mon Jan 02 15:04:05 2006")
+			}
+			if accessStr != "" && modStr != "" {
+				d.Send(fmt.Sprintf("Accessed: %s    Modified: %s", accessStr, modStr))
+			} else if accessStr != "" {
+				d.Send(fmt.Sprintf("Accessed: %s", accessStr))
+			} else if modStr != "" {
+				d.Send(fmt.Sprintf("Modified: %s", modStr))
+			}
+		}
+
+		// 5. Zone (always shown, even *NOTHING*)
+		d.Send(fmt.Sprintf("Zone: %s", g.unparseObject(d.Player, obj.Zone)))
+
+		// 6. Parent (only if set)
+		if obj.Parent != gamedb.Nothing {
+			d.Send(fmt.Sprintf("Parent: %s", g.unparseObject(d.Player, obj.Parent)))
+		}
+
+		// 7. Powers (only if any powers are set)
+		if pwrStr := powerDescription(obj); pwrStr != "" {
+			d.Send(pwrStr)
+		}
 	}
 
 	// Check per-player TRUNC_LENGTH for attribute display truncation
@@ -1739,10 +1784,11 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 	}
 
 	// Show attributes with permission checks
+	// Resolve the object's resolved owner for annotation comparison
+	objResolvedOwner := ResolveOwner(g, target)
 	for _, attr := range obj.Attrs {
 		info := ParseAttrInfo(attr.Value)
 		def := g.LookupAttrDef(attr.Number)
-		// Use CanReadAttr for proper permission enforcement (replaces isInternalAttr)
 		if !CanReadAttr(g, d.Player, target, def, info.Flags, info.Owner) {
 			continue
 		}
@@ -1751,6 +1797,13 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 			name = fmt.Sprintf("ATTR_%d", attr.Number)
 		}
 		text := eval.StripAttrPrefix(attr.Value)
+		// C TinyMUSH: if attr has AF_IS_LOCK, parse through boolexp for human-readable names
+		if def != nil && def.Flags&gamedb.AFIsLock != 0 && text != "" {
+			parsed := ParseBoolExp(g, d.Player, text)
+			if parsed != nil {
+				text = UnparseBoolExp(g, parsed)
+			}
+		}
 		if truncLen > 0 && len(text) > truncLen {
 			text = text[:truncLen] + "..."
 		}
@@ -1758,7 +1811,7 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		showAnnotation := Controls(g, d.Player, target) || info.Owner == d.Player
 		annotation := ""
 		if showAnnotation {
-			annotation = attrAnnotation(g, d.Player, info, def)
+			annotation = attrAnnotation(g, d.Player, target, objResolvedOwner, info, def)
 		}
 		if annotation != "" {
 			d.Send(fmt.Sprintf("  %s %s: %s", name, annotation, text))
@@ -1767,31 +1820,79 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		}
 	}
 
-	// Contents section
-	examContents := g.DB.SafeContents(target)
-	if len(examContents) > 0 {
-		d.Send("Contents:")
-		for _, cRef := range examContents {
-			if cObj, ok := g.DB.Objects[cRef]; ok {
-				d.Send(fmt.Sprintf("%s(#%d%s)", cObj.Name, cRef, flagString(cObj)))
+	if control {
+		// Contents section
+		examContents := g.DB.SafeContents(target)
+		if len(examContents) > 0 {
+			d.Send("Contents:")
+			for _, cRef := range examContents {
+				d.Send(g.unparseObject(d.Player, cRef))
 			}
 		}
-	}
 
-	// Exits section (only for rooms — for exits, Exits field is the source room, already shown above)
-	if obj.ObjType() != gamedb.TypeExit && obj.Exits != gamedb.Nothing {
-		d.Send("Exits:")
-		seenEx := make(map[gamedb.DBRef]bool)
-		exitRef := obj.Exits
-		for exitRef != gamedb.Nothing && !seenEx[exitRef] {
-			seenEx[exitRef] = true
-			if eObj, ok := g.DB.Objects[exitRef]; ok {
-				d.Send(fmt.Sprintf("%s(#%d%s)", eObj.Name, exitRef, flagString(eObj)))
-				exitRef = eObj.Next
+		// Type-specific sections (matching C TinyMUSH order)
+		switch obj.ObjType() {
+		case gamedb.TypeRoom:
+			// Exits
+			if obj.Exits != gamedb.Nothing {
+				d.Send("Exits:")
+				seenEx := make(map[gamedb.DBRef]bool)
+				exitRef := obj.Exits
+				for exitRef != gamedb.Nothing && !seenEx[exitRef] {
+					seenEx[exitRef] = true
+					if eObj, ok := g.DB.Objects[exitRef]; ok {
+						d.Send(g.unparseObject(d.Player, exitRef))
+						exitRef = eObj.Next
+					} else {
+						break
+					}
+				}
 			} else {
-				break
+				d.Send("No exits.")
+			}
+			// Dropto
+			if obj.Link != gamedb.Nothing {
+				d.Send(fmt.Sprintf("Dropped objects go to: %s", g.unparseObject(d.Player, obj.Link)))
+			}
+
+		case gamedb.TypeThing, gamedb.TypePlayer:
+			// Exits
+			if obj.Exits != gamedb.Nothing {
+				d.Send("Exits:")
+				seenEx := make(map[gamedb.DBRef]bool)
+				exitRef := obj.Exits
+				for exitRef != gamedb.Nothing && !seenEx[exitRef] {
+					seenEx[exitRef] = true
+					if eObj, ok := g.DB.Objects[exitRef]; ok {
+						d.Send(g.unparseObject(d.Player, exitRef))
+						exitRef = eObj.Next
+					} else {
+						break
+					}
+				}
+			} else {
+				d.Send("No exits.")
+			}
+			// Home
+			d.Send(fmt.Sprintf("Home: %s", g.unparseObject(d.Player, obj.Link)))
+			// Location
+			if obj.Location != gamedb.Nothing {
+				d.Send(fmt.Sprintf("Location: %s", g.unparseObject(d.Player, obj.Location)))
+			}
+
+		case gamedb.TypeExit:
+			// Source
+			d.Send(fmt.Sprintf("Source: %s", g.unparseObject(d.Player, obj.Exits)))
+			// Destination
+			if obj.Location == gamedb.Nothing {
+				d.Send("Destination: *UNLINKED*")
+			} else {
+				d.Send(fmt.Sprintf("Destination: %s", g.unparseObject(d.Player, obj.Location)))
 			}
 		}
+	} else {
+		// Non-controlling viewer: show "Owned by Name"
+		d.Send(fmt.Sprintf("Owned by %s", g.PlayerName(obj.Owner)))
 	}
 }
 
@@ -1799,10 +1900,11 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 // C TinyMUSH's view_atr shows: [#owner instance_flags(def_flags)]
 // Per-instance flags (aflags) and definition flags (ap->flags) are shown
 // separately: instance flags directly, definition flags in parentheses.
-func attrAnnotation(g *Game, player gamedb.DBRef, info AttrInfo, def *gamedb.AttrDef) string {
+// Owner is only shown when it differs from the object's resolved owner.
+func attrAnnotation(g *Game, player, target, objResolvedOwner gamedb.DBRef, info AttrInfo, def *gamedb.AttrDef) string {
 	var parts []string
-	// Show owner if different from object owner (non-default)
-	if info.Owner != gamedb.Nothing && info.Owner != gamedb.DBRef(0) {
+	// Show owner only if different from object's resolved owner
+	if info.Owner != gamedb.Nothing && info.Owner != gamedb.DBRef(0) && info.Owner != objResolvedOwner {
 		parts = append(parts, fmt.Sprintf("#%d", info.Owner))
 	}
 
@@ -1918,65 +2020,126 @@ func typeChar(t gamedb.ObjectType) string {
 	}
 }
 
-// flagLetters maps flag word/bit pairs to their TinyMUSH display character.
-// Ordered to produce consistent output matching TinyMUSH examine.
-var flagLetters = []struct {
-	Word   int
-	Bit    int
-	Letter byte
-}{
-	// Flag word 0 — uppercase letters
-	{0, gamedb.FlagDark, 'D'},
-	{0, gamedb.FlagHaven, 'H'},
-	{0, gamedb.FlagInherit, 'I'},
-	{0, gamedb.FlagJumpOK, 'J'},
-	{0, gamedb.FlagLinkOK, 'L'},
-	{0, gamedb.FlagMonitor, 'M'},
-	{0, gamedb.FlagNoSpoof, 'N'},
-	{0, gamedb.FlagOpaque, 'O'},
-	{0, gamedb.FlagQuiet, 'Q'},
-	{0, gamedb.FlagSticky, 'S'},
-	{0, gamedb.FlagTrace, 'T'},
-	{0, gamedb.FlagVisual, 'V'},
-	{0, gamedb.FlagWizard, 'W'},
-	{0, gamedb.FlagRoyalty, 'Z'},
-	{0, gamedb.FlagVerbose, 'v'},
-	{0, gamedb.FlagGoing, 'G'},
-	{0, gamedb.FlagChownOK, 'C'},
-	{0, gamedb.FlagEnterOK, 'e'},
-	{0, gamedb.FlagImmortal, 'i'},
-	{0, gamedb.FlagMyopic, 'm'},
-	{0, gamedb.FlagPuppet, 'p'},
-	{0, gamedb.FlagRobot, 'r'},
-	{0, gamedb.FlagSafe, 's'},
-	{0, gamedb.FlagHalt, 'h'},
-	{0, gamedb.FlagDestroyOK, 'd'},
-	{0, gamedb.FlagSeeThru, 't'},
-	{0, gamedb.FlagHearThru, 'a'},
-	{0, gamedb.FlagHasStartup, '='},
-	// Flag word 1 — lowercase letters and symbols
-	{1, gamedb.Flag2Abode, 'A'},
-	{1, gamedb.Flag2Unfindable, 'U'},
-	{1, gamedb.Flag2ParentOK, 'Y'},
-	{1, gamedb.Flag2Light, 'l'},
-	{1, gamedb.Flag2Connected, 'c'},
-	{1, gamedb.Flag2Slave, 'x'},
-	{1, gamedb.Flag2Ansi, 'X'},
-	{1, gamedb.Flag2Bounce, 'b'},
-	{1, gamedb.Flag2ControlOK, 'z'},
-	{1, gamedb.Flag2StopMatch, '!'},
-	{1, gamedb.Flag2NoBLeed, '-'},
-	{1, gamedb.Flag2Gagged, 'j'},
-	{1, gamedb.Flag2Fixed, 'f'},
-	{1, gamedb.Flag2Staff, 'w'},
-	{1, gamedb.Flag2Watcher, '+'},
-	{1, gamedb.Flag2HasCommands, '$'},
-	{1, gamedb.Flag2HasDaily, '*'},
-	{1, gamedb.Flag2HasListen, '@'},
-	{1, gamedb.Flag2HTML, '~'},
-	{1, gamedb.Flag2ZoneParent, 'o'},
-	{1, gamedb.Flag2Blind, 'B'},
-	{1, gamedb.Flag2Floating, 'F'},
+// Flag visibility permissions for flag_description
+const (
+	flagPermPublic = 0 // Anyone can see
+	flagPermWizard = 1 // Only wizards can see
+	flagPermGod    = 2 // Only God can see
+)
+
+// flagEntry maps flag word/bit pairs to their TinyMUSH display character and full name.
+// Ordered to match C TinyMUSH gen_flags[] table for consistent output.
+type flagEntry struct {
+	Word     int
+	Bit      int
+	Letter   byte
+	Name     string
+	ListPerm int // flagPermPublic/Wizard/God
+}
+
+var flagLetters = []flagEntry{
+	// Matches C TinyMUSH gen_flags[] order exactly
+	{1, gamedb.Flag2Abode, 'A', "ABODE", flagPermPublic},
+	{1, gamedb.Flag2Blind, 'B', "BLIND", flagPermPublic},
+	{0, gamedb.FlagChownOK, 'C', "CHOWN_OK", flagPermPublic},
+	{0, gamedb.FlagDark, 'D', "DARK", flagPermPublic},
+	{1, gamedb.Flag2Floating, 'F', "FREE", flagPermPublic},
+	{0, gamedb.FlagGoing, 'G', "GOING", flagPermPublic},
+	{0, gamedb.FlagHaven, 'H', "HAVEN", flagPermPublic},
+	{0, gamedb.FlagInherit, 'I', "INHERIT", flagPermPublic},
+	{0, gamedb.FlagJumpOK, 'J', "JUMP_OK", flagPermPublic},
+	{1, gamedb.Flag2Key, 'K', "KEY", flagPermPublic},
+	{0, gamedb.FlagLinkOK, 'L', "LINK_OK", flagPermPublic},
+	{0, gamedb.FlagMonitor, 'M', "MONITOR", flagPermPublic},
+	{0, gamedb.FlagNoSpoof, 'N', "NOSPOOF", flagPermWizard},
+	{0, gamedb.FlagOpaque, 'O', "OPAQUE", flagPermPublic},
+	{0, gamedb.FlagQuiet, 'Q', "QUIET", flagPermPublic},
+	{0, gamedb.FlagSticky, 'S', "STICKY", flagPermPublic},
+	{0, gamedb.FlagTrace, 'T', "TRACE", flagPermPublic},
+	{1, gamedb.Flag2Unfindable, 'U', "UNFINDABLE", flagPermPublic},
+	{0, gamedb.FlagVisual, 'V', "VISUAL", flagPermPublic},
+	{0, gamedb.FlagWizard, 'W', "WIZARD", flagPermPublic},
+	{1, gamedb.Flag2Ansi, 'X', "ANSI", flagPermPublic},
+	{1, gamedb.Flag2ParentOK, 'Y', "PARENT_OK", flagPermPublic},
+	{0, gamedb.FlagRoyalty, 'Z', "ROYALTY", flagPermPublic},
+	{0, gamedb.FlagHearThru, 'a', "AUDIBLE", flagPermPublic},
+	{1, gamedb.Flag2Bounce, 'b', "BOUNCE", flagPermPublic},
+	{1, gamedb.Flag2Connected, 'c', "CONNECTED", flagPermPublic},
+	{0, gamedb.FlagDestroyOK, 'd', "DESTROY_OK", flagPermPublic},
+	{0, gamedb.FlagEnterOK, 'e', "ENTER_OK", flagPermPublic},
+	{1, gamedb.Flag2Fixed, 'f', "FIXED", flagPermPublic},
+	{0, gamedb.FlagHalt, 'h', "HALTED", flagPermPublic},
+	{0, gamedb.FlagImmortal, 'i', "IMMORTAL", flagPermPublic},
+	{1, gamedb.Flag2Gagged, 'j', "GAGGED", flagPermPublic},
+	{1, gamedb.Flag2Light, 'l', "LIGHT", flagPermPublic},
+	{0, gamedb.FlagMyopic, 'm', "MYOPIC", flagPermPublic},
+	{1, gamedb.Flag2ZoneParent, 'o', "ZONE", flagPermPublic},
+	{0, gamedb.FlagPuppet, 'p', "PUPPET", flagPermPublic},
+	{0, gamedb.FlagTerse, 'q', "TERSE", flagPermPublic},
+	{0, gamedb.FlagRobot, 'r', "ROBOT", flagPermPublic},
+	{0, gamedb.FlagSafe, 's', "SAFE", flagPermPublic},
+	{0, gamedb.FlagSeeThru, 't', "TRANSPARENT", flagPermPublic},
+	{0, gamedb.FlagVerbose, 'v', "VERBOSE", flagPermPublic},
+	{1, gamedb.Flag2Staff, 'w', "STAFF", flagPermPublic},
+	{1, gamedb.Flag2Slave, 'x', "SLAVE", flagPermWizard},
+	{1, gamedb.Flag2ControlOK, 'z', "CONTROL_OK", flagPermPublic},
+	{1, gamedb.Flag2StopMatch, '!', "STOP", flagPermPublic},
+	{1, gamedb.Flag2HasCommands, '$', "COMMANDS", flagPermPublic},
+	{1, gamedb.Flag2NoBLeed, '-', "NOBLEED", flagPermPublic},
+	{1, gamedb.Flag2Watcher, '+', "WATCHER", flagPermPublic},
+	{1, gamedb.Flag2HasDaily, '*', "HAS_DAILY", flagPermGod},
+	{0, gamedb.FlagHasStartup, '=', "HAS_STARTUP", flagPermGod},
+	{1, gamedb.Flag2HasFwd, '&', "HAS_FORWARDLIST", flagPermGod},
+	{1, gamedb.Flag2HasListen, '@', "HAS_LISTEN", flagPermGod},
+	{1, gamedb.Flag2HTML, '~', "HTML", flagPermPublic},
+}
+
+// powerNameEntry maps power word/bit pairs to their TinyMUSH display name.
+// Ordered to match C TinyMUSH gen_powers[] table.
+type powerNameEntry struct {
+	Word int // 0=Powers[0], 1=Powers[1]
+	Bit  int
+	Name string
+}
+
+var powerNames = []powerNameEntry{
+	{0, gamedb.PowAnnounce, "announce"},
+	{0, gamedb.PowMdarkAttr, "attr_read"},
+	{0, gamedb.PowWizAttr, "attr_write"},
+	{0, gamedb.PowBoot, "boot"},
+	{1, gamedb.Pow2Builder, "builder"},
+	{0, gamedb.PowChownAny, "chown_anything"},
+	{1, gamedb.Pow2Cloak, "cloak"},
+	{0, gamedb.PowCommAll, "comm_all"},
+	{0, gamedb.PowControlAll, "control_all"},
+	{0, gamedb.PowWizardWho, "expanded_who"},
+	{0, gamedb.PowFindUnfind, "find_unfindable"},
+	{0, gamedb.PowFreeMoney, "free_money"},
+	{0, gamedb.PowFreeQuota, "free_quota"},
+	{0, gamedb.PowGuest, "guest"},
+	{0, gamedb.PowHalt, "halt"},
+	{0, gamedb.PowHide, "hide"},
+	{0, gamedb.PowIdle, "idle"},
+	{1, gamedb.Pow2LinkHome, "link_any_home"},
+	{1, gamedb.Pow2LinkToAny, "link_to_anything"},
+	{1, gamedb.Pow2LinkVar, "link_variable"},
+	{0, gamedb.PowLongfingers, "long_fingers"},
+	{0, gamedb.PowNoDestroy, "no_destroy"},
+	{1, gamedb.Pow2OpenAnyLoc, "open_anywhere"},
+	{0, gamedb.PowPassLocks, "pass_locks"},
+	{0, gamedb.PowPoll, "poll"},
+	{0, gamedb.PowProg, "prog"},
+	{0, gamedb.PowChgQuotas, "quota"},
+	{0, gamedb.PowSearch, "search"},
+	{0, gamedb.PowExamAll, "see_all"},
+	{0, gamedb.PowSeeQueue, "see_queue"},
+	{0, gamedb.PowSeeHidden, "see_hidden"},
+	{0, gamedb.PowStatAny, "stat_any"},
+	{0, gamedb.PowSteal, "steal_money"},
+	{0, gamedb.PowTelAnywhr, "tel_anywhere"},
+	{0, gamedb.PowTelUnrst, "tel_anything"},
+	{0, gamedb.PowUnkillable, "unkillable"},
+	{0, gamedb.PowWatch, "watch_logins"},
 }
 
 func flagString(obj *gamedb.Object) string {
@@ -1997,6 +2160,89 @@ func flagString(obj *gamedb.Object) string {
 		}
 	}
 	return buf.String()
+}
+
+// flagDescription produces C TinyMUSH's flag_description output:
+// "Type: THING Flags: DESTROY_OK ENTER_OK COMMANDS"
+// Full flag names, filtered by viewer's permission level.
+func flagDescription(g *Game, player gamedb.DBRef, obj *gamedb.Object) string {
+	isWiz := Wizard(g, player)
+	isGod := IsGod(g, player)
+	var buf strings.Builder
+	buf.WriteString("Type: ")
+	buf.WriteString(obj.ObjType().String())
+	buf.WriteString(" Flags:")
+	for _, fl := range flagLetters {
+		hasFlag := false
+		if fl.Word == 0 {
+			hasFlag = obj.HasFlag(fl.Bit)
+		} else if fl.Word == 1 {
+			hasFlag = obj.HasFlag2(fl.Bit)
+		}
+		if !hasFlag {
+			continue
+		}
+		// Permission check
+		if fl.ListPerm == flagPermWizard && !isWiz {
+			continue
+		}
+		if fl.ListPerm == flagPermGod && !isGod {
+			continue
+		}
+		buf.WriteByte(' ')
+		buf.WriteString(fl.Name)
+	}
+	return buf.String()
+}
+
+// powerDescription produces C TinyMUSH's power_description output:
+// "Powers: see_all boot halt"
+// Returns empty string if no powers are set.
+func powerDescription(obj *gamedb.Object) string {
+	var buf strings.Builder
+	buf.WriteString("Powers:")
+	hasPower := false
+	for _, pe := range powerNames {
+		if obj.HasPower(pe.Word, pe.Bit) {
+			buf.WriteByte(' ')
+			buf.WriteString(pe.Name)
+			hasPower = true
+		}
+	}
+	if !hasPower {
+		return ""
+	}
+	return buf.String()
+}
+
+// unparseObject produces C TinyMUSH's unparse_object output:
+// "Name(#dbref flags)" if examinable or has visible flags,
+// "*NOTHING*" for Nothing, "*HOME*" for Home, "*VARIABLE*" for Ambiguous.
+func (g *Game) unparseObject(player, target gamedb.DBRef) string {
+	switch target {
+	case gamedb.Nothing:
+		return "*NOTHING*"
+	case gamedb.Home:
+		return "*HOME*"
+	case gamedb.Ambiguous:
+		return "*VARIABLE*"
+	}
+	obj, ok := g.DB.Objects[target]
+	if !ok {
+		return fmt.Sprintf("*ILLEGAL*(#%d)", target)
+	}
+	if obj.ObjType() == gamedb.TypeGarbage {
+		return fmt.Sprintf("*GARBAGE*(#%d%s)", target, flagString(obj))
+	}
+	// C: show dbref+flags if examinable or has any of CHOWN_OK/JUMP_OK/LINK_OK/DESTROY_OK/ABODE
+	showFlags := Examinable(g, player, target) ||
+		obj.HasFlag(gamedb.FlagChownOK) || obj.HasFlag(gamedb.FlagJumpOK) ||
+		obj.HasFlag(gamedb.FlagLinkOK) || obj.HasFlag(gamedb.FlagDestroyOK) ||
+		obj.HasFlag2(gamedb.Flag2Abode)
+	if showFlags {
+		return fmt.Sprintf("%s(#%d%s)", obj.Name, target, flagString(obj))
+	}
+	return obj.Name
 }
 
 // isInternalAttr returns true for attributes that should never be shown

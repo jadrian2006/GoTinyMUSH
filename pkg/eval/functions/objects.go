@@ -289,41 +289,73 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1 NOT FOUND"); return }
 
-	// Build flag string like TinyMUSH does
+	// Type letter first
 	switch obj.ObjType() {
 	case gamedb.TypeRoom: buf.WriteByte('R')
 	case gamedb.TypeExit: buf.WriteByte('E')
 	case gamedb.TypePlayer: buf.WriteByte('P')
 	default: // THING has no letter
 	}
+
+	// Flag characters in C TinyMUSH gen_flags[] order
 	f1 := obj.Flags[0]
-	if f1&gamedb.FlagWizard != 0 { buf.WriteByte('W') }
+	f2 := obj.Flags[1]
+	// Uppercase flags (gen_flags order: A B C D F G H I J K L M N O Q S T U V W X Y Z)
+	if f2&gamedb.Flag2Abode != 0 { buf.WriteByte('A') }
+	if f2&gamedb.Flag2Blind != 0 { buf.WriteByte('B') }
+	if f1&gamedb.FlagChownOK != 0 { buf.WriteByte('C') }
 	if f1&gamedb.FlagDark != 0 { buf.WriteByte('D') }
+	if f2&gamedb.Flag2Floating != 0 { buf.WriteByte('F') }
+	if f1&gamedb.FlagGoing != 0 { buf.WriteByte('G') }
 	if f1&gamedb.FlagHaven != 0 { buf.WriteByte('H') }
-	if f1&gamedb.FlagHalt != 0 { buf.WriteByte('h') }
-	if f1&gamedb.FlagSafe != 0 { buf.WriteByte('s') }
 	if f1&gamedb.FlagInherit != 0 { buf.WriteByte('I') }
+	if f1&gamedb.FlagJumpOK != 0 { buf.WriteByte('J') }
+	if f2&gamedb.Flag2Key != 0 { buf.WriteByte('K') }
+	if f1&gamedb.FlagLinkOK != 0 { buf.WriteByte('L') }
+	if f1&gamedb.FlagMonitor != 0 { buf.WriteByte('M') }
 	if f1&gamedb.FlagNoSpoof != 0 { buf.WriteByte('N') }
-	if f1&gamedb.FlagVisual != 0 { buf.WriteByte('V') }
 	if f1&gamedb.FlagOpaque != 0 { buf.WriteByte('O') }
 	if f1&gamedb.FlagQuiet != 0 { buf.WriteByte('Q') }
-	if f1&gamedb.FlagPuppet != 0 { buf.WriteByte('p') }
 	if f1&gamedb.FlagSticky != 0 { buf.WriteByte('S') }
-	if f1&gamedb.FlagMonitor != 0 { buf.WriteByte('M') }
-	if f1&gamedb.FlagRobot != 0 { buf.WriteByte('r') }
-	if f1&gamedb.FlagRoyalty != 0 { buf.WriteByte('Z') }
-	if f1&gamedb.FlagEnterOK != 0 { buf.WriteByte('e') }
-	if f1&gamedb.FlagLinkOK != 0 { buf.WriteByte('L') }
-	if f1&gamedb.FlagJumpOK != 0 { buf.WriteByte('J') }
-	if f1&gamedb.FlagVerbose != 0 { buf.WriteByte('v') }
-	if f1&gamedb.FlagTerse != 0 { buf.WriteByte('t') }
 	if f1&gamedb.FlagTrace != 0 { buf.WriteByte('T') }
-	if f1&gamedb.FlagHasStartup != 0 { buf.WriteByte('c') }
-	// Flag2
-	f2 := obj.Flags[1]
-	if f2&gamedb.Flag2Ansi != 0 { buf.WriteByte('X') }
-	if f2&gamedb.Flag2Connected != 0 { buf.WriteByte('C') }
 	if f2&gamedb.Flag2Unfindable != 0 { buf.WriteByte('U') }
+	if f1&gamedb.FlagVisual != 0 { buf.WriteByte('V') }
+	if f1&gamedb.FlagWizard != 0 { buf.WriteByte('W') }
+	if f2&gamedb.Flag2Ansi != 0 { buf.WriteByte('X') }
+	if f2&gamedb.Flag2ParentOK != 0 { buf.WriteByte('Y') }
+	if f1&gamedb.FlagRoyalty != 0 { buf.WriteByte('Z') }
+	// Lowercase flags (gen_flags order: a b c d e f g h i j k l m n o p q r s t u v w x y z)
+	if f1&gamedb.FlagHearThru != 0 { buf.WriteByte('a') }
+	if f2&gamedb.Flag2Bounce != 0 { buf.WriteByte('b') }
+	if f2&gamedb.Flag2Connected != 0 { buf.WriteByte('c') }
+	if f1&gamedb.FlagDestroyOK != 0 { buf.WriteByte('d') }
+	if f1&gamedb.FlagEnterOK != 0 { buf.WriteByte('e') }
+	if f2&gamedb.Flag2Fixed != 0 { buf.WriteByte('f') }
+	if f1&gamedb.FlagHalt != 0 { buf.WriteByte('h') }
+	if f1&gamedb.FlagImmortal != 0 { buf.WriteByte('i') }
+	if f2&gamedb.Flag2Gagged != 0 { buf.WriteByte('j') }
+	if f2&gamedb.Flag2Light != 0 { buf.WriteByte('l') }
+	if f1&gamedb.FlagMyopic != 0 { buf.WriteByte('m') }
+	if f2&gamedb.Flag2ZoneParent != 0 { buf.WriteByte('o') }
+	if f1&gamedb.FlagPuppet != 0 { buf.WriteByte('p') }
+	if f1&gamedb.FlagTerse != 0 { buf.WriteByte('q') }
+	if f1&gamedb.FlagRobot != 0 { buf.WriteByte('r') }
+	if f1&gamedb.FlagSafe != 0 { buf.WriteByte('s') }
+	if f1&gamedb.FlagSeeThru != 0 { buf.WriteByte('t') }
+	if f1&gamedb.FlagVerbose != 0 { buf.WriteByte('v') }
+	if f2&gamedb.Flag2Staff != 0 { buf.WriteByte('w') }
+	if f2&gamedb.Flag2Slave != 0 { buf.WriteByte('x') }
+	if f2&gamedb.Flag2ControlOK != 0 { buf.WriteByte('z') }
+	// Symbol flags
+	if f2&gamedb.Flag2StopMatch != 0 { buf.WriteByte('!') }
+	if f2&gamedb.Flag2HasCommands != 0 { buf.WriteByte('$') }
+	if f2&gamedb.Flag2NoBLeed != 0 { buf.WriteByte('-') }
+	if f2&gamedb.Flag2Watcher != 0 { buf.WriteByte('+') }
+	if f2&gamedb.Flag2HasDaily != 0 { buf.WriteByte('*') }
+	if f1&gamedb.FlagHasStartup != 0 { buf.WriteByte('=') }
+	if f2&gamedb.Flag2HasFwd != 0 { buf.WriteByte('&') }
+	if f2&gamedb.Flag2HasListen != 0 { buf.WriteByte('@') }
+	if f2&gamedb.Flag2HTML != 0 { buf.WriteByte('~') }
 }
 
 // knownFlags maps flag names to [word, bitmask]. Word -1 means type check.
@@ -667,29 +699,29 @@ var lockNameTable = []struct {
 	minUniq int
 	attr    int
 }{
-	{"chownlock", 2, 59},     // A_LCHOWN
-	{"controllock", 2, 69},   // A_LCONTROL
+	{"chownlock", 2, 217},    // A_LCHOWN
+	{"controllock", 2, 99},   // A_LCONTROL
 	{"defaultlock", 1, 42},   // A_LOCK
-	{"darklock", 2, 85},      // A_LDARK
-	{"droplock", 2, 54},      // A_LDROP
-	{"enterlock", 1, 53},     // A_LENTER
-	{"givelock", 2, 55},      // A_LGIVE
-	{"heardlock", 5, 233},    // A_LHEARD
-	{"hearslock", 5, 234},    // A_LHEARS
-	{"knownlock", 5, 237},    // A_LKNOWN
-	{"knowslock", 5, 238},    // A_LKNOWS
-	{"leavelock", 2, 56},     // A_LLEAVE
-	{"linklock", 2, 57},      // A_LLINK
-	{"movedlock", 5, 235},    // A_LMOVED
-	{"moveslock", 5, 236},    // A_LMOVES
-	{"openlock", 1, 78},      // A_LOPEN
+	{"darklock", 2, 219},     // A_LDARK
+	{"droplock", 2, 86},      // A_LDROP
+	{"enterlock", 1, 59},     // A_LENTER
+	{"givelock", 2, 63},      // A_LGIVE
+	{"heardlock", 5, 224},    // A_LHEARD
+	{"hearslock", 5, 227},    // A_LHEARS
+	{"knownlock", 5, 223},    // A_LKNOWN
+	{"knowslock", 5, 226},    // A_LKNOWS
+	{"leavelock", 2, 60},     // A_LLEAVE
+	{"linklock", 2, 93},      // A_LLINK
+	{"movedlock", 5, 225},    // A_LMOVED
+	{"moveslock", 5, 228},    // A_LMOVES
+	{"openlock", 1, 144},     // A_LOPEN
 	{"pagelock", 3, 61},      // A_LPAGE
 	{"parentlock", 3, 98},    // A_LPARENT
-	{"receivelock", 1, 58},   // A_LRECEIVE
-	{"teloutlock", 2, 63},    // A_LTELOUT
-	{"tportlock", 2, 60},     // A_LTPORT
+	{"receivelock", 1, 87},   // A_LRECEIVE
+	{"teloutlock", 2, 94},    // A_LTELOUT
+	{"tportlock", 2, 85},     // A_LTPORT
 	{"uselock", 1, 62},       // A_LUSE
-	{"userlock", 4, 86},      // A_LUSER
+	{"userlock", 4, 97},      // A_LUSER
 	{"speechlock", 1, 209},   // A_LSPEECH
 }
 
@@ -773,6 +805,10 @@ func fnLockFn(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	}
 	if ctx.GameState != nil {
 		text := ctx.GameState.GetAttrTextGS(ref, lockAttr)
+		// Fall back to obj.Lock (header BoolExp) when attr 42 is empty
+		if text == "" && lockAttr == 42 {
+			text = ctx.GameState.GetObjLockStr(ref)
+		}
 		buf.WriteString(text)
 	}
 }

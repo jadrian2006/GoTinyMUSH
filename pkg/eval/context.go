@@ -172,6 +172,9 @@ type GameState interface {
 	SetAttrDefFlags(player gamedb.DBRef, attrName, flags string) string
 	// IsWizard returns true if the player is an effective wizard.
 	IsWizard(player gamedb.DBRef) bool
+	// GetObjLockStr returns the serialized default lock (obj.Lock BoolExp) for an object.
+	// Returns "" if no header lock is set. Used as fallback when attr 42 is empty.
+	GetObjLockStr(obj gamedb.DBRef) string
 }
 
 // EvalContext is the execution context for MUSH expression evaluation.
