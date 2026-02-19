@@ -2713,12 +2713,24 @@ func (g *Game) SetAttr(obj gamedb.DBRef, attrNum int, value string) {
 
 	for i, attr := range o.Attrs {
 		if attr.Number == attrNum {
+			if value == "" {
+				// C TinyMUSH: atr_add with empty value calls atr_clr to delete the attr.
+				// Remove the attribute so parent chain inheritance works correctly.
+				o.Attrs = append(o.Attrs[:i], o.Attrs[i+1:]...)
+				g.PersistObject(o)
+				return
+			}
 			existing := ParseAttrInfo(attr.Value)
 			fullValue := fmt.Sprintf("\x01%s:%d:%s", owner, existing.Flags, value)
 			o.Attrs[i].Value = fullValue
 			g.PersistObject(o)
 			return
 		}
+	}
+
+	// If value is empty and attr doesn't exist, nothing to do.
+	if value == "" {
+		return
 	}
 
 	// Attribute doesn't exist on this object yet.
