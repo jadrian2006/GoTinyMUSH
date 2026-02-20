@@ -77,15 +77,20 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 		DebugLog("DOLLAR search list (%d objs): %v", len(searchObjs), names)
 	}
 
-	// Search each object's attributes
+	// Search each object's attributes.
+	// In C TinyMUSH, ALL matching $-commands across all objects fire
+	// (they are all queued), not just the first match found.
+	found := false
 	for _, objRef := range searchObjs {
 		if g.matchDollarOnObject(objRef, player, cause, input) {
 			DebugLog("DOLLAR MATCHED on #%d", objRef)
-			return true
+			found = true
 		}
 	}
-	DebugLog("DOLLAR NO MATCH for %q", input)
-	return false
+	if !found {
+		DebugLog("DOLLAR NO MATCH for %q", input)
+	}
+	return found
 }
 
 // addZoneObjects appends a zone object and its contents to the search list.
@@ -96,6 +101,8 @@ func (g *Game) addZoneObjects(searchObjs []gamedb.DBRef, zone gamedb.DBRef) []ga
 }
 
 // matchDollarOnObject checks a single object for $-command matches.
+// In C TinyMUSH, all matching $-commands on an object fire (are queued),
+// not just the first one. This function scans all attributes and parents.
 func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input string) bool {
 	obj, ok := g.DB.Objects[objRef]
 	if !ok {
@@ -108,6 +115,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		return false
 	}
 
+	found := false
 	dollarCount := 0
 	for _, attr := range obj.Attrs {
 		text := eval.StripAttrPrefix(attr.Value)
@@ -157,7 +165,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 			g.Queue.Add(entry)
 			g.WakeQueue() // Player-initiated: process without waiting for next tick
 		}
-		return true
+		found = true
 	}
 
 	// Check parent chain
@@ -174,7 +182,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 	for parentRef != gamedb.Nothing && !visited[parentRef] {
 		visited[parentRef] = true
 		if g.matchDollarOnParent(parentRef, objRef, player, cause, input) {
-			return true
+			found = true
 		}
 		if pObj, ok := g.DB.Objects[parentRef]; ok {
 			parentRef = pObj.Parent
@@ -183,7 +191,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		}
 	}
 
-	return false
+	return found
 }
 
 // matchDollarOnParent checks a parent object's attributes, skipping AF_PRIVATE.
@@ -193,6 +201,7 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 		return false
 	}
 
+	found := false
 	dollarCount := 0
 	for _, attr := range parent.Attrs {
 		text := eval.StripAttrPrefix(attr.Value)
@@ -232,9 +241,9 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 		}
 		g.Queue.Add(entry)
 		g.WakeQueue() // Player-initiated: process without waiting for next tick
-		return true
+		found = true
 	}
-	return false
+	return found
 }
 
 // ExecuteQueueEntry executes a queued command.
