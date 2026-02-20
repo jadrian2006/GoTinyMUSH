@@ -241,7 +241,12 @@ func SerializeBoolExp(b *BoolExp) string {
 	}
 	switch b.Type {
 	case BoolAnd:
-		return SerializeBoolExp(b.Sub1) + "&" + SerializeBoolExp(b.Sub2)
+		// Wrap left child in parens if it's an OR (lower precedence)
+		left := SerializeBoolExp(b.Sub1)
+		if b.Sub1 != nil && b.Sub1.Type == BoolOr {
+			left = "(" + left + ")"
+		}
+		return left + "&" + SerializeBoolExp(b.Sub2)
 	case BoolOr:
 		return SerializeBoolExp(b.Sub1) + "|" + SerializeBoolExp(b.Sub2)
 	case BoolNot:

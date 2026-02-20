@@ -597,7 +597,7 @@ func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 
 	parts := splitCommaRespectingBraces(body)
 
-	firstOnly := HasSwitch(switches, "first")
+	matchAll := HasSwitch(switches, "all")
 	matched := false
 
 
@@ -611,7 +611,7 @@ func (g *Game) handleSwitchDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 			action = strings.ReplaceAll(action, "#$", expr)
 			g.dispatchActionBody(ctx, entry, descs, action)
 			matched = true
-			if firstOnly {
+			if !matchAll {
 				return
 			}
 		}

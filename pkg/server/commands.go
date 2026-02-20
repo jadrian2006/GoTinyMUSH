@@ -94,6 +94,7 @@ func InitCommands() map[string]*Command {
 	// Eval / softcode
 	register("@eval", cmdEval)
 	registerNG("@switch", cmdSwitch)
+	registerNG("@swi", cmdSwitch)
 	registerNG("@dolist", cmdDolist)
 	registerNG("@program", cmdProgram)
 	register("@quitprogram", cmdQuitProgram)

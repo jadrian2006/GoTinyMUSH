@@ -411,7 +411,12 @@ func UnparseBoolExp(g *Game, b *gamedb.BoolExp) string {
 	}
 	switch b.Type {
 	case gamedb.BoolAnd:
-		return UnparseBoolExp(g, b.Sub1) + "&" + UnparseBoolExp(g, b.Sub2)
+		// Wrap left child in parens if it's an OR (lower precedence)
+		left := UnparseBoolExp(g, b.Sub1)
+		if b.Sub1 != nil && b.Sub1.Type == gamedb.BoolOr {
+			left = "(" + left + ")"
+		}
+		return left + "&" + UnparseBoolExp(g, b.Sub2)
 	case gamedb.BoolOr:
 		return UnparseBoolExp(g, b.Sub1) + "|" + UnparseBoolExp(g, b.Sub2)
 	case gamedb.BoolNot:

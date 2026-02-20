@@ -351,6 +351,10 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLLeave // A_LLEAVE = 60
 	} else if HasSwitch(switches, "use") || HasSwitch(switches, "uselock") {
 		lockAttrNum = aLUse // A_LUSE = 62
+	} else if HasSwitch(switches, "give") || HasSwitch(switches, "givelock") {
+		lockAttrNum = aLGive // A_LGIVE = 63
+	} else if HasSwitch(switches, "receive") || HasSwitch(switches, "receivelock") {
+		lockAttrNum = aLRecv // A_LRECEIVE = 87
 	}
 	// Parse lock expression at set time to resolve names (me, here, etc.) to dbrefs.
 	// This matches C TinyMUSH behavior where lock keys are stored as parsed boolexps.
@@ -381,6 +385,10 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLLeave // A_LLEAVE = 60
 	} else if HasSwitch(switches, "use") || HasSwitch(switches, "uselock") {
 		lockAttrNum = aLUse // A_LUSE = 62
+	} else if HasSwitch(switches, "give") || HasSwitch(switches, "givelock") {
+		lockAttrNum = aLGive // A_LGIVE = 63
+	} else if HasSwitch(switches, "receive") || HasSwitch(switches, "receivelock") {
+		lockAttrNum = aLRecv // A_LRECEIVE = 87
 	}
 	g.SetAttr(target, lockAttrNum, "")
 	d.Send("Unlocked.")
