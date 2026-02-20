@@ -111,6 +111,7 @@ func InitCommands() map[string]*Command {
 	registerNG("@drain", cmdDrain)
 	registerNG("@edit", cmdEdit)
 	registerNG("@admin", cmdAdmin)
+	registerNG("@verb", cmdVerb)
 
 	// Attribute management (no guest)
 	registerNG("@attribute", cmdAttribute)
@@ -2511,6 +2512,11 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 	// Search room contents
 	loc := playerObj.Location
 	if found := searchContents(g.DB.SafeContents(loc)); found != gamedb.Nothing {
+		return found
+	}
+
+	// Search room exits (C TinyMUSH match_exit searches exits by name/alias)
+	if found := searchContents(g.DB.SafeExits(loc)); found != gamedb.Nothing {
 		return found
 	}
 

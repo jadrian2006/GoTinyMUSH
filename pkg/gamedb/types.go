@@ -358,6 +358,27 @@ func (db *Database) SafeContents(obj DBRef) []DBRef {
 	return result
 }
 
+// SafeExits returns the exit chain for an object as a slice, with cycle protection.
+func (db *Database) SafeExits(obj DBRef) []DBRef {
+	o, ok := db.Objects[obj]
+	if !ok {
+		return nil
+	}
+	var result []DBRef
+	seen := make(map[DBRef]bool)
+	next := o.Exits
+	for next != Nothing && !seen[next] && len(result) < 10000 {
+		seen[next] = true
+		result = append(result, next)
+		if nObj, ok := db.Objects[next]; ok {
+			next = nObj.Next
+		} else {
+			break
+		}
+	}
+	return result
+}
+
 // NewDatabase creates an empty Database.
 func NewDatabase() *Database {
 	return &Database{

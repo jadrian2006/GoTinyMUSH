@@ -246,11 +246,24 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		return
 	}
 
+	// C TinyMUSH locate() flags: type filters (R,E,P,T) and scope flags (i,n,*,X, etc.)
+	// Separate type filter chars from scope/modifier chars.
+	hasTypeFilter := false
+	typeChars := ""
+	for _, ch := range typeFilter {
+		switch ch {
+		case 'R', 'E', 'P', 'T':
+			hasTypeFilter = true
+			typeChars += string(ch)
+		}
+		// Scope/modifier flags (i,n,N,X,*,a,F,L,V etc.) are ignored for type matching
+	}
+
 	matchType := func(obj *gamedb.Object) bool {
-		if typeFilter == "" {
+		if !hasTypeFilter {
 			return true
 		}
-		for _, ch := range typeFilter {
+		for _, ch := range typeChars {
 			switch ch {
 			case 'R':
 				if obj.ObjType() == gamedb.TypeRoom {
@@ -268,8 +281,6 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 				if obj.ObjType() == gamedb.TypeThing {
 					return true
 				}
-			case '*':
-				return true
 			}
 		}
 		return false

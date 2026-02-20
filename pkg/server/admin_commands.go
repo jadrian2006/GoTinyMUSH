@@ -466,14 +466,140 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 
 // --- Admin/Wizard Commands ---
 
+// cmdVerb implements @verb: a generic did_it with named attributes.
+// C TinyMUSH syntax: @verb obj = actor, what, whatdefault, owhat, owhatdefault, awhat, {args}
+// The paired format is: attr_name, default_text (used if attr is empty).
+// The +buy system uses: @verb vendor = buyer, MPAY-item, , MOPAY-item, , MAPAY-item, {buyer, cost}
+func cmdVerb(g *Game, d *Descriptor, args string, _ []string) {
+	eqIdx := strings.IndexByte(args, '=')
+	if eqIdx < 0 {
+		d.Send("Usage: @verb obj = actor, what, whatdef, owhat, owhatdef, awhat, {args}")
+		return
+	}
+
+	// Evaluate the LHS (obj) and RHS
+	ctx := MakeEvalContextWithGame(g, d.Player, func(c *eval.EvalContext) {
+		functions.RegisterAll(c)
+	})
+	objStr := ctx.Exec(strings.TrimSpace(args[:eqIdx]), eval.EvFCheck|eval.EvEval, nil)
+	rhs := strings.TrimSpace(args[eqIdx+1:])
+
+	obj := g.ResolveRef(d.Player, objStr)
+	if obj == gamedb.Nothing {
+		obj = g.MatchObject(d.Player, objStr)
+	}
+	if obj == gamedb.Nothing {
+		d.Send("I don't see that here.")
+		return
+	}
+
+	// Parse comma-separated args
+	parts := splitCommaRespectingBraces(rhs)
+
+	if len(parts) < 1 {
+		d.Send("Usage: @verb obj = actor, what, whatdef, owhat, owhatdef, awhat, {args}")
+		return
+	}
+
+	actorStr := strings.TrimSpace(parts[0])
+	actor := g.ResolveRef(d.Player, actorStr)
+	if actor == gamedb.Nothing {
+		actor = g.MatchObject(d.Player, actorStr)
+	}
+	if actor == gamedb.Nothing {
+		actor = d.Player
+	}
+
+	// Extract attribute names (may be empty)
+	// C TinyMUSH paired format: what, whatdef, owhat, owhatdef, awhat, {args}
+	getPartStr := func(idx int) string {
+		if idx < len(parts) {
+			return strings.TrimSpace(parts[idx])
+		}
+		return ""
+	}
+
+	msgAttr := getPartStr(1)    // what: Message attr to actor (like SUCC)
+	msgDef := getPartStr(2)     // whatdef: Default msg if attr empty
+	omsgAttr := getPartStr(3)   // owhat: Message attr to room (like OSUCC)
+	omsgDef := getPartStr(4)    // owhatdef: Default omsg if attr empty
+	amsgAttr := getPartStr(5)   // awhat: Action attr (like ASUCC)
+
+	// Args (last element, typically brace-wrapped like {%#, 10})
+	var verbArgs []string
+	lastPart := getPartStr(len(parts) - 1)
+	if len(lastPart) >= 2 && lastPart[0] == '{' && lastPart[len(lastPart)-1] == '}' {
+		inner := lastPart[1 : len(lastPart)-1]
+		for _, a := range strings.Split(inner, ",") {
+			verbArgs = append(verbArgs, strings.TrimSpace(a))
+		}
+	}
+
+	// Helper to resolve and evaluate a named attribute on obj, with fallback default
+	evalAttr := func(attrName, defText string) string {
+		if attrName != "" {
+			attrNum := g.LookupAttrNum(attrName)
+			if attrNum >= 0 {
+				if text := g.GetAttrText(obj, attrNum); text != "" {
+					evalCtx := MakeEvalContextForObj(g, obj, actor, func(c *eval.EvalContext) {
+						functions.RegisterAll(c)
+					})
+					return evalCtx.Exec(text, eval.EvFCheck|eval.EvEval|eval.EvStrip, verbArgs)
+				}
+			}
+		}
+		return defText
+	}
+
+	// Show message to actor (what)
+	if msg := evalAttr(msgAttr, msgDef); msg != "" {
+		g.Conns.SendToPlayer(actor, msg)
+	}
+
+	// Show omsg to room (owhat), prefixed with actor name
+	if msg := evalAttr(omsgAttr, omsgDef); msg != "" {
+		loc := g.PlayerLocation(actor)
+		if loc != gamedb.Nothing {
+			actorObj, _ := g.DB.Objects[actor]
+			prefix := ""
+			if actorObj != nil {
+				prefix = DisplayName(actorObj.Name) + " "
+			}
+			g.Conns.SendToRoomExcept(g.DB, loc, actor, prefix+msg)
+		}
+	}
+
+	// Queue the action attribute (awhat)
+	if amsgAttr != "" {
+		attrNum := g.LookupAttrNum(amsgAttr)
+		if attrNum >= 0 {
+			if text := g.GetAttrText(obj, attrNum); text != "" {
+				entry := &QueueEntry{
+					Player:  obj,
+					Cause:   actor,
+					Caller:  actor,
+					Command: text,
+					Args:    verbArgs,
+				}
+				g.Queue.Add(entry)
+			}
+		}
+	}
+}
+
 func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	// @tel dest  OR  @tel victim = dest
+	// Evaluate args (C TinyMUSH evaluates function calls before dispatch)
+	ctx := MakeEvalContextWithGame(g, d.Player, func(c *eval.EvalContext) {
+		functions.RegisterAll(c)
+	})
+
 	var victim gamedb.DBRef
 	var destStr string
 
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
-		victimStr := strings.TrimSpace(args[:eqIdx])
-		destStr = strings.TrimSpace(args[eqIdx+1:])
+		victimStr := ctx.Exec(strings.TrimSpace(args[:eqIdx]), eval.EvFCheck|eval.EvEval, nil)
+		destStr = ctx.Exec(strings.TrimSpace(args[eqIdx+1:]), eval.EvFCheck|eval.EvEval, nil)
 		victim = g.MatchObject(d.Player, victimStr)
 		if victim == gamedb.Nothing {
 			d.Send("I don't see that here.")
@@ -481,7 +607,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 		}
 	} else {
 		victim = d.Player
-		destStr = strings.TrimSpace(args)
+		destStr = ctx.Exec(strings.TrimSpace(args), eval.EvFCheck|eval.EvEval, nil)
 	}
 
 	if strings.EqualFold(destStr, "home") {

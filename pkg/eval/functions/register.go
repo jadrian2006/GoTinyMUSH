@@ -306,6 +306,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("NEXT", fnNext, 1, 0)
 	ctx.RegisterFunction("LCON", fnLcon, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("LEXITS", fnLexits, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("EXITS", fnLexits, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("LATTR", fnLattr, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("NATTR", fnNattr, 1, 0)
 	ctx.RegisterFunction("HOME", fnHome, 1, 0)
