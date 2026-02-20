@@ -385,10 +385,22 @@ func fnNearby(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		return
 	}
 
+	// For exits, the effective location is the source room (Exits field),
+	// not Location (which stores the destination). This matches C TinyMUSH's
+	// nearby() which uses Exits(thing) for exit objects.
+	loc1 := obj1.Location
+	if obj1.ObjType() == gamedb.TypeExit {
+		loc1 = obj1.Exits
+	}
+	loc2 := obj2.Location
+	if obj2.ObjType() == gamedb.TypeExit {
+		loc2 = obj2.Exits
+	}
+
 	// Same location, or one is in the other, or one is the other's location
-	if obj1.Location == obj2.Location ||
-		obj1.Location == ref2 ||
-		obj2.Location == ref1 ||
+	if loc1 == loc2 ||
+		loc1 == ref2 ||
+		loc2 == ref1 ||
 		ref1 == ref2 {
 		buf.WriteString("1")
 	} else {

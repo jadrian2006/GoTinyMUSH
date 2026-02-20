@@ -199,7 +199,21 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 	}
 	// Try matching by player name (for *name syntax or bare name fallback).
 	// Player names may have semicolon-separated aliases: "Name;alias1;alias2"
-	if strings.HasPrefix(s, "*") { s = s[1:] }
+	if strings.HasPrefix(s, "*") {
+		s = s[1:]
+		// After stripping *, re-check for dbref (e.g. *#11587 → #11587).
+		// The * prefix means "player lookup", so only return if it's a player.
+		if strings.HasPrefix(s, "#") {
+			n, err := strconv.Atoi(s[1:])
+			if err == nil {
+				ref := gamedb.DBRef(n)
+				if obj, ok := ctx.DB.Objects[ref]; ok && obj.ObjType() == gamedb.TypePlayer {
+					return ref
+				}
+				return gamedb.Nothing
+			}
+		}
+	}
 	for _, obj := range ctx.DB.Objects {
 		if obj.ObjType() != gamedb.TypePlayer {
 			continue
@@ -227,6 +241,10 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 			}
 			// Search inventory
 			if found := searchContentChain(ctx.DB, pObj.Contents, s); found != gamedb.Nothing {
+				return found
+			}
+			// Search own exits (for when ctx.Player is a room executing a $-command)
+			if found := searchContentChain(ctx.DB, pObj.Exits, s); found != gamedb.Nothing {
 				return found
 			}
 		}

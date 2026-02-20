@@ -1458,9 +1458,9 @@ func (g *Game) QueueAttrAction(obj, cause gamedb.DBRef, attrNum int, args []stri
 }
 
 // stripDoubleEscapeSpecials reduces \\X to \X for special characters X in
-// [ ] { } %. This fixes data written for C TinyMUSH where an extra level of
-// backslash escaping was used to produce literal brackets, braces, and percent
-// signs through C's additional eval/strip pass in the queue path.
+// [ ] { } % ( ). This fixes data written for C TinyMUSH where an extra level
+// of backslash escaping was used to produce literal brackets, braces, parens,
+// and percent signs through C's additional eval/strip pass in the queue path.
 func stripDoubleEscapeSpecials(text string) string {
 	// Quick scan: bail early if no \\ present
 	if !strings.Contains(text, `\\`) {
@@ -1472,7 +1472,7 @@ func stripDoubleEscapeSpecials(text string) string {
 	for i < len(text) {
 		if i+2 < len(text) && text[i] == '\\' && text[i+1] == '\\' {
 			switch text[i+2] {
-			case '[', ']', '{', '}', '%':
+			case '[', ']', '{', '}', '%', '(', ')':
 				b.WriteByte('\\')      // keep one backslash
 				b.WriteByte(text[i+2]) // then the special char
 				i += 3
