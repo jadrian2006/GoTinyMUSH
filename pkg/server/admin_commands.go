@@ -1631,6 +1631,55 @@ func cmdPassword(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdVersion(g *Game, d *Descriptor, _ string, _ []string) {
 	d.Send(VersionString())
+	// Show uptime
+	if !g.StartTime.IsZero() {
+		d.Send(formatUptime(g.StartTime))
+	}
+	// Show enabled features
+	var features []string
+	if g.Comsys != nil {
+		features = append(features, "Comsys")
+	}
+	if g.Mail != nil {
+		features = append(features, "Mail")
+	}
+	if g.SQLDB != nil {
+		features = append(features, "SQL")
+	}
+	if g.Spell != nil {
+		features = append(features, "Spellcheck")
+	}
+	if g.Conf != nil && g.Conf.PuebloEnabled {
+		features = append(features, "Pueblo")
+	}
+	if g.EventBus != nil {
+		features = append(features, "GMCP/MSDP")
+	}
+	features = append(features, "MSSP")
+	if len(features) > 0 {
+		d.Send("Features: " + strings.Join(features, ", "))
+	}
+}
+
+func cmdUptime(g *Game, d *Descriptor, _ string, _ []string) {
+	if g.StartTime.IsZero() {
+		d.Send("Server start time not available.")
+		return
+	}
+	d.Send(formatUptime(g.StartTime))
+}
+
+// formatUptime returns a human-readable uptime string.
+func formatUptime(start time.Time) string {
+	dur := time.Since(start)
+	days := int(dur.Hours()) / 24
+	hours := int(dur.Hours()) % 24
+	mins := int(dur.Minutes()) % 60
+	secs := int(dur.Seconds()) % 60
+	if days > 0 {
+		return fmt.Sprintf("Uptime: %dd %dh %dm %ds (since %s)", days, hours, mins, secs, start.Format("2006-01-02 15:04:05"))
+	}
+	return fmt.Sprintf("Uptime: %dh %dm %ds (since %s)", hours, mins, secs, start.Format("2006-01-02 15:04:05"))
 }
 
 func cmdMotd(g *Game, d *Descriptor, args string, switches []string) {

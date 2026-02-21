@@ -14,13 +14,15 @@ import (
 func Negotiate(conn net.Conn, timeout time.Duration) *Capabilities {
 	caps := NewCapabilities()
 
-	// Send WILL GMCP and WILL MSDP
+	// Send WILL GMCP, WILL MSDP, and WILL MSSP
 	willGMCP := []byte{IAC, WILL, TeloptGMCP}
 	willMSDP := []byte{IAC, WILL, TeloptMSDP}
+	willMSSP := []byte{IAC, WILL, TeloptMSSP}
 
 	conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	conn.Write(willGMCP)
 	conn.Write(willMSDP)
+	conn.Write(willMSSP)
 
 	// Read responses within timeout
 	conn.SetReadDeadline(time.Now().Add(timeout))
@@ -56,12 +58,17 @@ func Negotiate(conn net.Conn, timeout time.Duration) *Capabilities {
 				log.Printf("oob: client declined GMCP")
 			case cmd == DONT && opt == TeloptMSDP:
 				log.Printf("oob: client declined MSDP")
+			case cmd == DO && opt == TeloptMSSP:
+				caps.MSSP = true
+				log.Printf("oob: client supports MSSP")
+			case cmd == DONT && opt == TeloptMSSP:
+				log.Printf("oob: client declined MSSP")
 			}
 			i += 2 // Skip the 3-byte sequence
 		}
 
-		// If we got responses for both, no need to wait longer
-		if caps.GMCP || caps.MSDP {
+		// If we got responses for all offered protocols, no need to wait longer
+		if (caps.GMCP || caps.MSDP) && caps.MSSP {
 			break
 		}
 	}

@@ -14,6 +14,7 @@ const (
 	// Telnet options used by OOB protocols
 	TeloptGMCP byte = 201 // GMCP option number
 	TeloptMSDP byte = 69  // MSDP option number
+	TeloptMSSP byte = 70  // MSSP option number
 )
 
 // MSDP subnegotiation type bytes

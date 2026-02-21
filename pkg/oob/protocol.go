@@ -11,6 +11,7 @@ const (
 	ProtoGMCP Protocol = iota
 	ProtoMSDP
 	ProtoMCP
+	ProtoMSSP
 )
 
 // Capabilities tracks which OOB protocols a connection has negotiated.
@@ -18,6 +19,7 @@ type Capabilities struct {
 	GMCP bool // GMCP (telopt 201) negotiated
 	MSDP bool // MSDP (telopt 69) negotiated
 	MCP  bool // MCP handshake completed
+	MSSP bool // MSSP (telopt 70) negotiated
 
 	// GMCP package subscriptions from the client
 	GMCPPackages map[string]bool
@@ -32,5 +34,5 @@ func NewCapabilities() *Capabilities {
 
 // HasAny returns true if any OOB protocol is negotiated.
 func (c *Capabilities) HasAny() bool {
-	return c.GMCP || c.MSDP || c.MCP
+	return c.GMCP || c.MSDP || c.MCP || c.MSSP
 }

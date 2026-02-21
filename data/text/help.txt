@@ -549,7 +549,8 @@ Locks			LOOPING			Markers
 Matching		Modules			MONEY
 Moving			OBJECT TYPES		PARENT OBJECTS
 Patchlevel		PIPING			Propdirs
-PUEBLO			PUPPETS			REGEXPS
+OOB Communications	PUEBLO			PUPPETS
+REGEXPS
 ROBBERY			Scan Order		SEARCH CLASSES
 SEMAPHORES		SPOOFING		STACK
 SUBSTITUTIONS		SUCCESS			SWITCHES
@@ -1553,6 +1554,125 @@ Examples:
  
 See also: say, @emit
  
+& OOB Communications
+& OOB
+  Topic: OOB Communications (Out-of-Band Protocols)
+
+  GoTinyMUSH supports several out-of-band (OOB) protocols for
+  communicating structured data between the server and client. These
+  protocols operate alongside normal text output using telnet option
+  negotiation or in-band signaling.
+
+  Supported protocols:
+
+  GMCP (Generic MUD Communication Protocol) - Telnet option 201.
+    Sends JSON-encoded data for room info, character data, and channels.
+    Widely supported by modern MUD clients (Mudlet, etc.).
+
+  MSDP (MUD Server Data Protocol) - Telnet option 69.
+    Sends key-value data using a binary encoding. Supported by many
+    MUD clients and frameworks.
+
+  MSSP (MUD Server Status Protocol) - Telnet option 70.
+    Provides server metadata (name, player count, uptime, codebase)
+    to MUD listing sites like MudConnector and Grapevine. Data is
+    sent once during connection negotiation.
+
+  MCP (MUD Client Protocol) - In-band protocol.
+    Uses special message prefixes in the text stream. Supports
+    packages for editing, DNS lookups, and client negotiation.
+
+  Pueblo - HTML-based extensions.
+    Provides HTML rendering support for clients that support it.
+    See 'help pueblo' for details.
+
+  Protocol negotiation happens automatically when a client connects.
+  Non-OOB clients are unaffected; negotiation times out in 1 second.
+
+  See also: GMCP, MSDP, MSSP, MCP, PUEBLO
+
+& GMCP
+  Topic: GMCP (Generic MUD Communication Protocol)
+
+  GMCP uses telnet option 201 to send JSON-encoded data between the
+  server and client. It is the most widely supported OOB protocol in
+  modern MUD clients such as Mudlet, Blightmud, and others.
+
+  GoTinyMUSH sends GMCP data for:
+    Char.Name        - Character name on connect
+    Room.Info        - Room dbref and name on movement
+    Comm.Channel     - Channel messages with metadata
+
+  Clients subscribe to GMCP packages during negotiation. The server
+  only sends data for packages the client has requested.
+
+  Negotiation: Server sends IAC WILL 201; client responds IAC DO 201.
+  Data format: IAC SB 201 <package.name> <json> IAC SE
+
+  See also: OOB Communications, MSDP
+
+& MSDP
+  Topic: MSDP (MUD Server Data Protocol)
+
+  MSDP uses telnet option 69 to send key-value data using a binary
+  encoding. It provides similar functionality to GMCP but uses a
+  different wire format.
+
+  GoTinyMUSH sends MSDP data for:
+    ROOM / ROOM_NAME     - Room info on movement
+    CHANNEL / CHANNEL_TEXT - Channel messages
+    CHARACTER_NAME        - Character name on connect
+
+  Negotiation: Server sends IAC WILL 69; client responds IAC DO 69.
+  Data format: IAC SB 69 VAR <name> VAL <value> ... IAC SE
+
+  See also: OOB Communications, GMCP
+
+& MSSP
+  Topic: MSSP (MUD Server Status Protocol)
+
+  MSSP uses telnet option 70 to provide server metadata to MUD listing
+  sites such as MudConnector, Grapevine, and Top MUD Sites. The data
+  is sent once during connection negotiation.
+
+  GoTinyMUSH reports the following MSSP variables:
+    NAME      - MUD name (from game configuration)
+    PLAYERS   - Current connected player count
+    UPTIME    - Seconds since server start
+    CODEBASE  - Server software and version
+    FAMILY    - Codebase family (TinyMUSH)
+    PORT      - Game port number
+    ANSI      - ANSI color support (1)
+    UTF-8     - UTF-8 support (1)
+    GMCP      - GMCP protocol support (1)
+    MSDP      - MSDP protocol support (1)
+    MCP       - MCP protocol support (1)
+    PUEBLO    - Pueblo protocol support (1)
+    SSL       - TLS port (if configured)
+
+  Negotiation: Server sends IAC WILL 70; client responds IAC DO 70;
+  server immediately sends IAC SB 70 VAR <key> VAL <value> ... IAC SE.
+
+  See also: OOB Communications
+
+& MCP
+  Topic: MCP (MUD Client Protocol)
+
+  MCP is an in-band protocol that uses special message prefixes in the
+  text stream rather than telnet option negotiation. It supports a
+  package-based extension system.
+
+  MCP negotiation begins when the server sends a #$#mcp line in the
+  text stream. Clients that recognize this respond with their supported
+  package list.
+
+  GoTinyMUSH supports MCP for:
+    dns-com-awns-ping    - Client keepalive
+    dns-com-vmoo-client  - Client identification
+    mcp-negotiate        - Package negotiation
+
+  See also: OOB Communications
+
 & PUEBLO
   Topic: Pueblo
  
@@ -8520,6 +8640,42 @@ performed and the walk down the list stops.
      > say version()
      You say, "TinyMUSH Beta version 2.0 patchlevel 0 #3"
  
+& UPTIME()
+  Function: uptime()
+
+  Returns the number of seconds the server has been running since its
+  last restart.
+
+  Example:
+     > say uptime()
+     You say, "3661"
+
+  See also: starttime(), version(), @uptime.
+
+& STARTTIME()
+  Function: starttime()
+
+  Returns the Unix timestamp (seconds since epoch) of when the server
+  was last started.
+
+  Example:
+     > say starttime()
+     You say, "1740100000"
+
+  See also: uptime(), version(), @uptime.
+
+& @uptime
+  Command: @uptime
+
+  Displays how long the server has been running since its last restart,
+  along with the date and time the server was started.
+
+  Example:
+     > @uptime
+     Uptime: 2d 5h 30m 12s (since 2026-02-19 14:30:00)
+
+  See also: @version, uptime(), starttime().
+
 & CCOUNT()
 & CDEPTH()
 & FCOUNT()

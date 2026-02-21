@@ -158,6 +158,8 @@ func InitCommands() map[string]*Command {
 	registerNG("@password", cmdPassword)
 	register("@version", cmdVersion)
 	register("version", cmdVersion)
+	register("@uptime", cmdUptime)
+	register("uptime", cmdUptime)
 	register("@motd", cmdMotd)
 	registerNG("@chzone", cmdChzone)
 	registerNG("@search", cmdSearch)
@@ -1201,6 +1203,7 @@ type Game struct {
 	objExecCountReset time.Time // When the counter was last reset
 	queueWake chan struct{} // Signal to wake queue processor immediately (player input)
 	PeakPlayers int        // Historical peak connected player count
+	StartTime   time.Time  // Server start time
 }
 
 // Emit sends an event to the player specified in ev.Player via the event bus.

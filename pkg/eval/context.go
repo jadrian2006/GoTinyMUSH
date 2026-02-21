@@ -226,6 +226,7 @@ type EvalContext struct {
 	// Game identity (set from game config)
 	MudName    string
 	VersionStr string
+	StartTime  int64 // Server start time as Unix timestamp
 
 	// CArgs holds the current command arguments (%0-%9) from the calling context.
 	// This allows FnNoEval function handlers (iter, switch, etc.) to propagate

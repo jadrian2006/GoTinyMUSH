@@ -447,6 +447,25 @@ func fnVersion(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gam
 	}
 }
 
+// uptime() - returns seconds since server start
+func fnUptime(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if ctx.StartTime > 0 {
+		uptime := time.Now().Unix() - ctx.StartTime
+		buf.WriteString(strconv.FormatInt(uptime, 10))
+	} else {
+		buf.WriteString("-1")
+	}
+}
+
+// starttime() - returns Unix timestamp of server start
+func fnStarttime(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if ctx.StartTime > 0 {
+		buf.WriteString(strconv.FormatInt(ctx.StartTime, 10))
+	} else {
+		buf.WriteString("-1")
+	}
+}
+
 func fnMudname(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if ctx.MudName != "" {
 		buf.WriteString(ctx.MudName)
@@ -835,16 +854,13 @@ func fnToss(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb
 
 // --- Misc functions ---
 
-var startTime = time.Now()
-
-// fnStarttime — returns the server start time as epoch secs.
-func fnStarttime(_ *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	buf.WriteString(strconv.FormatInt(startTime.Unix(), 10))
-}
-
 // fnRestarttime — returns the server restart time (same as start for us).
-func fnRestarttime(_ *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	buf.WriteString(strconv.FormatInt(startTime.Unix(), 10))
+func fnRestarttime(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if ctx.StartTime > 0 {
+		buf.WriteString(strconv.FormatInt(ctx.StartTime, 10))
+	} else {
+		buf.WriteString(strconv.FormatInt(time.Now().Unix(), 10))
+	}
 }
 
 // fnPorts — returns ports a player is connected from.

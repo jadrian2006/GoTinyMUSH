@@ -465,6 +465,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("PFIND", fnPfind, 1, 0)
 	ctx.RegisterFunction("VERSION", fnVersion, 0, 0)
 	ctx.RegisterFunction("MUDNAME", fnMudname, 0, 0)
+	ctx.RegisterFunction("UPTIME", fnUptime, 0, 0)
 	ctx.RegisterFunction("VALID", fnValid, 2, eval.FnVarArgs)
 	ctx.RegisterFunction("IBREAK", fnIbreak, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("RANDEXTRACT", fnRandextract, 0, eval.FnVarArgs)

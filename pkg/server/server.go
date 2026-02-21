@@ -44,6 +44,7 @@ func DefaultConfig() Config {
 type Server struct {
 	Config      Config
 	Game        *Game
+	StartTime   time.Time
 	listener    net.Listener
 	tlsListener net.Listener
 	webServer   *WebServer
@@ -63,6 +64,9 @@ func (s *Server) Start() error {
 	if !s.Config.Cleartext && !s.Config.TLS {
 		return fmt.Errorf("both cleartext and TLS listeners are disabled; nothing to listen on")
 	}
+
+	s.StartTime = time.Now()
+	s.Game.StartTime = s.StartTime
 
 	// Start the command queue processor
 	s.Game.StartQueueProcessor()
@@ -211,12 +215,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	log.Printf("[%d] New connection from %s", d.ID, d.Addr)
 
-	// OOB protocol negotiation (GMCP/MSDP) with 1-second timeout.
+	// OOB protocol negotiation (GMCP/MSDP/MSSP) with 1-second timeout.
 	// Non-OOB clients simply don't respond and we move on.
 	caps := oob.Negotiate(conn, 1*time.Second)
 	if caps.HasAny() {
 		d.OOB = caps
-		log.Printf("[%d] OOB negotiated: GMCP=%v MSDP=%v", d.ID, caps.GMCP, caps.MSDP)
+		log.Printf("[%d] OOB negotiated: GMCP=%v MSDP=%v MSSP=%v", d.ID, caps.GMCP, caps.MSDP, caps.MSSP)
+	}
+
+	// Send MSSP response immediately after negotiation
+	if caps.MSSP {
+		d.SendRaw(oob.EncodeMSSP(s.buildMSSPData()))
 	}
 
 	defer func() {
@@ -294,6 +303,39 @@ func (s *Server) handleConnection(conn net.Conn) {
 			return
 		}
 	}
+}
+
+// buildMSSPData returns the MSSP key-value pairs for this server.
+func (s *Server) buildMSSPData() map[string]string {
+	mudName := "GoTinyMUSH"
+	if s.Game.Conf != nil && s.Game.Conf.MudName != "" {
+		mudName = s.Game.Conf.MudName
+	}
+	port := fmt.Sprintf("%d", s.Config.Port)
+	players := fmt.Sprintf("%d", len(s.Game.Conns.ConnectedPlayers()))
+	uptime := fmt.Sprintf("%d", int64(time.Since(s.StartTime).Seconds()))
+
+	data := map[string]string{
+		"NAME":     mudName,
+		"PLAYERS":  players,
+		"UPTIME":   uptime,
+		"CODEBASE": "GoTinyMUSH " + Version,
+		"FAMILY":   "TinyMUSH",
+		"PORT":     port,
+		"ANSI":     "1",
+		"UTF-8":    "1",
+		"GMCP":     "1",
+		"MSDP":     "1",
+		"MCP":      "1",
+		"PUEBLO":   "1",
+		"MSSP":     "1",
+	}
+
+	if s.Config.TLS && s.Config.TLSPort > 0 {
+		data["SSL"] = fmt.Sprintf("%d", s.Config.TLSPort)
+	}
+
+	return data
 }
 
 // handleLoginCommand processes pre-login commands.
