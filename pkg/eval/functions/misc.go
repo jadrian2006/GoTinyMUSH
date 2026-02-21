@@ -906,17 +906,15 @@ func fnBeep(_ *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.D
 // lsearch([player] [class]=<restriction>[,<low>[,<high>]])
 // Implements the C TinyMUSH search_setup/search_perform logic.
 func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 1 {
-		return
-	}
-
 	// Handle both search() and lsearch() arg formats:
 	// search("all type=player")        — single arg with space-separated player/class
 	// search("all type=player,0,100")  — single arg with range
 	// lsearch(all, type, player)       — comma-separated: player, class, restriction
 	// lsearch(all, type, player, 0, 100) — with range
 	var raw string
-	if len(args) >= 3 && !strings.Contains(args[0], "=") && !strings.Contains(args[1], "=") {
+	if len(args) == 0 {
+		raw = "" // No args: search own objects (wizard defaults to all)
+	} else if len(args) >= 3 && !strings.Contains(args[0], "=") && !strings.Contains(args[1], "=") {
 		// Comma-separated format: args[0]=player, args[1]=class, args[2]=restriction[, low[, high]]
 		raw = strings.TrimSpace(args[0]) + " " + strings.TrimSpace(args[1]) + "=" + strings.TrimSpace(args[2])
 		if len(args) >= 4 {
@@ -1014,10 +1012,16 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		}
 	}
 
-	// Non-wizard can only search own objects
+	// Non-wizard can only search own objects.
+	// Wizard with no explicit player specification defaults to searching all
+	// objects (matching C TinyMUSH behavior where wizard default is ANY_OWNER).
 	if !isWiz {
 		ownerRef = ctx.Player
 		searchAll = false
+	} else if leftSide == "" || (eqIdx >= 0 && len(strings.Fields(leftSide)) == 1) {
+		// Wizard didn't specify a player name — default to search all
+		// leftSide=="" means no args at all; single word with '=' means just a class, no player
+		searchAll = true
 	}
 
 	// Determine type filter from class
