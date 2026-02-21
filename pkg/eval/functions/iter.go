@@ -19,7 +19,7 @@ func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	if len(args) > 2 {
 		idelim = ctx.Exec(args[2], eval.EvFCheck|eval.EvEval, nil)
 	}
-	odelim := idelim
+	odelim := " "
 	if len(args) > 3 {
 		odelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval, nil)
 	}

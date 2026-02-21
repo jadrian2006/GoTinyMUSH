@@ -767,13 +767,18 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 						d.Send(msg)
 					}
 				}
+				// OSUCC: prepend player name, skip if player is DARK
 				if osucc := g.GetAttrText(exitRef, 1); osucc != "" {
-					ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
-						functions.RegisterAll(c)
-					})
-					msg := ctx.Exec(osucc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-					if msg != "" {
-						g.Conns.SendToRoomExcept(g.DB, loc, d.Player, msg)
+					pObj := g.DB.Objects[d.Player]
+					if pObj != nil && !pObj.HasFlag(gamedb.FlagDark) {
+						ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
+							functions.RegisterAll(c)
+						})
+						msg := ctx.Exec(osucc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+						if msg != "" {
+							g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
+								DisplayName(pObj.Name)+" "+msg)
+						}
 					}
 				}
 				g.QueueAttrAction(exitRef, d.Player, 12, nil) // exit ASUCC
@@ -1195,6 +1200,7 @@ type Game struct {
 	objExecCount map[gamedb.DBRef]int // Per-object execution counter for rate limiting
 	objExecCountReset time.Time // When the counter was last reset
 	queueWake chan struct{} // Signal to wake queue processor immediately (player input)
+	PeakPlayers int        // Historical peak connected player count
 }
 
 // Emit sends an event to the player specified in ev.Player via the event bus.
@@ -1346,21 +1352,25 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	}
 
 	oldLoc := playerObj.Location
+	isDark := playerObj.HasFlag(gamedb.FlagDark)
 
 	// Source room: ALEAVE action (52), OLEAVE to room (51)
 	if oldLoc != gamedb.Nothing {
-		g.QueueAttrAction(oldLoc, player, 52, nil) // ALEAVE
-		if oleave := g.GetAttrText(oldLoc, 51); oleave != "" {
-			ctx := MakeEvalContextForObj(g, oldLoc, player, func(c *eval.EvalContext) {
-				functions.RegisterAll(c)
-			})
-			msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-			if msg != "" {
-				g.Conns.SendToRoomExcept(g.DB, oldLoc, player, msg)
+		if !isDark {
+			g.QueueAttrAction(oldLoc, player, 52, nil) // ALEAVE
+			if oleave := g.GetAttrText(oldLoc, 51); oleave != "" {
+				ctx := MakeEvalContextForObj(g, oldLoc, player, func(c *eval.EvalContext) {
+					functions.RegisterAll(c)
+				})
+				msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+				if msg != "" {
+					g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
+						DisplayName(playerObj.Name)+" "+msg)
+				}
+			} else {
+				g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
+					fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
 			}
-		} else {
-			g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
-				fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
 		}
 		g.RemoveFromContents(oldLoc, player)
 	}
@@ -1372,8 +1382,10 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	g.AddToContents(dest, player)
 
 	// Announce arrival (default, before ShowRoom evaluates OSUCC)
-	g.Conns.SendToRoomExcept(g.DB, dest, player,
-		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
+	if !isDark {
+		g.Conns.SendToRoomExcept(g.DB, dest, player,
+			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
+	}
 
 	// Persist moved player and affected rooms
 	persistList := []*gamedb.Object{playerObj}
@@ -1391,21 +1403,24 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	// ShowRoom handles SUCC/OSUCC/ASUCC display via the lock-check path.
 	g.ShowRoom(d, dest)
 
-	// Dest room: AENTER action (35), OENTER to room (53)
-	g.QueueAttrAction(dest, player, 35, nil) // AENTER
-	if oenter := g.GetAttrText(dest, 53); oenter != "" {
-		ctx := MakeEvalContextForObj(g, dest, player, func(c *eval.EvalContext) {
-			functions.RegisterAll(c)
-		})
-		msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-		if msg != "" {
-			g.Conns.SendToRoomExcept(g.DB, dest, player, msg)
+	// Dest room: AENTER action (35), OENTER to room (53) - skip if DARK
+	if !isDark {
+		g.QueueAttrAction(dest, player, 35, nil) // AENTER
+		if oenter := g.GetAttrText(dest, 53); oenter != "" {
+			ctx := MakeEvalContextForObj(g, dest, player, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+			if msg != "" {
+				g.Conns.SendToRoomExcept(g.DB, dest, player,
+					DisplayName(playerObj.Name)+" "+msg)
+			}
 		}
-	}
 
-	// Notify listeners on arrival
-	g.MatchListenPatterns(dest, player,
-		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
+		// Notify listeners on arrival
+		g.MatchListenPatterns(dest, player,
+			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
+	}
 }
 
 // RemoveFromContents removes an object from a location's contents chain.
@@ -2351,6 +2366,7 @@ func (g *Game) ShowWho(d *Descriptor) {
 		onFor string
 		idle  string
 		doing string
+		flags string
 		loc   gamedb.DBRef
 		cmds  int
 		host  string
@@ -2362,16 +2378,32 @@ func (g *Game) ShowWho(d *Descriptor) {
 		if dd.State != ConnConnected {
 			continue
 		}
+		// Hide DARK players from non-wizards
+		if !isWiz {
+			if pObj, ok := g.DB.Objects[dd.Player]; ok && pObj.HasFlag(gamedb.FlagDark) {
+				continue
+			}
+		}
 		name := g.PlayerName(dd.Player)
 		onFor := FormatConnTime(now.Sub(dd.ConnTime))
 		idle := FormatIdleTime(now.Sub(dd.LastCmd))
-		// Extract host/IP (strip port)
+		// Build player flags string (wizard WHO only)
+		var flags string
+		if isWiz {
+			if pObj, ok := g.DB.Objects[dd.Player]; ok {
+				if pObj.HasFlag(gamedb.FlagDark) {
+					flags += "D"
+				}
+			}
+		}
+		// Extract host/IP (strip port and IPv6 brackets)
 		host := dd.Addr
 		if idx := strings.LastIndex(host, ":"); idx >= 0 {
 			host = host[:idx]
 		}
+		host = strings.Trim(host, "[]")
 		loc := g.PlayerLocation(dd.Player)
-		entries = append(entries, whoEntry{name, onFor, idle, dd.DoingStr, loc, dd.CmdCount, host})
+		entries = append(entries, whoEntry{name, onFor, idle, dd.DoingStr, flags, loc, dd.CmdCount, host})
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -2381,17 +2413,19 @@ func (g *Game) ShowWho(d *Descriptor) {
 	for _, e := range entries {
 		if isWiz {
 			// C format: "%-16s%9s %4s%-3s#%-6d%5d%3s%-25s"
-			// We skip player flags (%-3s) and site flags (%3s) for now
-			d.Send(fmt.Sprintf("%-16s%9s %4s   #%-6d%5d   %-25s",
-				e.name, e.onFor, e.idle, e.loc, e.cmds, e.host))
+			d.Send(fmt.Sprintf("%-16s%9s %4s%-3s#%-6d%5d   %-25s",
+				e.name, e.onFor, e.idle, e.flags, e.loc, e.cmds, e.host))
 		} else {
-			// C format: "%-16s%9s %4s  %s"
 			d.Send(fmt.Sprintf("%-16s%9s %4s  %s", e.name, e.onFor, e.idle, e.doing))
 		}
 	}
 
-	record := len(entries)
-	d.Send(fmt.Sprintf("%d Players logged in, %d record, no maximum.", record, record))
+	count := len(entries)
+	peak := g.Conns.PeakPlayers
+	if count > peak {
+		peak = count
+	}
+	d.Send(fmt.Sprintf("%d Players logged in, %d record, no maximum.", count, peak))
 }
 
 // MatchObject resolves a name to a dbref, searching contents and location.

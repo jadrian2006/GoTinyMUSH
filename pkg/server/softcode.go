@@ -1438,6 +1438,17 @@ func (g *Game) StartQueueProcessor() {
 						idle = false
 						ticker.Reset(queueTick)
 					}
+					// Drain any additional wakes generated during ProcessQueue
+					// (from @trigger, @notify, semaphore releases). Those entries
+					// should wait for the next 1-second tick, matching C TinyMUSH
+					// behavior where each timeslice only processes pre-existing entries.
+					for {
+						select {
+						case <-g.queueWake:
+						default:
+							return
+						}
+					}
 				}()
 			case <-heartbeat.C:
 				imm, wait, sem := g.Queue.Stats()

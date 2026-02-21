@@ -150,10 +150,10 @@ func fnReplace(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 func fnTrim(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	s := args[0]
-	trimChar := " "
-	if len(args) > 1 && len(args[1]) > 0 { trimChar = args[1] }
 	side := "b"
-	if len(args) > 2 && len(args[2]) > 0 { side = strings.ToLower(args[2]) }
+	if len(args) > 1 && len(args[1]) > 0 { side = strings.ToLower(args[1]) }
+	trimChar := " "
+	if len(args) > 2 && len(args[2]) > 0 { trimChar = args[2] }
 	switch side {
 	case "l":
 		buf.WriteString(strings.TrimLeft(s, trimChar))

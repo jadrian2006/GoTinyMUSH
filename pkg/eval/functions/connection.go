@@ -9,11 +9,12 @@ import (
 )
 
 // fnLwho returns a space-separated list of connected player dbrefs.
+// Filters DARK players for non-wizards (matches TinyMUSH behavior).
 func fnLwho(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if ctx.GameState == nil {
 		return
 	}
-	players := ctx.GameState.ConnectedPlayers()
+	players := ctx.GameState.ConnectedPlayersVisible(ctx.Player)
 	var refs []string
 	for _, p := range players {
 		refs = append(refs, fmt.Sprintf("#%d", p))

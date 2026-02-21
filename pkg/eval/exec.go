@@ -781,7 +781,7 @@ func isDigit(ch byte) bool {
 // (alphanumeric or underscore). Used to track function name boundaries.
 func isFuncNameChar(ch byte) bool {
 	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-		(ch >= '0' && ch <= '9') || ch == '_'
+		(ch >= '0' && ch <= '9') || ch == '_' || ch == '@'
 }
 
 // qidxChar converts a register character (0-9, a-z) to an index (0-35).

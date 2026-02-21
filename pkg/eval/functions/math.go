@@ -79,7 +79,33 @@ func writeFloat(buf *strings.Builder, f float64) {
 
 // --- Arithmetic ---
 
+// add() returns integer result (C TinyMUSH ival behavior: parse as float, compute, truncate).
 func fnAdd(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	sum := 0.0
+	for _, a := range args {
+		sum += toFloat(a)
+	}
+	writeInt(buf, int(sum))
+}
+
+// sub() returns integer result (C TinyMUSH ival behavior: parse as float, compute, truncate).
+func fnSub(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { buf.WriteString("0"); return }
+	writeInt(buf, int(toFloat(args[0])-toFloat(args[1])))
+}
+
+// mul() returns integer result (C TinyMUSH ival behavior: parse as float, compute, truncate).
+func fnMul(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) == 0 { buf.WriteString("0"); return }
+	prod := 1.0
+	for _, a := range args {
+		prod *= toFloat(a)
+	}
+	writeInt(buf, int(prod))
+}
+
+// fadd() returns float result.
+func fnFadd(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	sum := 0.0
 	for _, a := range args {
 		sum += toFloat(a)
@@ -87,12 +113,14 @@ func fnAdd(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	writeFloat(buf, sum)
 }
 
-func fnSub(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+// fsub() returns float result.
+func fnFsub(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
 	writeFloat(buf, toFloat(args[0])-toFloat(args[1]))
 }
 
-func fnMul(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+// fmul() returns float result.
+func fnFmul(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) == 0 { buf.WriteString("0"); return }
 	prod := 1.0
 	for _, a := range args {

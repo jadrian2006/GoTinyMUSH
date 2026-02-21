@@ -264,12 +264,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if d.State == ConnLogin {
 			s.handleLoginCommand(d, line)
 		} else {
-			// Undo AutoDark on first command input (matches C DS_AUTODARK behavior)
+			// Clear AutoDark tracking flag but keep DARK set —
+			// player must manually @set me=!DARK to become visible.
 			if d.AutoDark {
 				d.AutoDark = false
-				if playerObj, ok := s.Game.DB.Objects[d.Player]; ok {
-					playerObj.Flags[0] &^= gamedb.FlagDark
-				}
 			}
 			log.Printf("[%d] CMD state=%d player=#%d input=%q", d.ID, d.State, d.Player, line)
 			if d.ProgData != nil {
@@ -398,11 +396,12 @@ func (s *Server) handleConnect(d *Descriptor, user, password string, dark bool) 
 	playerObj.Flags[1] |= gamedb.Flag2Connected
 
 	// Connect dark: set DARK flag if wizard/god requested it
+	// Normal connect: clear DARK flag
 	if dark && (Wizard(s.Game, player) || player == gamedb.DBRef(1)) {
 		playerObj.Flags[0] |= gamedb.FlagDark
-		d.AutoDark = true
 		log.Printf("[%d] Player %s(#%d) DARK-connected from %s", d.ID, playerObj.Name, player, d.Addr)
 	} else {
+		playerObj.Flags[0] &^= gamedb.FlagDark
 		log.Printf("[%d] Player %s(#%d) connected from %s", d.ID, playerObj.Name, player, d.Addr)
 	}
 

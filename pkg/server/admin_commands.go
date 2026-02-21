@@ -628,10 +628,13 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	// Remove from old location
 	if obj, ok := g.DB.Objects[victim]; ok {
 		oldLoc := obj.Location
+		isDark := obj.HasFlag(gamedb.FlagDark)
 		if oldLoc != gamedb.Nothing {
 			g.RemoveFromContents(oldLoc, victim)
-			g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
-				fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+			if !isDark {
+				g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
+					fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+			}
 		}
 		obj.Location = dest
 		g.AddToContents(dest, victim)
@@ -645,8 +648,10 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 			}
 		}
 		g.PersistObjects(persistList...)
-		g.Conns.SendToRoomExcept(g.DB, dest, victim,
-			fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
+		if !isDark {
+			g.Conns.SendToRoomExcept(g.DB, dest, victim,
+				fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
+		}
 	}
 
 	if victim == d.Player {

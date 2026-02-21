@@ -212,6 +212,7 @@ type ConnManager struct {
 	nextID      int
 	byPlayer    map[gamedb.DBRef][]*Descriptor // player -> connections (multi-login)
 	EventBus    *events.Bus                    // Event bus for pub/sub (nil = disabled)
+	PeakPlayers int                            // Historical peak connected player count
 }
 
 // NewConnManager creates a new connection manager.
@@ -260,6 +261,11 @@ func (cm *ConnManager) Login(d *Descriptor, player gamedb.DBRef) {
 	d.State = ConnConnected
 	d.Player = player
 	cm.byPlayer[player] = append(cm.byPlayer[player], d)
+
+	// Track peak connected players (unique players, not connections)
+	if count := len(cm.byPlayer); count > cm.PeakPlayers {
+		cm.PeakPlayers = count
+	}
 
 	if cm.EventBus != nil {
 		cm.EventBus.Subscribe(player, d)
