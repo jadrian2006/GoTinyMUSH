@@ -9115,26 +9115,45 @@ performed and the walk down the list stops.
   See also: loc(), UNFINDABLE.
 
 & SEARCH()
-  Function: search([<player>] [<class>=<restriction>[,<low>[,<high>]]])
- 
-  The search() function returns a list of objects that match the search
-  criteria, which are the same as with the @search command.  This function
-  costs as much as the @search command, so repeated use is expensive.
- 
+& LSEARCH()
+  Function: search([<player>] <class>=<restriction>[,<low>[,<high>]])
+  Function: lsearch([<player>] <class>=<restriction>[,<low>[,<high>]])
+  Function: lsearch(<player>, <class>, <restriction>[, <low>[, <high>]])
+
+  Searches the database for objects matching the given criteria and returns
+  a space-separated list of matching dbrefs. search() and lsearch() are
+  identical in function. lsearch() also accepts comma-separated arguments.
+
+  <player> restricts the search to objects owned by that player. Wizards
+  may specify "all" to search all objects regardless of owner. Non-wizards
+  can only search their own objects.
+
+  <low> and <high> optionally limit the dbref range to search.
+
+  Search classes:
+    type=<type>       - Match by type (ROOM, EXIT, THING, PLAYER, GARBAGE)
+    name=<pattern>    - Match objects whose name starts with <pattern>
+    flags=<flags>     - Match by flag characters (e.g. W=WIZARD, D=DARK)
+                        Prefix with ! to negate (e.g. !D = not DARK)
+    parent=<dbref>    - Match objects with the given parent
+    zone=<dbref>      - Match objects in the given zone
+    eval=<expr>       - Evaluate <expr> for each object; ## = dbref.
+                        Objects where result is true (non-zero) match.
+    eplayer=<expr>    - eval= restricted to players
+    eroom=<expr>      - eval= restricted to rooms
+    eobject=<expr>    - eval= restricted to things
+    eexit=<expr>      - eval= restricted to exits
+
   Caution: if you use the [ and ] characters in an Eval selection you will
   need to escape them. Consider using Ueval instead.
- 
+
   Examples:
-    > say search()
-    You say, "#226 #289 #325 #364 #368 #369"
+    > say search(all type=player)
+    > say search(all parent=#100)
+    > say search(all flags=W)
     > say search(eval=\[eq(money(##),1)\])
-    You say, "#289 #325 #364 #368 #369"
-    > &TEST me = eq(money(%0),1)
-    > say search(ueval=me/TEST)
-    You say, "#289 #325 #364 #368 #369"
-    > say search(player=wizard)
-    You say, "#1"
- 
+    > say lsearch(all, type, player)
+
   See also: @search, SEARCH CLASSES.
  
 & STATS()

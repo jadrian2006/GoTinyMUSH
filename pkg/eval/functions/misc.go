@@ -901,25 +901,284 @@ func fnBeep(_ *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.D
 	buf.WriteByte('\a')
 }
 
-// fnSearch — search the database by criteria. Simplified stub.
-// search(player, type=TYPE)
+// fnSearch — search the database by criteria.
+// search([player] [class]=<restriction>[,<low>[,<high>]])
+// lsearch([player] [class]=<restriction>[,<low>[,<high>]])
+// Implements the C TinyMUSH search_setup/search_perform logic.
 func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 1 { return }
-	// Parse simple type= criteria
-	criteria := strings.ToUpper(strings.TrimSpace(args[0]))
-	var results []string
-	for ref, obj := range ctx.DB.Objects {
-		if strings.HasPrefix(criteria, "TYPE=") {
-			typeName := criteria[5:]
-			if strings.EqualFold(obj.ObjType().String(), typeName) {
-				results = append(results, fmt.Sprintf("#%d", ref))
-			}
-		} else if strings.HasPrefix(criteria, "NAME=") {
-			pattern := criteria[5:]
-			if wildMatch(pattern, obj.Name) {
-				results = append(results, fmt.Sprintf("#%d", ref))
+	if len(args) < 1 {
+		return
+	}
+
+	// Handle both search() and lsearch() arg formats:
+	// search("all type=player")        — single arg with space-separated player/class
+	// search("all type=player,0,100")  — single arg with range
+	// lsearch(all, type, player)       — comma-separated: player, class, restriction
+	// lsearch(all, type, player, 0, 100) — with range
+	var raw string
+	if len(args) >= 3 && !strings.Contains(args[0], "=") && !strings.Contains(args[1], "=") {
+		// Comma-separated format: args[0]=player, args[1]=class, args[2]=restriction[, low[, high]]
+		raw = strings.TrimSpace(args[0]) + " " + strings.TrimSpace(args[1]) + "=" + strings.TrimSpace(args[2])
+		if len(args) >= 4 {
+			raw += "," + strings.TrimSpace(args[3])
+		}
+		if len(args) >= 5 {
+			raw += "," + strings.TrimSpace(args[4])
+		}
+	} else {
+		// Standard single-arg format, rejoin any extra args as comma-separated range
+		raw = strings.TrimSpace(args[0])
+		for i := 1; i < len(args); i++ {
+			raw += "," + args[i]
+		}
+	}
+
+	// Determine if caller is a wizard
+	callerObj, callerOK := ctx.DB.Objects[ctx.Player]
+	isWiz := callerOK && callerObj.Flags[0]&gamedb.FlagWizard != 0
+
+	// Parse the search specification
+	// Format: [player] [class]=<restriction>[,<low>[,<high>]]
+	var ownerRef gamedb.DBRef = ctx.Player // default: search own objects
+	searchAll := false
+	searchClass := ""
+	restriction := ""
+	lowBound := gamedb.DBRef(0)
+	highBound := gamedb.DBRef(len(ctx.DB.Objects) - 1)
+	filterType := gamedb.ObjectType(-1) // -1 means no type filter
+
+	// Split on first '=' to get left side and right side
+	eqIdx := strings.Index(raw, "=")
+	var leftSide, rightSide string
+	if eqIdx >= 0 {
+		leftSide = strings.TrimSpace(raw[:eqIdx])
+		rightSide = raw[eqIdx+1:]
+	} else {
+		// No '=' — treat entire thing as left side (e.g. "all" or player name)
+		leftSide = raw
+		rightSide = ""
+	}
+
+	// Parse low,high from right side (comma-separated after restriction)
+	if rightSide != "" {
+		parts := strings.SplitN(rightSide, ",", 3)
+		restriction = strings.TrimSpace(parts[0])
+		if len(parts) >= 2 {
+			if v, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(parts[1], "#"))); err == nil {
+				lowBound = gamedb.DBRef(v)
 			}
 		}
+		if len(parts) >= 3 {
+			if v, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(parts[2], "#"))); err == nil {
+				highBound = gamedb.DBRef(v)
+			}
+		}
+	}
+
+	// Parse left side: could be "[player] [class]" or just "[class]" or just "[player]"
+	if leftSide != "" {
+		// Split by spaces
+		words := strings.Fields(leftSide)
+		if eqIdx >= 0 {
+			// There was an '=', so the last word is the class
+			if len(words) == 1 {
+				searchClass = strings.ToLower(words[0])
+			} else {
+				// First word(s) = player, last word = class
+				searchClass = strings.ToLower(words[len(words)-1])
+				playerName := strings.Join(words[:len(words)-1], " ")
+				if strings.EqualFold(playerName, "all") {
+					if isWiz {
+						searchAll = true
+					}
+				} else {
+					ref := resolveDBRef(ctx, playerName)
+					if ref != gamedb.Nothing {
+						ownerRef = ref
+					}
+				}
+			}
+		} else {
+			// No '=' — treat as player name or "all"
+			playerName := strings.Join(words, " ")
+			if strings.EqualFold(playerName, "all") {
+				if isWiz {
+					searchAll = true
+				}
+			} else {
+				ref := resolveDBRef(ctx, playerName)
+				if ref != gamedb.Nothing {
+					ownerRef = ref
+				}
+			}
+		}
+	}
+
+	// Non-wizard can only search own objects
+	if !isWiz {
+		ownerRef = ctx.Player
+		searchAll = false
+	}
+
+	// Determine type filter from class
+	restrictionUpper := strings.ToUpper(restriction)
+	switch searchClass {
+	case "type":
+		switch restrictionUpper {
+		case "ROOM":
+			filterType = gamedb.TypeRoom
+		case "EXIT":
+			filterType = gamedb.TypeExit
+		case "THING", "OBJECT":
+			filterType = gamedb.TypeThing
+		case "PLAYER":
+			filterType = gamedb.TypePlayer
+		case "GARBAGE":
+			filterType = gamedb.TypeGarbage
+		}
+	case "rooms":
+		filterType = gamedb.TypeRoom
+	case "exits":
+		filterType = gamedb.TypeExit
+	case "objects", "things":
+		filterType = gamedb.TypeThing
+	case "players":
+		filterType = gamedb.TypePlayer
+	case "eroom":
+		filterType = gamedb.TypeRoom
+	case "eexit":
+		filterType = gamedb.TypeExit
+	case "eobject", "ething":
+		filterType = gamedb.TypeThing
+	case "eplayer":
+		filterType = gamedb.TypePlayer
+	}
+
+	// Parse flags= restriction into a list of flag names
+	var flagNames []string
+	var flagNegate []bool
+	if searchClass == "flags" {
+		for i := 0; i < len(restriction); i++ {
+			negate := false
+			if restriction[i] == '!' {
+				negate = true
+				i++
+				if i >= len(restriction) {
+					break
+				}
+			}
+			fname := flagCharToName(restriction[i])
+			if fname != "" {
+				flagNames = append(flagNames, fname)
+				flagNegate = append(flagNegate, negate)
+			}
+		}
+	}
+
+	// Parse parent= and zone= restrictions
+	var parentRef gamedb.DBRef = gamedb.Nothing
+	var zoneRef gamedb.DBRef = gamedb.Nothing
+	if searchClass == "parent" && restriction != "" {
+		parentRef = resolveDBRef(ctx, restriction)
+	}
+	if searchClass == "zone" && restriction != "" {
+		zoneRef = resolveDBRef(ctx, restriction)
+	}
+
+	// Prepare eval expression for eval=/evaluate=/eplayer=/eroom= etc.
+	isEvalClass := false
+	switch searchClass {
+	case "eval", "evaluate", "eplayer", "eroom", "eobject", "ething", "eexit":
+		isEvalClass = true
+	}
+
+	// Determine if name-based classes need name matching
+	isNameClass := false
+	switch searchClass {
+	case "name", "rooms", "exits", "objects", "things", "players":
+		isNameClass = true
+	}
+
+	// Perform the search
+	var results []string
+	for ref := lowBound; ref <= highBound; ref++ {
+		obj, ok := ctx.DB.Objects[ref]
+		if !ok {
+			continue
+		}
+
+		// Skip GOING objects
+		if obj.Flags[0]&gamedb.FlagGoing != 0 {
+			continue
+		}
+
+		// Owner filter
+		if !searchAll && obj.Owner != ownerRef {
+			continue
+		}
+
+		// Type filter
+		if filterType >= 0 && obj.ObjType() != filterType {
+			continue
+		}
+
+		// Class-specific filters
+		switch searchClass {
+		case "type":
+			// Already handled by filterType above
+		case "name":
+			if restriction != "" && !wildMatch(restriction+"*", obj.Name) {
+				continue
+			}
+		case "rooms", "exits", "objects", "things", "players":
+			if isNameClass && restriction != "" && !wildMatch(restriction+"*", obj.Name) {
+				continue
+			}
+		case "flags":
+			match := true
+			for i, fname := range flagNames {
+				has := objHasFlag(obj, fname)
+				if flagNegate[i] {
+					if has {
+						match = false
+						break
+					}
+				} else {
+					if !has {
+						match = false
+						break
+					}
+				}
+			}
+			if !match {
+				continue
+			}
+		case "parent":
+			if parentRef != gamedb.Nothing && obj.Parent != parentRef {
+				continue
+			}
+		case "zone":
+			if zoneRef != gamedb.Nothing && obj.Zone != zoneRef {
+				continue
+			}
+		case "eval", "evaluate", "eplayer", "eroom", "eobject", "ething", "eexit":
+			if isEvalClass && restriction != "" {
+				// Replace ## with current dbref
+				expr := strings.ReplaceAll(restriction, "##", fmt.Sprintf("#%d", ref))
+				result := ctx.Exec(expr, eval.EvFCheck|eval.EvEval, nil)
+				result = strings.TrimSpace(result)
+				if result == "" || result == "0" || result == "#-1" {
+					continue
+				}
+			}
+		case "":
+			// No class — list all matching owner (already filtered)
+		default:
+			// Unknown class — skip silently
+			continue
+		}
+
+		results = append(results, fmt.Sprintf("#%d", ref))
 	}
 	buf.WriteString(strings.Join(results, " "))
 }

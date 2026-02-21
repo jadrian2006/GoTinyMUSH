@@ -1620,10 +1620,12 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	}
 
 	// Build list of visible exit dbrefs
-	// TinyMUSH Can_See_Exit(p,x,l): !Darkened(p,x) && (!(l) || Light(x))
-	// DARK exits are ALWAYS hidden (even from wizards) — no SeeAll bypass.
-	// In a DARK room, only LIGHT exits are visible.
+	// DARK exits are ALWAYS hidden (even from wizards).
+	// In a DARK room without EXITFORMAT, only LIGHT exits are visible.
+	// When EXITFORMAT is set, all non-DARK exits are passed to it
+	// (DARK rooms use EXITFORMAT for display, so room darkness is irrelevant).
 	roomIsDark := roomObj.HasFlag(gamedb.FlagDark)
+	exitFmt := g.GetAttrText(room, 215) // A_LEXITS_FMT
 	var exitRefs []gamedb.DBRef
 	exitRef := roomObj.Exits
 	for exitRef != gamedb.Nothing {
@@ -1633,10 +1635,10 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		}
 		canSee := true
 		if exitObj.HasFlag(gamedb.FlagDark) {
-			// DARK exits are always hidden (Can_See_Exit: !Darkened)
+			// DARK exits are always hidden
 			canSee = false
-		} else if roomIsDark && !exitObj.HasFlag2(gamedb.Flag2Light) {
-			// In a DARK room, only LIGHT exits are visible
+		} else if roomIsDark && exitFmt == "" && !exitObj.HasFlag2(gamedb.Flag2Light) {
+			// In a DARK room without EXITFORMAT, only LIGHT exits are visible
 			canSee = false
 		}
 		if canSee {
@@ -1646,7 +1648,6 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	}
 
 	// Exits — use EXITFORMAT (215) if set, otherwise default "Obvious exits:" list
-	exitFmt := g.GetAttrText(room, 215) // A_LEXITS_FMT
 	exitFmtHandled := false
 	if exitFmt != "" {
 		var refStrs []string
