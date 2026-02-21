@@ -35,12 +35,21 @@ func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	ctx.Loop.LoopNumbers = append(ctx.Loop.LoopNumbers, 0)
 	idx := ctx.Loop.InLoop - 1
 
-	var results []string
+	// C TinyMUSH iter: write results directly to buffer with output
+	// delimiter between non-empty results. Empty results (e.g. from setq)
+	// do not produce separators, matching observed production behavior.
+	first := true
 	for i, word := range words {
 		ctx.Loop.LoopTokens[idx] = word
 		ctx.Loop.LoopNumbers[idx] = i
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-		results = append(results, result)
+		if result != "" {
+			if !first {
+				buf.WriteString(odelim)
+			}
+			buf.WriteString(result)
+			first = false
+		}
 		if ctx.Loop.BreakLevel > 0 {
 			ctx.Loop.BreakLevel--
 			break
@@ -52,8 +61,6 @@ func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	ctx.Loop.LoopTokens2 = ctx.Loop.LoopTokens2[:idx]
 	ctx.Loop.LoopNumbers = ctx.Loop.LoopNumbers[:idx]
 	ctx.Loop.InLoop--
-
-	buf.WriteString(strings.Join(results, odelim))
 }
 
 // fnParse is an alias for iter() (parse outputs results, iter was historically different)

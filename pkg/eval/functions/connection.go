@@ -711,12 +711,14 @@ func processTables(args []string, buf *strings.Builder, just int) {
 				buf.WriteString(strings.Repeat(padChar, leftPad))
 			}
 			buf.WriteString(word)
-			if rightPad > 0 && col+1 < nCols && i+1 < len(words) {
+			if rightPad > 0 {
 				buf.WriteString(strings.Repeat(padChar, rightPad))
 			}
 		default: // left
 			buf.WriteString(word)
-			if padding > 0 && col+1 < nCols && i+1 < len(words) {
+			// C TinyMUSH always pads to full column width, even for
+			// the last column and last word, ensuring consistent widths.
+			if padding > 0 {
 				buf.WriteString(strings.Repeat(padChar, padding))
 			}
 		}
