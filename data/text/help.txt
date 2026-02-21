@@ -15651,21 +15651,44 @@ MARKERS - Per-player message markers for MUD client integration
 
   To set a marker:  &MARKER_<type> me=<open>|<close>
 
-  Message types: SAY, POSE, PAGE, WHISPER, EMIT
+  The | character separates opening and closing text. If omitted, the
+  entire value is used as a prefix only. Values are NOT evaluated as
+  softcode. Markers only affect what YOU receive.
+
+  Marker types:
+
+    SAY        - say/"         PAGE       - page (incl. page-pose)
+    POSE       - pose/:;       WHISPER    - whisper
+    EMIT       - @emit, @oemit, @pemit, @remit
+
   For channels, use the channel name: &MARKER_<channelname> me=...
+
+  Special markers:
+
+    DECOMPILE  - @decompile output (block mode: open marker sent before
+                 the first line, close marker after the last line)
 
   Examples:
     &MARKER_POSE me=>>>POSE> |<<<
     &MARKER_SAY me=[SAY] |[/SAY]
     &MARKER_Public me=[PUB] |[/PUB]
+    &MARKER_DECOMPILE me=decompile>>>|<<<decompile
 
   With MARKER_POSE set to ">>>POSE> |<<<":
     >>>POSE> Wizard stretches.<<<
 
-  The | separates opening and closing markers. Values are NOT evaluated
-  as softcode. Markers only affect what YOU receive.
+  With MARKER_DECOMPILE set to "decompile>>>|<<<decompile":
+    decompile>>>
+    @Conformat Parent Room=[setq(0,...)]...
+    <<<decompile
 
-  To remove: &MARKER_POSE me=
+  To see your current markers:  examine me/MARKER_*
+  To remove a marker:           &MARKER_POSE me=
+
+  Note: "markers" are unrelated to the Marker0-Marker9 flags
+  (see 'help marker' for flag information).
+
+  See also: marker
 
 & TRUNC_LENGTH
 TRUNC_LENGTH - Per-player examine output truncation

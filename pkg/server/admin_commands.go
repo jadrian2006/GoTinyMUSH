@@ -1835,12 +1835,114 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 	d.Send(fmt.Sprintf("%d object(s) found.", count))
 }
 
+// decompileAttrCmd maps well-known attribute numbers to their @-command names.
+// Attrs listed here are output as "@Command obj=value" in @decompile.
+// Attrs not listed here and >= A_USER_START use "&ATTR obj=value" format.
+var decompileAttrCmd = map[int]string{
+	1:   "Osuccess",
+	2:   "Ofail",
+	3:   "Fail",
+	4:   "Success",
+	6:   "Describe",
+	7:   "Sex",
+	8:   "Odrop",
+	9:   "Drop",
+	10:  "Okill",
+	11:  "Kill",
+	12:  "Asucc",
+	13:  "Afail",
+	14:  "Adrop",
+	15:  "Akill",
+	16:  "Ause",
+	17:  "Charges",
+	18:  "Runout",
+	19:  "Startup",
+	20:  "Aclone",
+	21:  "Apay",
+	22:  "Opay",
+	23:  "Pay",
+	24:  "Cost",
+	26:  "Listen",
+	27:  "Aahear",
+	28:  "Amhear",
+	29:  "Ahear",
+	32:  "Idescribe",
+	33:  "Enter",
+	34:  "Oxenter",
+	35:  "Aenter",
+	36:  "Adescribe",
+	37:  "Odescribe",
+	39:  "Aconnect",
+	40:  "Adisconnect",
+	45:  "Use",
+	46:  "Ouse",
+	50:  "Leave",
+	51:  "Oleave",
+	52:  "Aleave",
+	53:  "Oenter",
+	54:  "Oxleave",
+	55:  "Move",
+	56:  "Omove",
+	57:  "Amove",
+	58:  "Alias",
+	64:  "Ealias",
+	65:  "Lalias",
+	66:  "Efail",
+	67:  "Oefail",
+	68:  "Aefail",
+	69:  "Lfail",
+	70:  "Olfail",
+	71:  "Alfail",
+	72:  "Reject",
+	73:  "Away",
+	74:  "Idle",
+	75:  "Ufail",
+	76:  "Oufail",
+	77:  "Aufail",
+	79:  "Tport",
+	80:  "Otport",
+	81:  "Oxtport",
+	82:  "Atport",
+	89:  "Inprefix",
+	90:  "Prefix",
+	91:  "Infilter",
+	92:  "Filter",
+	95:  "Forwardlist",
+	129: "Gfail",
+	130: "Ogfail",
+	131: "Agfail",
+	132: "Rfail",
+	133: "Orfail",
+	134: "Arfail",
+	135: "Dfail",
+	136: "Odfail",
+	137: "Adfail",
+	138: "Tfail",
+	139: "Otfail",
+	140: "Atfail",
+	141: "Tofail",
+	142: "Otofail",
+	143: "Atofail",
+	214: "Conformat",
+	215: "Exitformat",
+	222: "Nameformat",
+}
+
 func cmdDecompile(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
 		d.Send("Decompile what?")
 		return
 	}
-	target := g.MatchObject(d.Player, args)
+
+	// Parse object/attrpattern — split on '/' for attribute wildcard filter
+	objStr := args
+	attrPattern := ""
+	if slashIdx := strings.IndexByte(args, '/'); slashIdx >= 0 {
+		objStr = args[:slashIdx]
+		attrPattern = strings.ToUpper(args[slashIdx+1:])
+	}
+
+	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
 		d.Send("I don't see that here.")
 		return
@@ -1851,88 +1953,108 @@ func cmdDecompile(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 
-	ref := fmt.Sprintf("#%d", target)
+	// Collect all output lines, then send with marker wrapping
+	var lines []string
 
+	// Use object name for ref (C TinyMUSH style), "me" for self
+	ref := DisplayName(obj.Name)
+	if target == d.Player {
+		ref = "me"
+	}
+
+	attrOnly := attrPattern != ""
+
+	// Object creation line (skip for players; show even with attr filter for non-players)
 	switch obj.ObjType() {
 	case gamedb.TypeRoom:
-		d.Send(fmt.Sprintf("@dig %s", obj.Name))
+		lines = append(lines, fmt.Sprintf("@dig %s", obj.Name))
 	case gamedb.TypeThing:
-		d.Send(fmt.Sprintf("@create %s", obj.Name))
+		lines = append(lines, fmt.Sprintf("@create %s=10", obj.Name))
 	case gamedb.TypeExit:
-		d.Send(fmt.Sprintf("@open %s", obj.Name))
+		lines = append(lines, fmt.Sprintf("@open %s", obj.Name))
 	case gamedb.TypePlayer:
-		// Can't recreate players via decompile, just show attrs
+		// Can't recreate players via decompile
 	}
 
-	// Description
-	desc := g.GetAttrText(target, 6)
-	if desc != "" {
-		d.Send(fmt.Sprintf("@describe %s=%s", ref, desc))
-	}
-
-	// Show user-set attributes
+	// Show attributes
 	for _, attr := range obj.Attrs {
 		name := g.DB.GetAttrName(attr.Number)
 		if name == "" {
 			name = fmt.Sprintf("ATTR_%d", attr.Number)
+		}
+		// If filtering by attribute pattern, check match
+		if attrOnly && !wildMatchCI(attrPattern, name) {
+			continue
 		}
 		text := eval.StripAttrPrefix(attr.Value)
 		// Skip internal/sensitive attrs
 		if isInternalAttr(attr.Number) {
 			continue
 		}
-		// Check if there's a known @command for this attr
-		switch attr.Number {
-		case 6: // A_DESC — already handled above
-			continue
-		case 4:
-			d.Send(fmt.Sprintf("@success %s=%s", ref, text))
-		case 1:
-			d.Send(fmt.Sprintf("@osuccess %s=%s", ref, text))
-		case 3:
-			d.Send(fmt.Sprintf("@fail %s=%s", ref, text))
-		case 2:
-			d.Send(fmt.Sprintf("@ofail %s=%s", ref, text))
-		case 9:
-			d.Send(fmt.Sprintf("@drop %s=%s", ref, text))
-		case 8:
-			d.Send(fmt.Sprintf("@odrop %s=%s", ref, text))
-		case 7:
-			d.Send(fmt.Sprintf("@sex %s=%s", ref, text))
-		default:
-			d.Send(fmt.Sprintf("@set %s=%s:%s", ref, name, text))
+		// Use @Command format for well-known attrs, &ATTR for user attrs
+		if cmd, ok := decompileAttrCmd[attr.Number]; ok {
+			lines = append(lines, fmt.Sprintf("@%s %s=%s", cmd, ref, text))
+		} else if attr.Number >= gamedb.A_USER_START {
+			lines = append(lines, fmt.Sprintf("&%s %s=%s", name, ref, text))
+		} else {
+			// Built-in attr without a known @-command — use &ATTR format
+			lines = append(lines, fmt.Sprintf("&%s %s=%s", name, ref, text))
 		}
 	}
 
-	// Flags
-	if obj.HasFlag(gamedb.FlagDark) {
-		d.Send(fmt.Sprintf("@set %s=DARK", ref))
-	}
-	if obj.HasFlag(gamedb.FlagHaven) {
-		d.Send(fmt.Sprintf("@set %s=HAVEN", ref))
-	}
-	if obj.HasFlag(gamedb.FlagQuiet) {
-		d.Send(fmt.Sprintf("@set %s=QUIET", ref))
-	}
-	if obj.HasFlag(gamedb.FlagSafe) {
-		d.Send(fmt.Sprintf("@set %s=SAFE", ref))
-	}
-	if obj.HasFlag(gamedb.FlagEnterOK) {
-		d.Send(fmt.Sprintf("@set %s=ENTER_OK", ref))
-	}
-	if obj.HasFlag(gamedb.FlagVisual) {
-		d.Send(fmt.Sprintf("@set %s=VISUAL", ref))
-	}
-	if obj.HasFlag(gamedb.FlagPuppet) {
-		d.Send(fmt.Sprintf("@set %s=PUPPET", ref))
-	}
-	if obj.HasFlag(gamedb.FlagSticky) {
-		d.Send(fmt.Sprintf("@set %s=STICKY", ref))
+	// Flags (skip when filtering by attribute)
+	if !attrOnly {
+		if obj.HasFlag(gamedb.FlagDark) {
+			lines = append(lines, fmt.Sprintf("@set %s=DARK", ref))
+		}
+		if obj.HasFlag(gamedb.FlagHaven) {
+			lines = append(lines, fmt.Sprintf("@set %s=HAVEN", ref))
+		}
+		if obj.HasFlag(gamedb.FlagQuiet) {
+			lines = append(lines, fmt.Sprintf("@set %s=QUIET", ref))
+		}
+		if obj.HasFlag(gamedb.FlagSafe) {
+			lines = append(lines, fmt.Sprintf("@set %s=SAFE", ref))
+		}
+		if obj.HasFlag(gamedb.FlagEnterOK) {
+			lines = append(lines, fmt.Sprintf("@set %s=ENTER_OK", ref))
+		}
+		if obj.HasFlag(gamedb.FlagVisual) {
+			lines = append(lines, fmt.Sprintf("@set %s=VISUAL", ref))
+		}
+		if obj.HasFlag(gamedb.FlagPuppet) {
+			lines = append(lines, fmt.Sprintf("@set %s=PUPPET", ref))
+		}
+		if obj.HasFlag(gamedb.FlagSticky) {
+			lines = append(lines, fmt.Sprintf("@set %s=STICKY", ref))
+		}
+
+		// Parent
+		if obj.Parent != gamedb.Nothing {
+			lines = append(lines, fmt.Sprintf("@parent %s=#%d", ref, obj.Parent))
+		}
 	}
 
-	// Parent
-	if obj.Parent != gamedb.Nothing {
-		d.Send(fmt.Sprintf("@parent %s=#%d", ref, obj.Parent))
+	// Send with DECOMPILE marker wrapping (block mode: open before, close after)
+	markerVal := g.GetAttrTextByName(d.Player, "MARKER_DECOMPILE")
+	openMarker, closeMarker := "", ""
+	if markerVal != "" {
+		if idx := strings.IndexByte(markerVal, '|'); idx >= 0 {
+			openMarker = markerVal[:idx]
+			closeMarker = markerVal[idx+1:]
+		} else {
+			openMarker = markerVal
+		}
+	}
+
+	if openMarker != "" {
+		d.Send(openMarker)
+	}
+	for _, line := range lines {
+		d.Send(line)
+	}
+	if closeMarker != "" {
+		d.Send(closeMarker)
 	}
 }
 

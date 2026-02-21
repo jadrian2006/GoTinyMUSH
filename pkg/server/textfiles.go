@@ -111,13 +111,16 @@ func (tf *TextFiles) loadAll(dir string) {
 	log.Printf("Loaded %d text files from %s", count, dir)
 }
 
-// ReloadTextFiles reloads all cached text files from the configured TextDir.
-// Returns the count of non-empty files loaded.
+// ReloadTextFiles reloads all cached text files and help files from the configured TextDir.
+// Returns the count of non-empty text files loaded.
 func (g *Game) ReloadTextFiles() int {
 	if g.TextDir == "" || g.Texts == nil {
 		return 0
 	}
 	g.Texts.loadAll(g.TextDir)
+
+	// Also reload help files from the same directory
+	g.LoadHelpFiles(g.TextDir)
 
 	g.Texts.mu.RLock()
 	count := 0
