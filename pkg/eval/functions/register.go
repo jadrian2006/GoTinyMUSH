@@ -593,4 +593,18 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("LINSTANCES", fnLinstances, 0, 0)
 	ctx.RegisterFunction("STORE", fnStore, 2, 0)
 	ctx.RegisterFunction("ITEMS", fnItems, 1, 0)
+
+	// Array functions
+	ctx.RegisterFunction("ARRAY", fnArray, 1, eval.FnVarArgs)
+	ctx.RegisterFunction("ADESTROY", fnAdestroy, 1, 0)
+	ctx.RegisterFunction("APUSH", fnApush, 2, eval.FnVarArgs)
+	ctx.RegisterFunction("APOP", fnApop, 1, 0)
+	ctx.RegisterFunction("ASHIFT", fnAshift, 1, 0)
+	ctx.RegisterFunction("AUNSHIFT", fnAunshift, 2, eval.FnVarArgs)
+	ctx.RegisterFunction("AGET", fnAget, 2, 0)
+	ctx.RegisterFunction("ASET", fnAset, 3, 0)
+	ctx.RegisterFunction("ALEN", fnAlen, 1, 0)
+	ctx.RegisterFunction("ALIST", fnAlist, 1, eval.FnVarArgs)
+	ctx.RegisterFunction("ALOAD", fnAload, 2, eval.FnVarArgs)
+	ctx.RegisterFunction("LARRAYS", fnLarrays, 0, 0)
 }

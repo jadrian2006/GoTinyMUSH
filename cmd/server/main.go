@@ -372,6 +372,9 @@ func main() {
 	// Load structures from bbolt
 	loadStructures(store)
 
+	// Load arrays from bbolt
+	loadArrays(store)
+
 	// Store paths on Game for archive system
 	srv.Game.ConfPath = *confFile
 	srv.Game.AliasConfs = aliasPaths
@@ -489,6 +492,24 @@ func loadStructures(store *boltstore.Store) {
 	}
 	functions.LoadStructStore(defs, insts)
 	log.Printf("Loaded %d structure defs, %d instances from bolt", defCount, instCount)
+}
+
+// loadArrays populates the in-memory array store from bbolt.
+func loadArrays(store *boltstore.Store) {
+	if store == nil || !store.HasArrayData() {
+		return
+	}
+	data, err := store.LoadArrays()
+	if err != nil {
+		log.Printf("WARNING: failed to load arrays from bolt: %v", err)
+		return
+	}
+	count := 0
+	for _, m := range data {
+		count += len(m)
+	}
+	functions.LoadArrayStore(data)
+	log.Printf("Loaded %d arrays from bolt", count)
 }
 
 // loadMail initializes the mail system from bbolt.

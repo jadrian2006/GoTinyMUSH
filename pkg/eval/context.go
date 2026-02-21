@@ -143,6 +143,9 @@ type GameState interface {
 	// PersistStructInstance saves or deletes a structure instance.
 	// Pass nil inst to delete.
 	PersistStructInstance(player gamedb.DBRef, name string, inst *gamedb.StructInstance)
+	// PersistArray saves or deletes an array.
+	// Pass nil arr to delete.
+	PersistArray(player gamedb.DBRef, name string, arr *gamedb.ArrayData)
 	// MailCount returns (total, unread, cleared) for a player's mailbox.
 	// Returns (-1, -1, -1) if mail is disabled.
 	MailCount(player gamedb.DBRef) (int, int, int)

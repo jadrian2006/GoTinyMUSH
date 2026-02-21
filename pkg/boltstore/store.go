@@ -25,7 +25,7 @@ func Open(path string) (*Store, error) {
 
 	// Ensure all buckets exist.
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail} {
+		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketArrays} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
@@ -586,6 +586,71 @@ func (s *Store) HasStructData() bool {
 	has := false
 	s.bolt.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketStructDefs)
+		if b.Stats().KeyN > 0 {
+			has = true
+		}
+		return nil
+	})
+	return has
+}
+
+// --- Array Persistence ---
+
+// arrayKey returns "playerRef:name" key for array storage.
+func arrayKey(player gamedb.DBRef, name string) []byte {
+	return []byte(fmt.Sprintf("%d:%s", player, strings.ToLower(name)))
+}
+
+// PutArray persists an array to bbolt.
+func (s *Store) PutArray(player gamedb.DBRef, name string, arr *gamedb.ArrayData) error {
+	data, err := encodeArray(arr)
+	if err != nil {
+		return fmt.Errorf("boltstore: encode array %q: %w", name, err)
+	}
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketArrays).Put(arrayKey(player, name), data)
+	})
+}
+
+// DeleteArray removes an array from bbolt.
+func (s *Store) DeleteArray(player gamedb.DBRef, name string) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketArrays).Delete(arrayKey(player, name))
+	})
+}
+
+// LoadArrays reads all arrays from bbolt.
+func (s *Store) LoadArrays() (map[gamedb.DBRef]map[string]*gamedb.ArrayData, error) {
+	result := make(map[gamedb.DBRef]map[string]*gamedb.ArrayData)
+	err := s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketArrays)
+		return b.ForEach(func(k, v []byte) error {
+			arr, err := decodeArray(v)
+			if err != nil {
+				return fmt.Errorf("decode array %q: %w", string(k), err)
+			}
+			parts := strings.SplitN(string(k), ":", 2)
+			if len(parts) != 2 {
+				return nil
+			}
+			var ref int
+			fmt.Sscanf(parts[0], "%d", &ref)
+			player := gamedb.DBRef(ref)
+			if result[player] == nil {
+				result[player] = make(map[string]*gamedb.ArrayData)
+			}
+			result[player][parts[1]] = arr
+			return nil
+		})
+	})
+	return result, err
+}
+
+// HasArrayData returns true if there are any arrays stored in bbolt.
+func (s *Store) HasArrayData() bool {
+	has := false
+	s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketArrays)
 		if b.Stats().KeyN > 0 {
 			has = true
 		}

@@ -447,6 +447,18 @@ func (g *Game) PersistStructDef(player gamedb.DBRef, name string, def *gamedb.St
 	}
 }
 
+// PersistArray saves or deletes an array in bbolt.
+func (g *Game) PersistArray(player gamedb.DBRef, name string, arr *gamedb.ArrayData) {
+	if g.Store == nil {
+		return
+	}
+	if arr == nil {
+		g.Store.DeleteArray(player, name)
+	} else {
+		g.Store.PutArray(player, name, arr)
+	}
+}
+
 // PersistStructInstance saves or deletes a structure instance in bbolt.
 func (g *Game) PersistStructInstance(player gamedb.DBRef, name string, inst *gamedb.StructInstance) {
 	if g.Store == nil {

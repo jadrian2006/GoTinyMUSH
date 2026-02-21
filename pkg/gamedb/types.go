@@ -410,6 +410,12 @@ type StructInstance struct {
 	Values  []string
 }
 
+// ArrayData is a mutable variable-length container (persisted to bbolt).
+type ArrayData struct {
+	MaxSize int
+	Values  []string
+}
+
 // GetAttrName returns the name for an attribute number, or "" if unknown.
 func (db *Database) GetAttrName(num int) string {
 	if def, ok := db.AttrNames[num]; ok {

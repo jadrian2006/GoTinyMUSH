@@ -239,19 +239,20 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			pos = newPos + 1
 
 			// Evaluate arguments (unless FN_NO_EVAL).
-			// Trim leading spaces from each raw arg before evaluation to match
-			// C TinyMUSH's EV_STRIP_LS behavior in parse_arglist — "func(a, b)"
-			// should pass "b" not " b".
+			// Trim leading AND trailing spaces from each raw arg to match
+			// C TinyMUSH's EV_STRIP_LS | EV_STRIP_TS behavior in parse_arglist.
+			// "func(a, b)" passes "b" not " b", and "func(= , 78)" passes "="
+			// not "= ".
 			var evaledArgs []string
 			if fn.Flags&FnNoEval != 0 {
 				evaledArgs = make([]string, len(args))
 				for i, arg := range args {
-					evaledArgs[i] = strings.TrimLeft(arg, " ")
+					evaledArgs[i] = strings.TrimSpace(arg)
 				}
 			} else {
 				evaledArgs = make([]string, len(args))
 				for i, arg := range args {
-					evaledArgs[i] = ctx.Exec(strings.TrimLeft(arg, " "), evalFlags|EvFCheck, cargs)
+					evaledArgs[i] = ctx.Exec(strings.TrimSpace(arg), evalFlags|EvFCheck, cargs)
 				}
 			}
 

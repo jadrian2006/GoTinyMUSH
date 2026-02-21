@@ -17,6 +17,7 @@ func init() {
 	gob.Register(gamedb.StructDef{})
 	gob.Register(gamedb.StructInstance{})
 	gob.Register(gamedb.MailMessage{})
+	gob.Register(gamedb.ArrayData{})
 }
 
 // encodeObject serializes an Object to bytes using gob.
@@ -125,4 +126,22 @@ func decodeStructInst(data []byte) (*gamedb.StructInstance, error) {
 		return nil, err
 	}
 	return &inst, nil
+}
+
+// encodeArray serializes an ArrayData to bytes using gob.
+func encodeArray(arr *gamedb.ArrayData) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(arr); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decodeArray deserializes bytes back into an ArrayData.
+func decodeArray(data []byte) (*gamedb.ArrayData, error) {
+	var arr gamedb.ArrayData
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&arr); err != nil {
+		return nil, err
+	}
+	return &arr, nil
 }

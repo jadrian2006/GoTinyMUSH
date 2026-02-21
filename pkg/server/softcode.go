@@ -301,15 +301,18 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		}
 
 		// Evaluate each individual command with args as %0-%9.
-		// We do NOT use EvStrip here so that brace grouping is preserved for
-		// commands like @switch that need to split on commas respecting braces.
-		// In C TinyMUSH, parse_arglist splits args by parse_to (brace-aware)
-		// BEFORE evaluation; we approximate this by preserving braces through eval.
+		// Deferred-body commands (@switch, @dolist, @wait, @trigger) are
+		// already handled above by handleDeferredBodyCmd, so only simple
+		// commands (@pemit, think, @emit, etc.) reach here.
+		// EvStrip: strip brace grouping during evaluation, matching C
+		// TinyMUSH's EV_STRIP_CURLY. Function results (get(), etc.) are
+		// injected into the buffer directly and NOT re-parsed, so literal
+		// braces in data survive.
 		// EvFCheckPersist: C TinyMUSH splits command args BEFORE eval, so
 		// each arg gets its own EvFCheck. Our whole-string eval needs to
 		// keep EvFCheck active throughout to avoid missing subsequent
 		// bare function calls (e.g., "@tel con(me)=loc(%0)").
-		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval|eval.EvFCheckPersist, entry.Args)
+		evaluated := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval|eval.EvStrip|eval.EvFCheckPersist, entry.Args)
 		evaluated = strings.TrimSpace(evaluated)
 		DebugLog("EVAL player=#%d cmd=%q evaluated=%q args=%v", entry.Player, truncDebug(cmd, 200), truncDebug(evaluated, 200), entry.Args)
 		if evaluated == "" {
@@ -831,12 +834,12 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "think":
 		// Args arrive already evaluated from queue — send directly to owner
 		if obj, ok := g.DB.Objects[player]; ok {
-			g.Conns.SendToPlayer(obj.Owner, stripAllBraces(args))
+			g.Conns.SendToPlayer(obj.Owner, args)
 		}
 	case "@pemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
+			message := strings.TrimSpace(args[eqIdx+1:])
 			DebugLog("OBJEXEC @pemit target=%q message=%q switches=%q", targetStr, truncDebug(message, 120), switches)
 			target := g.ResolveRef(player, targetStr)
 			if target == gamedb.Nothing {
@@ -875,12 +878,12 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@emit":
 		loc := g.PlayerLocation(player)
 		if loc != gamedb.Nothing {
-			g.SendMarkedToRoom(loc, "EMIT", stripAllBraces(args))
+			g.SendMarkedToRoom(loc, "EMIT", args)
 		}
 	case "@oemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
+			message := strings.TrimSpace(args[eqIdx+1:])
 			target := g.ResolveRef(player, targetStr)
 			if target != gamedb.Nothing {
 				if tObj, ok := g.DB.Objects[target]; ok {
@@ -891,7 +894,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@remit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			roomStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
+			message := strings.TrimSpace(args[eqIdx+1:])
 			room := g.ResolveRef(player, roomStr)
 			if room != gamedb.Nothing {
 				g.SendMarkedToRoom(room, "EMIT", message)

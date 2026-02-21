@@ -5844,7 +5844,8 @@ See also: @link, @open.
   Topic: FUNCTION LIST
  
   See the following help topics for the relevant function lists:
- 
+
+  Array Functions: mutable variable-length containers (push/pop/shift).
   Attribute Functions: retrievel of attribute-related information.
   Comsys Functions: available only when the comsys is enabled.
   List Functions: manipulation of lists.
@@ -15872,3 +15873,205 @@ TRUNC_LENGTH - Per-player examine output truncation
   this setting.
 
   See also: examine, @decompile
+
+& ARRAY FUNCTIONS
+  Topic: Array Functions
+
+  Arrays are mutable, variable-length, ordered containers of strings.
+  Each player can create named arrays that persist across restarts.
+  Arrays use 1-based indexing and support push/pop/shift/unshift
+  operations for stack and queue semantics. They interoperate with
+  the list system via alist() and aload().
+
+  The array functions are:
+
+	adestroy()	aget()		alen()		alist()
+	aload()		apop()		apush()		array()
+	aset()		ashift()	aunshift()	larrays()
+
+  All array functions operate on the calling object's arrays.
+  To manipulate arrays on other objects, wrap calls in objeval().
+
+& ARRAY()
+  Function: array(<name>[, <maxsize>])
+
+  Creates a new named array. If <maxsize> is specified and greater
+  than 0, the array will be limited to that many elements (0 or
+  omitted means unlimited). Returns 1 on success, 0 on failure
+  (e.g. if an array with that name already exists).
+
+  Example:
+    > say array(mylist)
+    You say, "1"
+    > say array(bounded, 10)
+    You say, "1"
+    > say array(mylist)
+    You say, "0"
+
+  See also: adestroy(), apush(), larrays(), ARRAY FUNCTIONS.
+
+& ADESTROY()
+  Function: adestroy(<name>)
+
+  Destroys a named array, freeing its storage. Returns 1 on success,
+  0 if no array with that name exists.
+
+  Example:
+    > say adestroy(mylist)
+    You say, "1"
+    > say adestroy(mylist)
+    You say, "0"
+
+  See also: array(), larrays(), ARRAY FUNCTIONS.
+
+& APUSH()
+  Function: apush(<name>, <value>[, <value2>, ...])
+
+  Appends one or more values to the end of the array. Returns the
+  new length of the array. If the array has a maxsize, values that
+  would exceed the limit are silently dropped.
+
+  Example:
+    > say array(test)
+    You say, "1"
+    > say apush(test, alpha)
+    You say, "1"
+    > say apush(test, beta, gamma)
+    You say, "3"
+    > say alist(test)
+    You say, "alpha beta gamma"
+
+  See also: aunshift(), apop(), alist(), ARRAY FUNCTIONS.
+
+& APOP()
+  Function: apop(<name>)
+
+  Removes and returns the last element of the array. Returns an
+  empty string if the array is empty or does not exist.
+
+  Example:
+    > say apop(test)
+    You say, "gamma"
+    > say alist(test)
+    You say, "alpha beta"
+
+  See also: apush(), ashift(), ARRAY FUNCTIONS.
+
+& ASHIFT()
+  Function: ashift(<name>)
+
+  Removes and returns the first element of the array. Returns an
+  empty string if the array is empty or does not exist.
+
+  Example:
+    > say ashift(test)
+    You say, "alpha"
+    > say alist(test)
+    You say, "beta"
+
+  See also: aunshift(), apop(), ARRAY FUNCTIONS.
+
+& AUNSHIFT()
+  Function: aunshift(<name>, <value>[, <value2>, ...])
+
+  Prepends one or more values to the beginning of the array. Returns
+  the new length. If the array has a maxsize, values that would
+  exceed the limit are silently dropped.
+
+  Example:
+    > say aunshift(test, first, second)
+    You say, "4"
+    > say alist(test)
+    You say, "first second alpha beta"
+
+  See also: ashift(), apush(), ARRAY FUNCTIONS.
+
+& AGET()
+  Function: aget(<name>, <index>)
+
+  Returns the element at the given 1-based index. Returns an empty
+  string if the index is out of range or the array does not exist.
+
+  Example:
+    > say aget(test, 1)
+    You say, "alpha"
+    > say aget(test, 2)
+    You say, "beta"
+    > say aget(test, 99)
+    You say, ""
+
+  See also: aset(), alen(), ARRAY FUNCTIONS.
+
+& ASET()
+  Function: aset(<name>, <index>, <value>)
+
+  Sets the element at the given 1-based index to <value>. Returns
+  1 on success, 0 if the index is out of range or array not found.
+
+  Example:
+    > say aset(test, 2, bravo)
+    You say, "1"
+    > say alist(test)
+    You say, "alpha bravo gamma"
+    > say aset(test, 99, nope)
+    You say, "0"
+
+  See also: aget(), alen(), ARRAY FUNCTIONS.
+
+& ALEN()
+  Function: alen(<name>)
+
+  Returns the current number of elements in the array. Returns 0
+  if the array does not exist.
+
+  Example:
+    > say alen(test)
+    You say, "3"
+
+  See also: aget(), alist(), ARRAY FUNCTIONS.
+
+& ALIST()
+  Function: alist(<name>[, <delim>])
+
+  Converts the array to a MUSH list, with elements separated by
+  <delim> (default: space). Returns empty string if the array is
+  empty or does not exist.
+
+  Example:
+    > say alist(test)
+    You say, "alpha beta gamma"
+    > say alist(test, |)
+    You say, "alpha|beta|gamma"
+
+  See also: aload(), alen(), ARRAY FUNCTIONS.
+
+& ALOAD()
+  Function: aload(<name>, <list>[, <delim>])
+
+  Replaces the entire contents of an array with elements parsed
+  from <list>, using <delim> as separator (default: space). Returns
+  the new length. If the array has a maxsize, the list is truncated.
+
+  Example:
+    > say aload(test, one two three four five)
+    You say, "5"
+    > say alist(test)
+    You say, "one two three four five"
+    > say aload(test, a|b|c, |)
+    You say, "3"
+    > say alist(test)
+    You say, "a b c"
+
+  See also: alist(), array(), ARRAY FUNCTIONS.
+
+& LARRAYS()
+  Function: larrays()
+
+  Returns a space-separated list of the names of all arrays owned
+  by the calling object, sorted alphabetically.
+
+  Example:
+    > say larrays()
+    You say, "inventory queue scores"
+
+  See also: array(), adestroy(), ARRAY FUNCTIONS.
