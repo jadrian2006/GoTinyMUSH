@@ -123,7 +123,7 @@ export function InputBar({ onSubmit, disabled }: InputBarProps) {
         class="h-1 cursor-ns-resize bg-mush-panel hover:bg-mush-accent transition-colors"
       />
       <div class="flex items-start gap-2 p-2" style={{ height: `${height}px` }}>
-        <span class="text-mush-accent font-bold mt-1">&gt;</span>
+        <span class="text-mush-accent font-bold text-sm font-mono" style={{ lineHeight: "1.4" }}>&gt;</span>
         <textarea
           ref={textareaRef}
           disabled={disabled}

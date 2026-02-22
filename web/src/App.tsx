@@ -1,8 +1,9 @@
 import { useEffect, useCallback } from "preact/hooks";
-import { Terminal } from "./components/Terminal";
+import { WindowGrid } from "./components/WindowGrid";
 import { InputBar } from "./components/InputBar";
 import { LoginForm } from "./components/LoginForm";
-import { ChannelSidebar } from "./components/ChannelSidebar";
+import { PaneManagerDrawer } from "./components/PaneManagerDrawer";
+import { ContextMenu } from "./components/ContextMenu";
 import { SettingsMenu } from "./components/SettingsMenu";
 import { useAuth } from "./hooks/useAuth";
 import { useWebSocket } from "./hooks/useWebSocket";
@@ -100,15 +101,18 @@ export function App() {
 
       {/* Main content */}
       <div class="flex flex-1 min-h-0">
-        {/* Terminal + input */}
+        {/* Grid + input */}
         <div class="flex flex-col flex-1 min-w-0">
-          <Terminal />
+          <WindowGrid />
           <InputBar onSubmit={handleCommand} disabled={!connected.value} />
         </div>
 
-        {/* Channel sidebar */}
-        <ChannelSidebar />
+        {/* Pane manager sidebar */}
+        <PaneManagerDrawer />
       </div>
+
+      {/* Global context menu */}
+      <ContextMenu />
     </div>
   );
 }

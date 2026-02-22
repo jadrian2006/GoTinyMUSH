@@ -3566,21 +3566,41 @@ func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	senderName := g.PlayerName(d.Player)
-	d.Send(g.WrapMarker(d.Player, "WHISPER", fmt.Sprintf("You whisper \"%s\" to %s.", message, DisplayName(targetObj.Name))))
-	g.SendMarkedToPlayer(target, "WHISPER",
-		fmt.Sprintf("%s whispers \"%s\"", senderName, message))
+	loc := g.PlayerLocation(d.Player)
+	whisperData := map[string]any{
+		"sender":  senderName,
+		"target":  DisplayName(targetObj.Name),
+		"message": message,
+	}
+
+	// Sender sees their own whisper
+	g.EmitEvent(d.Player, "WHISPER", events.Event{
+		Type:   events.EvWhisper,
+		Source: d.Player,
+		Room:   loc,
+		Text:   fmt.Sprintf("You whisper \"%s\" to %s.", message, DisplayName(targetObj.Name)),
+		Data:   whisperData,
+	})
+	// Target receives the whisper
+	g.EmitEvent(target, "WHISPER", events.Event{
+		Type:   events.EvWhisper,
+		Source: d.Player,
+		Room:   loc,
+		Text:   fmt.Sprintf("%s whispers \"%s\"", senderName, message),
+		Data:   whisperData,
+	})
 
 	// Others in the room see that a whisper happened
-	loc := g.PlayerLocation(d.Player)
-	for _, dd := range g.Conns.AllDescriptors() {
-		if dd.State != ConnConnected {
-			continue
-		}
-		if dd.Player == d.Player || dd.Player == target {
-			continue
-		}
-		if g.PlayerLocation(dd.Player) == loc {
-			dd.Send(g.WrapMarker(dd.Player, "WHISPER", fmt.Sprintf("%s whispers something to %s.", senderName, DisplayName(targetObj.Name))))
+	bystanderEv := events.Event{
+		Type:   events.EvWhisper,
+		Source: d.Player,
+		Room:   loc,
+		Text:   fmt.Sprintf("%s whispers something to %s.", senderName, DisplayName(targetObj.Name)),
+		Data:   map[string]any{"sender": senderName, "target": DisplayName(targetObj.Name)},
+	}
+	for _, next := range g.DB.SafeContents(loc) {
+		if next != d.Player && next != target && g.Conns.IsConnected(next) {
+			g.EmitEvent(next, "WHISPER", bystanderEv)
 		}
 	}
 }

@@ -3,6 +3,11 @@ import type { OutputLine, WhoEntry, ChannelInfo } from "../types/events";
 
 let nextLineId = 1;
 
+// BroadcastChannel for popout windows
+const outputBC = typeof BroadcastChannel !== "undefined"
+  ? new BroadcastChannel("mush_output")
+  : null;
+
 export const token = signal<string | null>(
   localStorage.getItem("mush_token"),
 );
@@ -28,6 +33,7 @@ export function addOutput(text: string, type = "text", channel?: string) {
     timestamp: Date.now(),
   };
   outputLines.value = [...outputLines.value.slice(-2000), line];
+  outputBC?.postMessage(line);
 }
 
 export function addCommand(cmd: string) {
