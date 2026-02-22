@@ -2,8 +2,8 @@ import { useEffect, useCallback } from "preact/hooks";
 import { Terminal } from "./components/Terminal";
 import { InputBar } from "./components/InputBar";
 import { LoginForm } from "./components/LoginForm";
-import { WhoPanel } from "./components/WhoPanel";
-import { ChannelPanel } from "./components/ChannelPanel";
+import { ChannelSidebar } from "./components/ChannelSidebar";
+import { SettingsMenu } from "./components/SettingsMenu";
 import { useAuth } from "./hooks/useAuth";
 import { useWebSocket } from "./hooks/useWebSocket";
 import {
@@ -11,9 +11,8 @@ import {
   connected,
   token,
   playerName,
-  activeChannel,
-  outputLines,
 } from "./stores/gameStore";
+import { sidebarOpen } from "./stores/prefsStore";
 
 export function App() {
   const { login, logout } = useAuth();
@@ -48,13 +47,6 @@ export function App() {
     [sendCommand, disconnect, logout],
   );
 
-  // Filter output by active channel
-  const filteredLines = activeChannel.value
-    ? outputLines.value.filter(
-        (l) => l.channel === activeChannel.value || l.type === "system",
-      )
-    : outputLines.value;
-
   if (!isLoggedIn.value) {
     return <LoginForm onLogin={handleLogin} />;
   }
@@ -73,6 +65,26 @@ export function App() {
           </span>
         </div>
         <div class="flex items-center gap-3">
+          <SettingsMenu />
+          <button
+            onClick={() => (sidebarOpen.value = !sidebarOpen.value)}
+            class="text-mush-dim hover:text-mush-accent transition-colors"
+            title="Toggle sidebar"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          </button>
           <span class="text-mush-text">{playerName.value}</span>
           <button
             onClick={() => {
@@ -90,18 +102,12 @@ export function App() {
       <div class="flex flex-1 min-h-0">
         {/* Terminal + input */}
         <div class="flex flex-col flex-1 min-w-0">
-          {/* Channel tabs */}
-          {isLoggedIn.value && <ChannelPanel />}
-
-          {/* Output area - uses filtered lines via signal override */}
           <Terminal />
-
-          {/* Command input */}
           <InputBar onSubmit={handleCommand} disabled={!connected.value} />
         </div>
 
-        {/* WHO sidebar */}
-        <WhoPanel />
+        {/* Channel sidebar */}
+        <ChannelSidebar />
       </div>
     </div>
   );

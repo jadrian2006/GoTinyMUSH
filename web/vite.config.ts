@@ -3,6 +3,9 @@ import preact from "@preact/preset-vite";
 
 export default defineConfig({
   plugins: [preact()],
+  test: {
+    environment: "node",
+  },
   server: {
     port: 3000,
     proxy: {

@@ -16,7 +16,6 @@ export const historyIndex = signal(-1);
 
 export const whoList = signal<WhoEntry[]>([]);
 export const channels = signal<ChannelInfo[]>([]);
-export const activeChannel = signal<string | null>(null);
 
 export const isLoggedIn = computed(() => token.value !== null);
 
