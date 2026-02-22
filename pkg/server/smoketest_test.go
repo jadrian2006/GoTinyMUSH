@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -713,3 +714,568 @@ func TestHelpCoverage_Commands(t *testing.T) {
 			len(missing), strings.Join(missing, "\n  "))
 	}
 }
+
+// ============================================================================
+// Sensory commands (smell, touch, taste, listen)
+// ============================================================================
+
+func TestSmell_Default(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// No SMELL attr set on Room #0 — should get default message
+	DispatchCommand(env.game, env.player, "smell")
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "You don't smell anything special.") {
+		t.Errorf("smell with no attr: expected default message, got:\n%s", out)
+	}
+}
+
+func TestSmell_WithAttr(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set SMELL attr (233) on Room #0
+	env.game.SetAttr(0, 233, "Fresh pine.")
+	clearOutput(env.player)
+
+	DispatchCommand(env.game, env.player, "smell")
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "Fresh pine.") {
+		t.Errorf("smell with attr set: expected 'Fresh pine.', got:\n%s", out)
+	}
+}
+
+func TestSmellAttrSetter(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// @smell here=The scent of roses
+	DispatchCommand(env.game, env.player, "@smell here=The scent of roses")
+	_ = getOutput(env.player)
+
+	// Verify attr 233 was set
+	text := env.game.GetAttrText(0, 233)
+	if text != "The scent of roses" {
+		t.Errorf("@smell setter: attr 233 = %q, want %q", text, "The scent of roses")
+	}
+}
+
+func TestTouchAttrSetter(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	DispatchCommand(env.game, env.player, "@touch here=Smooth stone")
+	_ = getOutput(env.player)
+
+	text := env.game.GetAttrText(0, 236)
+	if text != "Smooth stone" {
+		t.Errorf("@touch setter: attr 236 = %q, want %q", text, "Smooth stone")
+	}
+}
+
+func TestTasteAttrSetter(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	DispatchCommand(env.game, env.player, "@taste here=Salty air")
+	_ = getOutput(env.player)
+
+	text := env.game.GetAttrText(0, 239)
+	if text != "Salty air" {
+		t.Errorf("@taste setter: attr 239 = %q, want %q", text, "Salty air")
+	}
+}
+
+func TestSoundAttrSetter(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	DispatchCommand(env.game, env.player, "@sound here=Birds chirping")
+	_ = getOutput(env.player)
+
+	text := env.game.GetAttrText(0, 242)
+	if text != "Birds chirping" {
+		t.Errorf("@sound setter: attr 242 = %q, want %q", text, "Birds chirping")
+	}
+}
+
+// ============================================================================
+// @roomformat
+// ============================================================================
+
+func TestRoomformat_Custom(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set ROOMFORMAT on Room #0 — replaces entire ShowRoom output
+	env.game.SetAttr(0, 232, "CUSTOM ROOM OUTPUT: %0")
+	clearOutput(env.player)
+
+	env.game.ShowRoom(env.player, 0)
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "CUSTOM ROOM OUTPUT:") {
+		t.Errorf("ROOMFORMAT: expected custom output, got:\n%s", out)
+	}
+	// Normal room name should NOT appear since ROOMFORMAT replaces all output
+	if strings.Contains(out, "Room Zero") {
+		t.Errorf("ROOMFORMAT: normal room name should be replaced. Output:\n%s", out)
+	}
+}
+
+func TestRoomformat_NotSet(t *testing.T) {
+	env := newTestEnv(t)
+
+	// No ROOMFORMAT — normal ShowRoom display
+	env.game.SetAttr(0, 6, "A normal room.")
+	clearOutput(env.player)
+
+	env.game.ShowRoom(env.player, 0)
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "Room Zero") {
+		t.Errorf("no ROOMFORMAT: expected room name in output, got:\n%s", out)
+	}
+}
+
+// ============================================================================
+// callfn() and nextdbref()
+// ============================================================================
+
+func TestFnCallfn(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval("[callfn(ADD,1,2,3)]")
+	if got != "6" {
+		t.Errorf("callfn(ADD,1,2,3) = %q, want %q", got, "6")
+	}
+}
+
+func TestFnNextdbref(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	// evalTestEnv NextRef=8, so nextdbref() should return #8
+	got := e.eval("[nextdbref()]")
+	if got != "#8" {
+		t.Errorf("nextdbref() = %q, want %q", got, "#8")
+	}
+}
+
+// ============================================================================
+// Multiple zones
+// ============================================================================
+
+func TestAllZones_Combined(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set primary zone on TestObject #2
+	env.game.DB.Objects[2].Zone = 4 // Other Room as primary zone
+
+	// Add an additional zone
+	env.game.DB.Objects[2].Zones = append(env.game.DB.Objects[2].Zones, 0) // Room Zero as additional zone
+
+	zones := env.game.DB.Objects[2].AllZones()
+	if len(zones) != 2 {
+		t.Fatalf("AllZones: expected 2 zones, got %d: %v", len(zones), zones)
+	}
+	if zones[0] != 4 {
+		t.Errorf("AllZones[0] = %d, want 4", zones[0])
+	}
+	if zones[1] != 0 {
+		t.Errorf("AllZones[1] = %d, want 0", zones[1])
+	}
+}
+
+func TestChzoneAdd(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set primary zone first — use Container #5 (a THING) since
+	// only rooms may be zoned to rooms; THINGs can zone to THINGs.
+	env.game.DB.Objects[2].Zone = 5
+	clearOutput(env.player)
+
+	// Create a second THING to use as additional zone
+	zoneRef := env.game.CreateObject("ZoneThing", gamedb.TypeThing, 1)
+	env.game.DB.Objects[zoneRef].Location = 0
+	env.game.AddToContents(0, zoneRef)
+
+	// Use @chzone/add to add the new zone THING
+	DispatchCommand(env.game, env.player, "@chzone/add #2=#"+fmt.Sprintf("%d", zoneRef))
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "added") {
+		t.Errorf("@chzone/add: expected 'added' in output, got:\n%s", out)
+	}
+
+	zones := env.game.DB.Objects[2].AllZones()
+	found := false
+	for _, z := range zones {
+		if z == zoneRef {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("@chzone/add: zone #%d not in AllZones: %v", zoneRef, zones)
+	}
+}
+
+func TestChzoneRemove(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set up: primary zone #5 (Container THING), additional zone = new THING
+	zoneRef := env.game.CreateObject("ExtraZone", gamedb.TypeThing, 1)
+	env.game.DB.Objects[zoneRef].Location = 0
+	env.game.AddToContents(0, zoneRef)
+
+	env.game.DB.Objects[2].Zone = 5
+	env.game.DB.Objects[2].Zones = append(env.game.DB.Objects[2].Zones, zoneRef)
+	clearOutput(env.player)
+
+	// Remove the additional zone
+	DispatchCommand(env.game, env.player, "@chzone/remove #2=#"+fmt.Sprintf("%d", zoneRef))
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "removed") {
+		t.Errorf("@chzone/remove: expected 'removed' in output, got:\n%s", out)
+	}
+
+	zones := env.game.DB.Objects[2].AllZones()
+	for _, z := range zones {
+		if z == zoneRef {
+			t.Errorf("@chzone/remove: zone #%d still in AllZones: %v", zoneRef, zones)
+		}
+	}
+}
+
+func TestFnZones(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	// Set zones on TestObject #2
+	e.game.DB.Objects[2].Zone = 4
+	e.game.DB.Objects[2].Zones = append(e.game.DB.Objects[2].Zones, 0)
+
+	got := e.eval("[zones(#2)]")
+	if !strings.Contains(got, "#4") {
+		t.Errorf("zones(#2) = %q, expected to contain #4", got)
+	}
+	if !strings.Contains(got, "#0") {
+		t.Errorf("zones(#2) = %q, expected to contain #0", got)
+	}
+}
+
+// ============================================================================
+// @hook system
+// ============================================================================
+
+func TestHookList_Empty(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// @hook/list with no hooks defined should not crash
+	DispatchCommand(env.game, env.player, "@hook/list")
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "No hooks defined") {
+		t.Errorf("@hook/list empty: expected 'No hooks defined', got:\n%s", out)
+	}
+}
+
+func TestHookSetAndList(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// Set a before hook for SAY
+	DispatchCommand(env.game, env.player, "@hook/before say=SAYBEFORE")
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "Hook before set for SAY") {
+		t.Errorf("@hook/before: expected confirmation, got:\n%s", out)
+	}
+
+	// Verify it appears in @hook/list say
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "@hook/list say")
+	out = getOutput(env.player)
+
+	if !strings.Contains(out, "SAYBEFORE") {
+		t.Errorf("@hook/list say: expected SAYBEFORE in output, got:\n%s", out)
+	}
+
+	// Verify Hooks map is populated
+	if env.game.Hooks == nil {
+		t.Fatal("@hook/before: Hooks map is nil after setting hook")
+	}
+	hs, ok := env.game.Hooks["SAY"]
+	if !ok {
+		t.Fatal("@hook/before: no hook entry for SAY")
+	}
+	if hs.Before != "SAYBEFORE" {
+		t.Errorf("@hook/before: Before = %q, want %q", hs.Before, "SAYBEFORE")
+	}
+}
+
+// ============================================================================
+// Instance system
+// ============================================================================
+
+// buildInstanceTemplate sets up a template THING with an interior room in the test env.
+// Returns the template dbref. After calling this, env.game.NextRef will have advanced.
+func buildInstanceTemplate(env *testEnv) gamedb.DBRef {
+	g := env.game
+	// Create template THING #6
+	templateRef := g.CreateObject("Ship Template", gamedb.TypeThing, 1)
+	templateObj := g.DB.Objects[templateRef]
+	templateObj.Location = 0
+	g.AddToContents(0, templateRef)
+
+	// Create interior room #7 whose Location = template (signals it's interior)
+	interiorRef := g.CreateObject("Bridge", gamedb.TypeRoom, 1)
+	interiorObj := g.DB.Objects[interiorRef]
+	interiorObj.Location = templateRef
+
+	return templateRef
+}
+
+func TestInstanceCreate(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Build template: #6 = Ship Template (THING), #7 = Bridge (ROOM, Location=#6)
+	templateRef := buildInstanceTemplate(env)
+	clearOutput(env.player)
+
+	// Create an instance
+	DispatchCommand(env.game, env.player, "@instance/create #"+fmt.Sprintf("%d", templateRef)+"=My Ship")
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "Instance created") {
+		t.Fatalf("@instance/create: expected 'Instance created', got:\n%s", out)
+	}
+
+	// Verify instance object has Flag3Instance
+	// The instance THING should be #8 (NextRef was 8 after building template)
+	var instanceRef gamedb.DBRef = -1
+	for ref, obj := range env.game.DB.Objects {
+		if obj.Name == "My Ship" && obj.HasFlag3(gamedb.Flag3Instance) {
+			instanceRef = ref
+			break
+		}
+	}
+	if instanceRef == -1 {
+		t.Fatal("@instance/create: no instance object with Flag3Instance found")
+	}
+
+	// Verify interior rooms were cloned
+	rooms := env.game.InstanceInteriorRooms(instanceRef)
+	if len(rooms) == 0 {
+		t.Error("@instance/create: no interior rooms cloned")
+	}
+}
+
+func TestInstanceEnter(t *testing.T) {
+	env := newTestEnv(t)
+
+	templateRef := buildInstanceTemplate(env)
+	clearOutput(env.player)
+
+	// Create instance
+	DispatchCommand(env.game, env.player, "@instance/create #"+fmt.Sprintf("%d", templateRef)+"=Shuttle")
+	_ = getOutput(env.player)
+
+	// Find the instance
+	var instanceRef gamedb.DBRef = -1
+	for ref, obj := range env.game.DB.Objects {
+		if obj.Name == "Shuttle" && obj.HasFlag3(gamedb.Flag3Instance) {
+			instanceRef = ref
+			break
+		}
+	}
+	if instanceRef == -1 {
+		t.Fatal("instance not found")
+	}
+
+	// Set ENTER_OK on the instance
+	env.game.DB.Objects[instanceRef].Flags[0] |= gamedb.FlagEnterOK
+
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "enter Shuttle")
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "You enter Shuttle") {
+		t.Errorf("enter instance: expected 'You enter Shuttle', got:\n%s", out)
+	}
+
+	// Player should be in the interior room, not the instance THING itself
+	playerObj := env.game.DB.Objects[1]
+	rooms := env.game.InstanceInteriorRooms(instanceRef)
+	inInterior := false
+	for _, r := range rooms {
+		if playerObj.Location == r {
+			inInterior = true
+			break
+		}
+	}
+	if !inInterior {
+		t.Errorf("enter instance: player location=%d, expected one of interior rooms %v", playerObj.Location, rooms)
+	}
+}
+
+func TestInstanceLeave(t *testing.T) {
+	env := newTestEnv(t)
+
+	templateRef := buildInstanceTemplate(env)
+	clearOutput(env.player)
+
+	// Create instance
+	DispatchCommand(env.game, env.player, "@instance/create #"+fmt.Sprintf("%d", templateRef)+"=Pod")
+	_ = getOutput(env.player)
+
+	// Find instance
+	var instanceRef gamedb.DBRef = -1
+	for ref, obj := range env.game.DB.Objects {
+		if obj.Name == "Pod" && obj.HasFlag3(gamedb.Flag3Instance) {
+			instanceRef = ref
+			break
+		}
+	}
+	if instanceRef == -1 {
+		t.Fatal("instance not found")
+	}
+
+	// Set ENTER_OK and enter it
+	env.game.DB.Objects[instanceRef].Flags[0] |= gamedb.FlagEnterOK
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "enter Pod")
+	_ = getOutput(env.player)
+
+	// Now leave
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "leave")
+	out := getOutput(env.player)
+
+	// Player should be back in Room Zero (#0), the exterior location
+	playerObj := env.game.DB.Objects[1]
+	if playerObj.Location != 0 {
+		t.Errorf("leave instance: player location=%d, want 0 (Room Zero). Output:\n%s", playerObj.Location, out)
+	}
+}
+
+func TestInstanceDestroy(t *testing.T) {
+	env := newTestEnv(t)
+
+	templateRef := buildInstanceTemplate(env)
+	clearOutput(env.player)
+
+	// Create instance
+	DispatchCommand(env.game, env.player, "@instance/create #"+fmt.Sprintf("%d", templateRef)+"=Vessel")
+	_ = getOutput(env.player)
+
+	// Find instance
+	var instanceRef gamedb.DBRef = -1
+	for ref, obj := range env.game.DB.Objects {
+		if obj.Name == "Vessel" && obj.HasFlag3(gamedb.Flag3Instance) {
+			instanceRef = ref
+			break
+		}
+	}
+	if instanceRef == -1 {
+		t.Fatal("instance not found")
+	}
+
+	// Destroy it
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "@instance/destroy #"+fmt.Sprintf("%d", instanceRef))
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "destroyed") {
+		t.Errorf("@instance/destroy: expected 'destroyed' in output, got:\n%s", out)
+	}
+
+	// Verify the instance THING is marked GOING
+	instanceObj := env.game.DB.Objects[instanceRef]
+	if !instanceObj.IsGoing() {
+		t.Error("@instance/destroy: instance object not marked GOING")
+	}
+}
+
+func TestFnIsinstance(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	// #2 is a regular THING — should return 0
+	got := e.eval("[isinstance(#2)]")
+	if got != "0" {
+		t.Errorf("isinstance(#2) = %q, want %q", got, "0")
+	}
+
+	// Set Flag3Instance on #2
+	e.game.DB.Objects[2].Flags[2] |= gamedb.Flag3Instance
+	got = e.eval("[isinstance(#2)]")
+	if got != "1" {
+		t.Errorf("isinstance(#2) with flag set = %q, want %q", got, "1")
+	}
+}
+
+func TestFnIrooms(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	// Create an instance THING and interior room
+	instanceRef := e.game.CreateObject("TestVehicle", gamedb.TypeThing, 1)
+	e.game.DB.Objects[instanceRef].Flags[2] |= gamedb.Flag3Instance
+
+	interiorRef := e.game.CreateObject("Interior", gamedb.TypeRoom, 1)
+	e.game.DB.Objects[interiorRef].Location = instanceRef
+
+	got := e.eval("[irooms(#" + fmt.Sprintf("%d", instanceRef) + ")]")
+	expected := "#" + fmt.Sprintf("%d", interiorRef)
+	if got != expected {
+		t.Errorf("irooms(#%d) = %q, want %q", instanceRef, got, expected)
+	}
+}
+
+func TestFnIvehicle(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	// Create an instance THING and interior room
+	instanceRef := e.game.CreateObject("TestVehicle", gamedb.TypeThing, 1)
+	e.game.DB.Objects[instanceRef].Flags[2] |= gamedb.Flag3Instance
+
+	interiorRef := e.game.CreateObject("Interior", gamedb.TypeRoom, 1)
+	e.game.DB.Objects[interiorRef].Location = instanceRef
+
+	got := e.eval("[ivehicle(#" + fmt.Sprintf("%d", interiorRef) + ")]")
+	expected := "#" + fmt.Sprintf("%d", instanceRef)
+	if got != expected {
+		t.Errorf("ivehicle(#%d) = %q, want %q", interiorRef, got, expected)
+	}
+}
+
+// ============================================================================
+// INSTANCE flag display
+// ============================================================================
+
+func TestInstanceFlagSet(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// @set TestObject=INSTANCE
+	DispatchCommand(env.game, env.player, "@set #2=INSTANCE")
+	_ = getOutput(env.player)
+
+	obj := env.game.DB.Objects[2]
+	if !obj.HasFlag3(gamedb.Flag3Instance) {
+		t.Error("@set INSTANCE: Flag3Instance not set on object")
+	}
+}
+
+func TestInstanceFlagDisplay(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set Flag3Instance directly on TestObject #2
+	env.game.DB.Objects[2].Flags[2] |= gamedb.Flag3Instance
+
+	flags := flagString(env.game.DB.Objects[2])
+	if !strings.Contains(flags, "^") {
+		t.Errorf("flagString: expected '^' for INSTANCE flag, got %q", flags)
+	}
+}
+
