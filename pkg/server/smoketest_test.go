@@ -1279,3 +1279,114 @@ func TestInstanceFlagDisplay(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// JSON conversion functions: stringtojson, listtojson, jsontolist, jsonescape
+// ============================================================================
+
+func TestFnStringToJson(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`[stringtojson(hello)]`, `"hello"`},
+		{`[stringtojson()]`, `""`},
+		{`[stringtojson(line1)]`, `"line1"`},
+	}
+	for _, tt := range tests {
+		got := e.eval(tt.input)
+		if got != tt.want {
+			t.Errorf("stringtojson: eval(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestFnListToJson_Strings(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval(`[listtojson(red green blue)]`)
+	want := `["red","green","blue"]`
+	if got != want {
+		t.Errorf("listtojson strings: got %q, want %q", got, want)
+	}
+}
+
+func TestFnListToJson_Numbers(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval(`[listtojson(1 2 3,%b,number)]`)
+	// Note: numbers in JSON are unquoted
+	if !strings.Contains(got, "1") || !strings.Contains(got, "2") || !strings.Contains(got, "3") {
+		t.Errorf("listtojson numbers: got %q, expected [1,2,3]", got)
+	}
+	if strings.Contains(got, `"1"`) {
+		t.Errorf("listtojson numbers: values should not be quoted, got %q", got)
+	}
+}
+
+func TestFnListToJson_Auto(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval(`[listtojson(hello 42 true,%b,auto)]`)
+	if !strings.Contains(got, `"hello"`) {
+		t.Errorf("listtojson auto: expected quoted hello, got %q", got)
+	}
+	if !strings.Contains(got, "42") {
+		t.Errorf("listtojson auto: expected 42, got %q", got)
+	}
+}
+
+func TestFnListToJson_Empty(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval(`[listtojson()]`)
+	if got != "[]" {
+		t.Errorf("listtojson empty: got %q, want []", got)
+	}
+}
+
+func TestFnListToJson_CustomDelim(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval(`[listtojson(a|b|c,|)]`)
+	want := `["a","b","c"]`
+	if got != want {
+		t.Errorf("listtojson custom delim: got %q, want %q", got, want)
+	}
+}
+
+func TestFnJsonToList(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	// Use json(array,...) to build the JSON input, avoiding bracket/comma escape issues
+	got := e.eval(`[jsontolist([json(array,1,2,3)])]`)
+	if got != "1 2 3" {
+		t.Errorf("jsontolist numbers: got %q, want %q", got, "1 2 3")
+	}
+
+	got = e.eval(`[jsontolist([json(array,a,b,c)])]`)
+	if got != "a b c" {
+		t.Errorf("jsontolist strings: got %q, want %q", got, "a b c")
+	}
+}
+
+func TestFnJsonToList_CustomDelim(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval(`[jsontolist([json(array,x,y,z)],|)]`)
+	want := "x|y|z"
+	if got != want {
+		t.Errorf("jsontolist custom delim: got %q, want %q", got, want)
+	}
+}
+
+func TestFnJsonEscape(t *testing.T) {
+	e := newEvalTestEnv(t)
+
+	got := e.eval(`[jsonescape(hello)]`)
+	if got != "hello" {
+		t.Errorf("jsonescape plain: got %q, want %q", got, "hello")
+	}
+}
+

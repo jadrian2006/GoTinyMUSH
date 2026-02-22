@@ -16104,6 +16104,7 @@ TRUNC_LENGTH - Per-player examine output truncation
 
 	json()		json_query()	json_mod()	json_pp()
 	json_test()	json_to_array()	array_to_json()
+	stringtojson()	listtojson()	jsontolist()	jsonescape()
 
   See also: OOB FUNCTIONS, ARRAY FUNCTIONS.
 
@@ -16298,6 +16299,98 @@ TRUNC_LENGTH - Per-player examine output truncation
     You say, "["hello",[1,2,3]]"
 
   See also: json_to_array(), json(), ARRAY FUNCTIONS, JSON FUNCTIONS.
+
+& STRINGTOJSON()
+  Function: stringtojson(<string>)
+
+  Converts a plain MUSH string to a JSON string literal. The result is
+  properly quoted and escaped, ready for embedding in JSON structures.
+
+  This is a shortcut for json(string, <text>) and is especially useful
+  when building JSON payloads in softcode for use with oob().
+
+  Examples:
+    > say stringtojson(hello world)
+    You say, ""hello world""
+    > say stringtojson(He said "hi")
+    You say, ""He said \"hi\"""
+    > say stringtojson()
+    You say, """"
+
+  See also: listtojson(), jsonescape(), json(), JSON FUNCTIONS.
+
+& LISTTOJSON()
+  Function: listtojson(<list>[, <delim>[, <type>]])
+
+  Converts a MUSH list to a JSON array.
+
+  Arguments:
+    <list>    The MUSH list to convert.
+    <delim>   Delimiter character (default: space).
+    <type>    Element type: string (default), number, or auto.
+              string - each element becomes a JSON string.
+              number - parse as number; invalid values become null.
+              auto   - auto-detect: numbers, bools, null, or string.
+
+  Examples:
+    > say listtojson(red green blue)
+    You say, "["red","green","blue"]"
+    > say listtojson(1 2 3, , number)
+    You say, "[1,2,3]"
+    > say listtojson(hello 42 true, , auto)
+    You say, "["hello",42,true]"
+    > say listtojson(a|b|c, |)
+    You say, "["a","b","c"]"
+    > say listtojson()
+    You say, "[]"
+
+  See also: jsontolist(), stringtojson(), json(), JSON FUNCTIONS.
+
+& JSONTOLIST()
+  Function: jsontolist(<json>[, <delim>])
+
+  Converts a JSON array to a MUSH list.
+
+  Each element is converted to its MUSH string representation:
+  strings are unquoted, numbers and booleans become their text form,
+  nested objects/arrays remain as JSON strings, null becomes "null".
+
+  For JSON objects, returns the sorted keys as a list.
+
+  Arguments:
+    <json>    A valid JSON string.
+    <delim>   Output delimiter (default: space).
+
+  Examples:
+    > say jsontolist(["a","b","c"])
+    You say, "a b c"
+    > say jsontolist([1,2,3])
+    You say, "1 2 3"
+    > say jsontolist(["x","y","z"], |)
+    You say, "x|y|z"
+    > say jsontolist({"hp":100,"mp":50})
+    You say, "hp mp"
+
+  See also: listtojson(), json_query(), JSON FUNCTIONS.
+
+& JSONESCAPE()
+  Function: jsonescape(<string>)
+
+  Escapes a string for safe embedding inside a JSON value, without
+  adding surrounding quotes. Special characters like quotes, backslashes,
+  and control characters are properly escaped.
+
+  Unlike stringtojson(), this does NOT add surrounding quotes -- it only
+  escapes the content. This is useful for building JSON templates in
+  softcode where you handle the quoting yourself.
+
+  Examples:
+    > say jsonescape(hello)
+    You say, "hello"
+    > say jsonescape(say "hi")
+    You say, "say \"hi\""
+
+  See also: stringtojson(), json(), JSON FUNCTIONS.
 
 & OOB FUNCTIONS
   Topic: OOB Functions

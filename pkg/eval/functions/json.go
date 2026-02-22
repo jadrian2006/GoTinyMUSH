@@ -577,6 +577,136 @@ func fnJsonTest(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	buf.WriteString("1")
 }
 
+// --- MUSH-to-JSON conversion functions ---
+
+// fnStringToJson converts a plain MUSH string to a JSON string literal (quoted and escaped).
+// stringtojson(string)
+// Example: stringtojson(He said "hello") → "He said \"hello\""
+// This is useful for building JSON payloads in softcode without needing json(string,...).
+func fnStringToJson(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	s := ""
+	if len(args) > 0 {
+		s = args[0]
+	}
+	b, _ := json.Marshal(s)
+	buf.Write(b)
+}
+
+// fnListToJson converts a MUSH list to a JSON array.
+// listtojson(list[, delim[, type]])
+// delim: delimiter character (default: space)
+// type: "string" (default), "number", "auto"
+//   string — each element becomes a JSON string
+//   number — each element parsed as number (invalid → null)
+//   auto   — uses jsonAutoType detection (numbers, bools, null, strings)
+// Example: listtojson(1 2 3, , number) → [1,2,3]
+//          listtojson(red green blue) → ["red","green","blue"]
+func fnListToJson(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || strings.TrimSpace(args[0]) == "" {
+		buf.WriteString("[]")
+		return
+	}
+
+	delim := " "
+	if len(args) > 1 && args[1] != "" {
+		delim = args[1]
+	}
+
+	elemType := "string"
+	if len(args) > 2 && args[2] != "" {
+		elemType = strings.ToLower(strings.TrimSpace(args[2]))
+	}
+
+	elements := strings.Split(args[0], delim)
+	arr := make([]any, 0, len(elements))
+
+	for _, el := range elements {
+		el = strings.TrimSpace(el)
+		if delim == " " && el == "" {
+			continue // skip empty tokens from multiple spaces
+		}
+		switch elemType {
+		case "number":
+			if n, err := strconv.ParseInt(el, 10, 64); err == nil {
+				arr = append(arr, n)
+			} else if f, err := strconv.ParseFloat(el, 64); err == nil {
+				arr = append(arr, f)
+			} else {
+				arr = append(arr, nil) // invalid number → null
+			}
+		case "auto":
+			arr = append(arr, jsonAutoType(el))
+		default: // "string"
+			arr = append(arr, el)
+		}
+	}
+
+	b, err := json.Marshal(arr)
+	if err != nil {
+		buf.WriteString("#-1 JSON ERROR")
+		return
+	}
+	buf.Write(b)
+}
+
+// fnJsonToList converts a JSON array to a MUSH list.
+// jsontolist(json[, delim])
+// Each element is converted back to a MUSH string representation.
+// Objects/arrays within remain as JSON strings; scalars are unquoted.
+func fnJsonToList(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 {
+		buf.WriteString("#-1 TOO FEW ARGUMENTS")
+		return
+	}
+
+	var data any
+	if err := json.Unmarshal([]byte(args[0]), &data); err != nil {
+		buf.WriteString("#-1 INVALID JSON")
+		return
+	}
+
+	delim := " "
+	if len(args) > 1 && args[1] != "" {
+		delim = args[1]
+	}
+
+	switch v := data.(type) {
+	case []any:
+		parts := make([]string, len(v))
+		for i, elem := range v {
+			parts[i] = jsonValueToStr(elem)
+		}
+		buf.WriteString(strings.Join(parts, delim))
+	case map[string]any:
+		// For objects, return keys
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		buf.WriteString(strings.Join(keys, delim))
+	default:
+		buf.WriteString(jsonValueToStr(data))
+	}
+}
+
+// fnJsonEscape escapes a string for safe embedding inside a JSON value.
+// jsonescape(string)
+// Unlike stringtojson(), this does NOT add surrounding quotes — it only escapes
+// special characters. Useful for building JSON templates in softcode.
+// Example: jsonescape(line1\nline2) → line1\\nline2
+func fnJsonEscape(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 {
+		return
+	}
+	s := args[0]
+	// Marshal to get proper escaping, then strip the surrounding quotes
+	b, _ := json.Marshal(s)
+	if len(b) >= 2 {
+		buf.Write(b[1 : len(b)-1]) // strip leading and trailing quote
+	}
+}
+
 // --- JSON / Array bridge functions ---
 
 // fnJsonToArray loads a JSON array into a named MUSH array.

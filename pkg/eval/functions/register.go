@@ -611,6 +611,10 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("JSON_TEST", fnJsonTest, 1, 0)
 	ctx.RegisterFunction("JSON_TO_ARRAY", fnJsonToArray, 2, 0)
 	ctx.RegisterFunction("ARRAY_TO_JSON", fnArrayToJson, 1, eval.FnVarArgs)
+	ctx.RegisterFunction("STRINGTOJSON", fnStringToJson, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("LISTTOJSON", fnListToJson, 1, eval.FnVarArgs)
+	ctx.RegisterFunction("JSONTOLIST", fnJsonToList, 1, eval.FnVarArgs)
+	ctx.RegisterFunction("JSONESCAPE", fnJsonEscape, 1, 0)
 
 	// Formatting
 	ctx.RegisterFunction("ALIGN", fnAlign, 2, eval.FnVarArgs)
