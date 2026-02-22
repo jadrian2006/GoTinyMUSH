@@ -1,5 +1,5 @@
 import { signal } from "@preact/signals";
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 
 interface ContextMenuItem {
   label: string;
@@ -34,19 +34,24 @@ export function hideContextMenu() {
 
 export function ContextMenu() {
   const state = menuState.value;
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!state.visible) return;
 
-    const handleClick = () => hideContextMenu();
+    const handleClick = (e: MouseEvent) => {
+      // Don't dismiss if click is inside the context menu
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      hideContextMenu();
+    };
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") hideContextMenu();
     };
 
-    document.addEventListener("click", handleClick);
+    document.addEventListener("click", handleClick, true);
     document.addEventListener("keydown", handleEscape);
     return () => {
-      document.removeEventListener("click", handleClick);
+      document.removeEventListener("click", handleClick, true);
       document.removeEventListener("keydown", handleEscape);
     };
   }, [state.visible]);
@@ -55,6 +60,7 @@ export function ContextMenu() {
 
   return (
     <div
+      ref={menuRef}
       class="context-menu"
       style={{ left: `${state.x}px`, top: `${state.y}px` }}
     >
