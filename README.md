@@ -13,12 +13,13 @@ GoTinyMUSH is a from-scratch port of the classic TinyMUSH server, replacing ~76,
 - [Configuration](#configuration)
 - [Command-Line Reference](#command-line-reference)
 - [Key Features](#key-features)
-  - [376+ Softcode Functions](#softcode-functions)
+  - [550+ Softcode Functions](#softcode-functions)
   - [163 Commands](#commands)
   - [Web Interface & REST API](#web-interface)
   - [SSL/TLS](#ssltls)
   - [OOB Protocols](#oob-protocol-support)
   - [Backups & Archives](#backups)
+  - [AI Chatbot Service](#ai-chatbot-service)
 - [Migration Guide: Changes from TinyMUSH 3.x](#migration-guide-behavioral-changes-from-tinymush-3x)
 - [New Functions from TinyMUSH 4.x](#new-functions-from-tinymush-4x)
 - [New Functions from RhostMUSH](#new-functions-from-rhostmush)
@@ -263,7 +264,7 @@ Environment variables are used as defaults when flags are not provided. Command-
 
 ### Softcode Functions
 
-376+ softcode functions covering the full TinyMUSH 3.x set plus extensions from RhostMUSH and GoTinyMUSH originals:
+550+ softcode functions covering the full TinyMUSH 3.x set plus extensions from TinyMUSH 4.x, RhostMUSH, PennMUSH, and GoTinyMUSH originals:
 
 - **Math**: arithmetic, trig, hyperbolic, exp/log, bitwise, vector, distance, comparison, logic
 - **Vector**: vadd, vsub, vmul, vdot, vmag, vunit, vdim, vcross, vdist, vlerp, vnear, vclamp
@@ -280,8 +281,13 @@ Environment variables are used as defaults when flags are not provided. Command-
 - **Structure/instance system**: typed structures with persistence
 - **Connection**: lwho, conn, idle, doing, pmatch, ports, session
 - **Side-effects**: create, set, tel, link, trigger, wipe, force, wait, pemit, remit, oemit
-- **System**: search, stats, config, eval, fcount/fdepth, starttime, version
+- **Array**: array, adestroy, apush, apop, ashift, aunshift, aget, aset, alen, alist, aload, larrays
+- **JSON**: json, json_query, json_mod, json_pp, json_test, json_to_array, array_to_json, stringtojson, listtojson, jsontolist, jsonescape
+- **OOB/GMCP**: oob, hasgmcp, gmcppackages, hasmsdp
+- **System**: search, stats, config, eval, fcount/fdepth, starttime, version, nextdbref, callfn, textsearch
 - **SQL**: sql(), sqlescape()
+- **Crypto**: hmac, digest, crc32, encode64, decode64
+- **Connection history**: connlog, addrlog
 
 ### Commands
 
@@ -396,6 +402,34 @@ archive_hook: "scp %f user@backup-host:/backups/"  # optional post-archive comma
 ```
 
 This validates checksums, restores the database, and prompts before overwriting config files that differ.
+
+### AI Chatbot Service
+
+GoTinyMUSH includes an AI chatbot service (`bot/`) that connects to the MUSH as a player via WebSocket, monitors room speech, channel messages, and pages, and responds using an LLM (Anthropic Claude or OpenAI-compatible).
+
+**Features:**
+
+- Connects via WebSocket with JWT authentication
+- Responds to room speech, channel messages, and private pages
+- Configurable trigger patterns: bot name, @mention, custom regex, per-channel overrides
+- Per-room/channel/player conversation context with sliding window history
+- Three-layer self-loop prevention (name, dbref, outbound tracking)
+- Supports Anthropic Claude and OpenAI-compatible APIs (including Ollama, vLLM)
+- Auto-reconnect with exponential backoff and jitter
+- Message splitting for long responses
+- Channel auto-join on connect
+- Docker support with environment-driven configuration
+- Multi-bot support via multiple container instances
+
+**Quick start:**
+
+```bash
+cd bot
+npm install && npm run build
+MUSH_USER=BotName MUSH_PASS=pass LLM_API_KEY=sk-... npm start
+```
+
+See `bot/.env.example` for the full list of configuration variables.
 
 ---
 
@@ -647,6 +681,62 @@ See: `help MARKERS` in-game, or [docs/FEATURES.md](docs/FEATURES.md).
 | `store(name, value)` | Set and return a named variable (combines setx + x) |
 | `items(structure)` | Return number of components in a structure definition |
 
+### Array Functions
+
+A persistent per-object array system. Arrays are stored as object attributes and manipulated with stack/queue-style operations.
+
+| Function | Description |
+|---|---|
+| `array(object, name, dim1[, dim2...])` | Create a named array with specified dimensions |
+| `adestroy(object, name)` | Delete an array |
+| `apush(object, name, value)` | Push value onto end of array |
+| `apop(object, name)` | Pop value from end of array |
+| `ashift(object, name)` | Remove and return first element |
+| `aunshift(object, name, value)` | Insert value at beginning |
+| `aget(object, name, index)` | Get element by index |
+| `aset(object, name, index, value)` | Set element by index |
+| `alen(object, name)` | Return array length |
+| `alist(object, name[, delim])` | Return all elements as a list |
+| `aload(object, name, list[, delim])` | Load a list into an array |
+| `larrays(object)` | List all arrays on an object |
+
+### JSON Functions
+
+Full JSON support for creating, querying, and transforming JSON data within softcode.
+
+| Function | Description |
+|---|---|
+| `json(type, ...)` | Create JSON values (object, array, string, number, boolean, null) |
+| `json_query(json, path, ...)` | Query JSON with dot/bracket paths, type/size/exists checks |
+| `json_mod(json, op, path, value)` | Modify JSON (set, insert, delete, append, incr/decr) |
+| `json_pp(json)` | Pretty-print JSON with indentation |
+| `json_test(string)` | Test if a string is valid JSON |
+| `json_to_array(json, object, name)` | Convert JSON array to a MUSH array |
+| `array_to_json(object, name)` | Convert a MUSH array to a JSON array |
+| `stringtojson(string)` | Escape a string as a JSON string value |
+| `listtojson(list[, delim])` | Convert a MUSH list to a JSON array |
+| `jsontolist(json[, delim])` | Convert a JSON array to a MUSH list |
+| `jsonescape(string)` | Escape special characters for JSON embedding |
+
+### Additional Systems
+
+| Feature | Description |
+|---|---|
+| `@hook` | Extend built-in commands with before/after/override hooks |
+| `@roomformat` | Customizable room rendering via per-room/zone format objects |
+| `@program`/`@quitprogram` | Interactive menu system for multi-step player input |
+| Sensory commands | `smell`, `taste`, `touch`, `listen` with per-room/object attributes |
+| Channel mogrifiers | Transform channel messages through a softcode object |
+| Multiple zones | Objects can belong to multiple zones for layered security |
+| Instance/vehicle system | Typed structure instances with persistence |
+| `align(specs, col1, col2, ...)` | Column alignment with left/right/center/truncate/pad specs |
+| `reswitch()`/`reswitchall()` | Regexp-based switch evaluation |
+| `setsymdiff(list1, list2)` | Symmetric set difference |
+| `pgrep()`/`pgrepi()` | Parent-aware attribute grep |
+| `hmac(algo, key, text)` | HMAC authentication |
+| `connlog()`/`addrlog()` | Connection history queries |
+| `textsearch(file, term)` | Help file full-text search from softcode |
+
 ---
 
 ## Architecture Changes from C TinyMUSH
@@ -726,6 +816,7 @@ pkg/
   server/       TCP/WebSocket server, commands, REST API, softcode queue
   crypt/        DES password hashing (TinyMUSH compat)
 web/            Preact web client (Vite + Tailwind CSS)
+bot/            AI chatbot service (TypeScript/Node.js)
 data/
   game.yaml             Example game configuration
   goTinyAlias.conf      Command/flag/function/attribute aliases
@@ -744,7 +835,7 @@ All features listed above are functional, including:
 
 - TCP server with connect/create/WHO/QUIT
 - Flatfile import into bbolt with full round-trip fidelity
-- 376+ softcode functions and 163 commands
+- 550+ softcode functions and 163 commands
 - Archive/backup system with @archive, @archive/list, scheduled archives, retention, post-archive hooks, and -restore flag
 - Comsys (channel system) with bbolt persistence
 - Softcode queue with @trigger, @wait, @force, $-command matching, @startup, @notify, @halt
