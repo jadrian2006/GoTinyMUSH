@@ -13,15 +13,15 @@ import (
 // ## = current element, #@ = position (0-indexed), #+ = second list element
 func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
+	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	pattern := args[1]
 	idelim := " "
 	if len(args) > 2 {
-		idelim = ctx.Exec(args[2], eval.EvFCheck|eval.EvEval, nil)
+		idelim = ctx.Exec(args[2], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	}
 	odelim := " "
 	if len(args) > 3 {
-		odelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval, nil)
+		odelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	}
 	if idelim == "" { idelim = " " }
 
@@ -241,13 +241,13 @@ func fnMix(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 // iter2(list1, list2, pattern[, idelim[, odelim]])
 func fnIter2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 3 { return }
-	list1Str := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
-	list2Str := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval, nil)
+	list1Str := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+	list2Str := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	pattern := args[2]
 	idelim := " "
-	if len(args) > 3 { idelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 3 { idelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	odelim := idelim
-	if len(args) > 4 { odelim = ctx.Exec(args[4], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 4 { odelim = ctx.Exec(args[4], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	if idelim == "" { idelim = " " }
 
 	words1 := splitList(list1Str, idelim)
@@ -294,12 +294,12 @@ func fnWhenfalse(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, 
 
 func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, wantTrue bool) {
 	if len(args) < 2 { return }
-	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
+	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	pattern := args[1]
 	idelim := " "
-	if len(args) > 2 { idelim = ctx.Exec(args[2], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 2 { idelim = ctx.Exec(args[2], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	odelim := idelim
-	if len(args) > 3 { odelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 3 { odelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	if idelim == "" { idelim = " " }
 
 	words := splitList(listStr, idelim)
@@ -370,12 +370,12 @@ func fnUntil(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 // fnLoop — like iter() but emits output as notifications instead of returning.
 func fnLoop(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
+	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	pattern := args[1]
 	idelim := " "
-	if len(args) > 2 { idelim = ctx.Exec(args[2], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 2 { idelim = ctx.Exec(args[2], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	odelim := idelim
-	if len(args) > 3 { odelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 3 { odelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	if idelim == "" { idelim = " " }
 	_ = odelim
 
@@ -415,11 +415,11 @@ func fnList(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, 
 // list2(list1, list2, pattern[, idelim])
 func fnList2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 3 { return }
-	list1Str := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
-	list2Str := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval, nil)
+	list1Str := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+	list2Str := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	pattern := args[2]
 	idelim := " "
-	if len(args) > 3 { idelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 3 { idelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	if idelim == "" { idelim = " " }
 
 	words1 := splitList(list1Str, idelim)
@@ -470,13 +470,13 @@ func fnWhenfalse2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _,
 
 func when2Helper(ctx *eval.EvalContext, args []string, buf *strings.Builder, wantTrue bool) {
 	if len(args) < 3 { return }
-	list1Str := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
-	list2Str := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval, nil)
+	list1Str := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+	list2Str := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	pattern := args[2]
 	idelim := " "
-	if len(args) > 3 { idelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 3 { idelim = ctx.Exec(args[3], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	odelim := idelim
-	if len(args) > 4 { odelim = ctx.Exec(args[4], eval.EvFCheck|eval.EvEval, nil) }
+	if len(args) > 4 { odelim = ctx.Exec(args[4], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil) }
 	if idelim == "" { idelim = " " }
 
 	words1 := splitList(list1Str, idelim)

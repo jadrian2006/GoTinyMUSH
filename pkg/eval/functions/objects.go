@@ -845,7 +845,8 @@ func fnHasattrp(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if len(args) < 2 { buf.WriteString("0"); return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("0"); return }
-	text := getAttrByName(ctx, ref, args[1])
+	attrName := strings.ToUpper(strings.TrimSpace(args[1]))
+	text := getAttrByName(ctx, ref, attrName)
 	buf.WriteString(boolToStr(text != ""))
 }
 

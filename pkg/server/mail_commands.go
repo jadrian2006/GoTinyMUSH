@@ -11,7 +11,15 @@ import (
 // cmdMail handles the @mail command with switch routing.
 func cmdMail(g *Game, d *Descriptor, args string, switches []string) {
 	if g.Mail == nil {
-		d.Send("The mail system is not enabled.")
+		// Fall through to softcode $-commands (e.g. BrandyMail)
+		input := "@mail"
+		if len(switches) > 0 {
+			input += "/" + strings.Join(switches, "/")
+		}
+		if args != "" {
+			input += " " + args
+		}
+		g.MatchDollarCommands(d.Player, d.Player, input)
 		return
 	}
 
@@ -96,7 +104,9 @@ func cmdMail(g *Game, d *Descriptor, args string, switches []string) {
 // cmdMailDash handles the "- <text>" prefix command for draft body appending.
 func cmdMailDash(g *Game, d *Descriptor, args string, switches []string) {
 	if g.Mail == nil {
-		d.Send("The mail system is not enabled.")
+		// Fall through to softcode $-commands (e.g. BrandyMail)
+		input := "- " + args
+		g.MatchDollarCommands(d.Player, d.Player, input)
 		return
 	}
 

@@ -112,8 +112,16 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				buf.WriteByte(' ')
 				inner = inner[1:]
 			}
-			// Evaluate contents without strip and without function checking
-			ctx.exec(buf, inner, evalFlags&^(EvStrip|EvFCheck), cargs)
+			if evalFlags&EvStrip != 0 {
+				// EvStrip mode (NoEval function branches like switch/iter/ifelse):
+				// braces are grouping syntax; strip them and evaluate inner content
+				// with full function checking preserved (PennMUSH/BrandyMail behavior).
+				ctx.exec(buf, inner, evalFlags&^EvStrip, cargs)
+			} else {
+				// Normal mode: braces protect content from function evaluation.
+				// Standard TinyMUSH behavior: {text} prevents [function] calls.
+				ctx.exec(buf, inner, evalFlags&^(EvStrip|EvFCheck), cargs)
+			}
 			if evalFlags&EvStrip == 0 {
 				buf.WriteByte('}')
 			}
@@ -252,7 +260,7 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			} else {
 				evaledArgs = make([]string, len(args))
 				for i, arg := range args {
-					evaledArgs[i] = ctx.Exec(strings.TrimSpace(arg), evalFlags|EvFCheck, cargs)
+					evaledArgs[i] = ctx.Exec(strings.TrimSpace(arg), evalFlags|EvFCheck|EvStrip, cargs)
 				}
 			}
 

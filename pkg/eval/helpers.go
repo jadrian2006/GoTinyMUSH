@@ -144,6 +144,7 @@ func (ctx *EvalContext) resolveDBRefSimple(s string) gamedb.DBRef {
 // Walks the parent chain like TinyMUSH's atr_pget.
 func (ctx *EvalContext) GetAttrByNameHelper(ref gamedb.DBRef, attrName string) string {
 	// Resolve the attribute number first
+	attrName = strings.ToUpper(strings.TrimSpace(attrName))
 	attrNum := -1
 	if def, ok := ctx.DB.AttrByName[attrName]; ok {
 		attrNum = def.Number
