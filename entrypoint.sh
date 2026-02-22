@@ -23,6 +23,9 @@ adduser mush mush 2>/dev/null
 # Fix ownership on writable directories
 chown -R mush:mush /game/data /game/certs /game/seed 2>/dev/null
 
+# Allow non-root to bind to ports 80/443 (Let's Encrypt ACME + HTTPS)
+setcap 'cap_net_bind_service=+ep' /usr/local/bin/gotinymush 2>/dev/null || true
+
 echo "Starting as UID=$(id -u mush) GID=$(id -g mush) TZ=${TZ:-UTC}"
 
 # Drop privileges and exec the server

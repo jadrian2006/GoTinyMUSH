@@ -25,8 +25,8 @@ RUN CGO_ENABLED=0 go build -ldflags "-X github.com/crystal-mush/gotinymush/pkg/s
 # Stage 3: Final image
 FROM alpine:latest
 
-# su-exec for dropping privileges (lightweight gosu alternative)
-RUN apk add --no-cache su-exec tzdata
+# su-exec for dropping privileges, libcap for setcap (low-port binding)
+RUN apk add --no-cache su-exec tzdata libcap
 
 # Create default mush user (UID/GID adjusted at runtime by entrypoint)
 RUN addgroup -g 1000 mush && adduser -D -h /game -u 1000 -G mush mush
@@ -47,7 +47,7 @@ COPY data/minimal.FLAT /game/seed/minimal.FLAT
 
 RUN mkdir -p /game/data /game/certs && chown -R mush:mush /game
 
-EXPOSE 6250 8443
+EXPOSE 80 443 6250 8443
 
 # All paths configurable via environment variables.
 # MUSH_BOLT and MUSH_DB are intentionally NOT set here:
