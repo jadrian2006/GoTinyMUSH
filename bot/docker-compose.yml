@@ -1,0 +1,34 @@
+services:
+  bot:
+    build: .
+    image: gotinymush-bot
+    restart: unless-stopped
+    environment:
+      MUSH_WS_URL: ${MUSH_WS_URL:-ws://gotinymush:8443/ws}
+      MUSH_REST_URL: ${MUSH_REST_URL:-http://gotinymush:8443}
+      AUTH_MODE: ${AUTH_MODE:-password}
+      MUSH_USER: ${MUSH_USER:-}
+      MUSH_PASS: ${MUSH_PASS:-}
+      MUSH_DBREF: ${MUSH_DBREF:-}
+      MUSH_APIKEY: ${MUSH_APIKEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-20250514}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-300}
+      BOT_NAME: ${BOT_NAME:-Assistant}
+      BOT_SYSTEM_PROMPT: ${BOT_SYSTEM_PROMPT:-}
+      BOT_TRIGGERS: ${BOT_TRIGGERS:-}
+      BOT_TRIGGER_ALL_ROOM: ${BOT_TRIGGER_ALL_ROOM:-false}
+      BOT_CHANNELS: ${BOT_CHANNELS:-[]}
+      CONTEXT_MAX_MESSAGES: ${CONTEXT_MAX_MESSAGES:-20}
+      CONTEXT_TTL_MINUTES: ${CONTEXT_TTL_MINUTES:-30}
+      COOLDOWN_MS: ${COOLDOWN_MS:-2000}
+      MAX_RESPONSE_LENGTH: ${MAX_RESPONSE_LENGTH:-900}
+    depends_on:
+      - gotinymush
+
+  # Reference: MUSH server (defined elsewhere, included for dependency)
+  gotinymush:
+    image: gotinymush
+    # Defined in CrystalMUSH docker-compose, or override with profiles
