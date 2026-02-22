@@ -20,6 +20,10 @@ import (
 //   instance's exterior location, destroys interior exits, rooms, and the
 //   instance THING itself.
 func cmdInstance(g *Game, d *Descriptor, args string, switches []string) {
+	if g.Conf != nil && !g.Conf.InstancesEnabled {
+		d.Send("The instance system is not enabled.")
+		return
+	}
 	if HasSwitch(switches, "create") {
 		instanceCreate(g, d, args)
 	} else if HasSwitch(switches, "destroy") {

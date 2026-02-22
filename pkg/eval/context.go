@@ -370,6 +370,29 @@ func (ctx *EvalContext) GetAttrText(obj gamedb.DBRef, attrNum int) string {
 	return StripAttrPrefix(raw)
 }
 
+// GetAttrTextParent fetches the text portion of an attribute, walking the parent
+// chain like TinyMUSH's atr_pget. This is the correct method for most attribute
+// lookups (%v substitutions, @function invocation, pronoun resolution, etc.).
+func (ctx *EvalContext) GetAttrTextParent(obj gamedb.DBRef, attrNum int) string {
+	current := obj
+	for depth := 0; depth <= 10; depth++ {
+		dbObj, ok := ctx.DB.Objects[current]
+		if !ok {
+			return ""
+		}
+		for _, attr := range dbObj.Attrs {
+			if attr.Number == attrNum {
+				return StripAttrPrefix(attr.Value)
+			}
+		}
+		if dbObj.Parent == gamedb.Nothing || dbObj.Parent == current {
+			return ""
+		}
+		current = dbObj.Parent
+	}
+	return ""
+}
+
 // StripAttrPrefix removes the "\x01owner:flags:" prefix from a raw attribute value.
 // TinyMUSH stores attributes either as raw text (no prefix) or with a \x01 marker
 // followed by "owner:flags:text". If no \x01 marker is present, returns the raw value.

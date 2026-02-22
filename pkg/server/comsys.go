@@ -305,7 +305,7 @@ func (g *Game) ComsysProcessAlias(d *Descriptor, ca *gamedb.ChanAlias, args stri
 	}
 
 	// Apply mogrifier if set
-	if ch.Mogrifier != gamedb.Nothing {
+	if ch.Mogrifier != gamedb.Nothing && (g.Conf == nil || g.Conf.MogrifierEnabled) {
 		mogObj, mogOk := g.DB.Objects[ch.Mogrifier]
 		if mogOk {
 			mogAttr := g.GetAttrTextByName(ch.Mogrifier, "MOGRIFIER")

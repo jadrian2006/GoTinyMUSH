@@ -492,13 +492,14 @@ func fnV(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	if len(s) == 1 {
 		ch := strings.ToUpper(s)[0]
 		if ch >= 'A' && ch <= 'Z' {
-			attrNum := 100 + int(ch-'A') // A_VA = 100 (matches C TinyMUSH constants.h)
-			text := ctx.GetAttrText(ctx.Player, attrNum)
+			// v(a) → VA, v(b) → VB, etc. — walk parents
+			attrName := "V" + string(ch)
+			text := getAttrByName(ctx, ctx.Player, attrName)
 			buf.WriteString(text)
 			return
 		}
 	}
-	// Generic attribute get
+	// Generic attribute get with parent walk
 	attrName := strings.ToUpper(s)
 	text := getAttrByName(ctx, ctx.Player, attrName)
 	buf.WriteString(text)

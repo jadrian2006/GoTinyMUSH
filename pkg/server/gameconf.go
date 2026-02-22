@@ -76,9 +76,15 @@ type GameConf struct {
 	PuebloVersion string `yaml:"pueblo_version"`
 
 	// --- Module toggles ---
-	MailEnabled   bool `yaml:"mail_enabled"`
-	ComsysEnabled bool `yaml:"comsys_enabled"`
-	MailExpiration int  `yaml:"mail_expiration"` // Days before auto-expire, 0 = never
+	MailEnabled       bool `yaml:"mail_enabled"`
+	ComsysEnabled     bool `yaml:"comsys_enabled"`
+	MailExpiration    int  `yaml:"mail_expiration"`    // Days before auto-expire, 0 = never
+	HooksEnabled      bool `yaml:"hooks_enabled"`      // @hook command pre/post/override system
+	InstancesEnabled  bool `yaml:"instances_enabled"`  // @instance vehicle/container system
+	SensoryEnabled    bool `yaml:"sensory_enabled"`    // smell/touch/taste/listen commands
+	RoomformatEnabled bool `yaml:"roomformat_enabled"` // @roomformat custom room rendering
+	MultizoneEnabled  bool `yaml:"multizone_enabled"`  // @chzone/add, @chzone/remove, zones()
+	MogrifierEnabled  bool `yaml:"mogrifier_enabled"`  // Channel message mogrifiers
 
 	// --- Channels (stored for future comsys) ---
 	PublicChannel string `yaml:"public_channel"`
@@ -188,6 +194,12 @@ func DefaultGameConf() *GameConf {
 		MailEnabled:             true,
 		ComsysEnabled:           true,
 		MailExpiration:          14,
+		HooksEnabled:            true,
+		InstancesEnabled:        true,
+		SensoryEnabled:          true,
+		RoomformatEnabled:       true,
+		MultizoneEnabled:        true,
+		MogrifierEnabled:        true,
 		PuebloEnabled:           false,
 		PuebloVersion:           "This world is Pueblo 1.0 enhanced",
 		SpellcheckEnabled:       false,
@@ -413,6 +425,18 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.ComsysEnabled = parseBool(val)
 		case "mail_expiration":
 			gc.MailExpiration = atoi(val, gc.MailExpiration)
+		case "hooks_enabled":
+			gc.HooksEnabled = parseBool(val)
+		case "instances_enabled":
+			gc.InstancesEnabled = parseBool(val)
+		case "sensory_enabled":
+			gc.SensoryEnabled = parseBool(val)
+		case "roomformat_enabled":
+			gc.RoomformatEnabled = parseBool(val)
+		case "multizone_enabled":
+			gc.MultizoneEnabled = parseBool(val)
+		case "mogrifier_enabled":
+			gc.MogrifierEnabled = parseBool(val)
 
 		// --- Channels ---
 		case "public_channel":

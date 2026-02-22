@@ -18,6 +18,20 @@ import (
 // CommandHandler is the signature for game command implementations.
 type CommandHandler func(g *Game, d *Descriptor, args string, switches []string)
 
+// stripEqSep strips at most one leading space from the RHS of an '='
+// split.  This matches C TinyMUSH's EV_STRIP_LS behaviour when the
+// strip happens BEFORE evaluation: the conventional "= msg" separator
+// space is removed, but leading spaces produced by function evaluation
+// (e.g. switch() returning %b) are preserved.  Using strings.TrimSpace
+// here would destroy content whitespace when the command string has
+// already been evaluated by the queue executor.
+func stripEqSep(s string) string {
+	if len(s) > 0 && s[0] == ' ' {
+		return s[1:]
+	}
+	return s
+}
+
 // Command represents a registered game command.
 type Command struct {
 	Name    string
@@ -517,7 +531,7 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 	var targetName, message string
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 		targetName = strings.TrimSpace(args[:eqIdx])
-		message = strings.TrimSpace(args[eqIdx+1:])
+		message = stripEqSep(args[eqIdx+1:])
 	} else {
 		parts := strings.SplitN(args, " ", 2)
 		targetName = parts[0]
@@ -613,7 +627,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 			return
 		}
 		targetStr := strings.TrimSpace(args[:eqIdx])
-		message := strings.TrimSpace(args[eqIdx+1:])
+		message := stripEqSep(args[eqIdx+1:])
 		targetStr = evalExpr(g, d.Player, targetStr)
 		message = evalExpr(g, d.Player, message)
 		target := g.ResolveRef(d.Player, targetStr)
@@ -673,7 +687,7 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
-	message := strings.TrimSpace(args[eqIdx+1:])
+	message := stripEqSep(args[eqIdx+1:])
 
 	ctx := MakeEvalContextWithGame(g, d.Player, func(c *eval.EvalContext) {
 		functions.RegisterAll(c)
@@ -1588,43 +1602,45 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 
 	// ROOMFORMAT (232) check — lookup chain: room → zones → master room.
 	// When set, replaces the entire ShowRoom pipeline.
-	roomFmt := g.GetAttrText(room, 232) // A_ROOMFORMAT
-	if roomFmt == "" {
-		for _, z := range roomObj.AllZones() {
-			if roomFmt = g.GetAttrText(z, 232); roomFmt != "" {
-				break
+	if g.Conf == nil || g.Conf.RoomformatEnabled {
+		roomFmt := g.GetAttrText(room, 232) // A_ROOMFORMAT
+		if roomFmt == "" {
+			for _, z := range roomObj.AllZones() {
+				if roomFmt = g.GetAttrText(z, 232); roomFmt != "" {
+					break
+				}
 			}
 		}
-	}
-	if roomFmt == "" {
-		masterRoom := g.MasterRoomRef()
-		if masterRoom != gamedb.Nothing {
-			roomFmt = g.GetAttrText(masterRoom, 232)
+		if roomFmt == "" {
+			masterRoom := g.MasterRoomRef()
+			if masterRoom != gamedb.Nothing {
+				roomFmt = g.GetAttrText(masterRoom, 232)
+			}
 		}
-	}
-	if roomFmt != "" {
-		contentRefs := g.visibleContents(room, d.Player)
-		exitRefs := g.visibleExits(room, d.Player)
-		var cStrs, eStrs []string
-		for _, ref := range contentRefs {
-			cStrs = append(cStrs, fmt.Sprintf("#%d", ref))
+		if roomFmt != "" {
+			contentRefs := g.visibleContents(room, d.Player)
+			exitRefs := g.visibleExits(room, d.Player)
+			var cStrs, eStrs []string
+			for _, ref := range contentRefs {
+				cStrs = append(cStrs, fmt.Sprintf("#%d", ref))
+			}
+			for _, ref := range exitRefs {
+				eStrs = append(eStrs, fmt.Sprintf("#%d", ref))
+			}
+			ctx := MakeEvalContextForObj(g, room, d.Player, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			result := ctx.Exec(roomFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{
+				fmt.Sprintf("#%d", room),
+				strings.Join(cStrs, " "),
+				strings.Join(eStrs, " "),
+			})
+			if result != "" {
+				d.Send(result)
+			}
+			g.QueueAttrAction(room, d.Player, 36, nil) // A_ADESC
+			return
 		}
-		for _, ref := range exitRefs {
-			eStrs = append(eStrs, fmt.Sprintf("#%d", ref))
-		}
-		ctx := MakeEvalContextForObj(g, room, d.Player, func(c *eval.EvalContext) {
-			functions.RegisterAll(c)
-		})
-		result := ctx.Exec(roomFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{
-			fmt.Sprintf("#%d", room),
-			strings.Join(cStrs, " "),
-			strings.Join(eStrs, " "),
-		})
-		if result != "" {
-			d.Send(result)
-		}
-		g.QueueAttrAction(room, d.Player, 36, nil) // A_ADESC
-		return
 	}
 
 	makeCtx := func() *eval.EvalContext {
@@ -3115,6 +3131,10 @@ func (g *Game) CreateExit(name string, source, dest, owner gamedb.DBRef) gamedb.
 // It follows the did_it pattern: text to player, O-text to room, queue A-text action.
 func makeSensoryCommand(attr, oAttr, aAttr int, defaultMsg string) CommandHandler {
 	return func(g *Game, d *Descriptor, args string, _ []string) {
+		if g.Conf != nil && !g.Conf.SensoryEnabled {
+			d.Send("Huh?  (Type \"help\" for help.)")
+			return
+		}
 		target := g.PlayerLocation(d.Player) // default: current room
 		if args != "" {
 			t := g.MatchObject(d.Player, args)
@@ -3532,7 +3552,7 @@ func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
-	message := strings.TrimSpace(args[eqIdx+1:])
+	message := stripEqSep(args[eqIdx+1:])
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {

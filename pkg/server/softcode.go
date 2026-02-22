@@ -845,7 +845,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@pemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
+			message := stripAllBraces(stripEqSep(args[eqIdx+1:]))
 			DebugLog("OBJEXEC @pemit target=%q message=%q switches=%q", targetStr, truncDebug(message, 120), switches)
 			target := g.ResolveRef(player, targetStr)
 			if target == gamedb.Nothing {
@@ -889,7 +889,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@oemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
+			message := stripAllBraces(stripEqSep(args[eqIdx+1:]))
 			target := g.ResolveRef(player, targetStr)
 			if target != gamedb.Nothing {
 				if tObj, ok := g.DB.Objects[target]; ok {
@@ -900,7 +900,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@remit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			roomStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
+			message := stripAllBraces(stripEqSep(args[eqIdx+1:]))
 			room := g.ResolveRef(player, roomStr)
 			if room != gamedb.Nothing {
 				g.SendMarkedToRoom(room, "EMIT", message)

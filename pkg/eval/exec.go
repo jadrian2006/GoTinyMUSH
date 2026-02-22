@@ -177,7 +177,7 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 					} else if ctx.FuncInvkCtr >= ctx.FuncInvkLim {
 						buf.WriteString("#-1 FUNCTION INVOCATION LIMIT EXCEEDED")
 					} else {
-						attrText := ctx.GetAttrText(uf.Obj, uf.Attr)
+						attrText := ctx.GetAttrTextParent(uf.Obj, uf.Attr)
 						if attrText != "" {
 							// Evaluate as the object (privileged) or as caller
 							oldPlayer := ctx.Player
@@ -513,8 +513,8 @@ func (ctx *EvalContext) handlePercent(buf *strings.Builder, input string, pos in
 		}
 		ch2 := unicode.ToUpper(rune(input[pos]))
 		if ch2 >= 'A' && ch2 <= 'Z' {
-			attrNum := 100 + int(ch2-'A') // A_VA = 100 (matches C TinyMUSH constants.h)
-			text := ctx.GetAttrText(ctx.Player, attrNum)
+			attrName := "V" + string(ch2)
+			text := ctx.GetAttrByNameHelper(ctx.Player, attrName)
 			buf.WriteString(text)
 		}
 		return pos + 1
@@ -801,7 +801,7 @@ func qidxChar(ch byte) int {
 
 // getPronoun returns a pronoun based on the object's SEX attribute.
 func (ctx *EvalContext) getPronoun(obj gamedb.DBRef, ptype string) string {
-	sex := ctx.GetAttrText(obj, 7) // A_SEX = 7
+	sex := ctx.GetAttrTextParent(obj, 7) // A_SEX = 7
 	gender := 1                     // neuter
 	if len(sex) > 0 {
 		switch sex[0] {

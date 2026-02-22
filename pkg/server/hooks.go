@@ -22,7 +22,7 @@ type HookSet struct {
 // Looks up hooks for the command name on the master room.
 // Returns true if the command was handled (including by override/ignore blocking).
 func (g *Game) executeWithHooks(d *Descriptor, cmdName string, args string, handler func()) bool {
-	if g.Hooks == nil {
+	if g.Hooks == nil || (g.Conf != nil && !g.Conf.HooksEnabled) {
 		handler()
 		return true
 	}
@@ -111,6 +111,10 @@ func (g *Game) executeWithHooks(d *Descriptor, cmdName string, args string, hand
 // @hook/list [<cmd>]
 // @hook/clear <cmd>
 func cmdHook(g *Game, d *Descriptor, args string, switches []string) {
+	if g.Conf != nil && !g.Conf.HooksEnabled {
+		d.Send("The hook system is not enabled.")
+		return
+	}
 	if !Wizard(g, d.Player) {
 		d.Send("Permission denied.")
 		return

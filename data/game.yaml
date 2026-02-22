@@ -60,21 +60,31 @@ public_calias: pub
 guests_channel: Public
 guests_calias: pub
 
-# --- Spellcheck ---
-spellcheck_enabled: false
+# --- Module Toggles ---
+mail_enabled: false           # Built-in mail system (set false if using softcode mail)
+comsys_enabled: true          # Channel/comsys system
+spellcheck_enabled: false     # Spellcheck via LanguageTool API
 # spellcheck_url: "https://api.languagetool.org/v2/check"
 
+# --- Feature Toggles ---
+hooks_enabled: true              # @hook command pre/post/override system
+instances_enabled: true          # @instance vehicle/container system
+sensory_enabled: true            # smell/touch/taste/listen commands
+roomformat_enabled: true         # @roomformat custom room rendering
+multizone_enabled: true          # @chzone/add, @chzone/remove, zones()
+mogrifier_enabled: true          # Channel message mogrifiers
+
 # --- SQL ---
-# sql_enabled: false
+sql_enabled: false            # SQLite3 database for sql() function
 # sql_database: data/game.sqlite3
 # sql_query_limit: 100
 # sql_timeout: 5
 
 # --- Archive/Backup ---
 # archive_dir: backups
-# archive_interval: 0     # minutes, 0 = disabled
-# archive_retain: 0        # 0 = unlimited
-# archive_hook: ""          # shell command, %f = archive path
+# archive_interval: 0        # minutes, 0 = disabled
+# archive_retain: 0           # 0 = unlimited
+# archive_hook: ""             # shell command, %f = archive path
 
 # --- Web Server ---
 web_enabled: true

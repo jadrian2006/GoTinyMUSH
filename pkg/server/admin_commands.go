@@ -1569,7 +1569,7 @@ func cmdOemit(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
-	message := strings.TrimSpace(args[eqIdx+1:])
+	message := stripEqSep(args[eqIdx+1:])
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
@@ -1593,7 +1593,7 @@ func cmdRemit(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	roomStr := strings.TrimSpace(args[:eqIdx])
-	message := strings.TrimSpace(args[eqIdx+1:])
+	message := stripEqSep(args[eqIdx+1:])
 
 	room := g.ResolveRef(d.Player, roomStr)
 	if room == gamedb.Nothing {
@@ -1820,6 +1820,10 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 
 	// Handle /add and /remove switches for multi-zone
 	if HasSwitch(switches, "add") {
+		if g.Conf != nil && !g.Conf.MultizoneEnabled {
+			d.Send("The multi-zone system is not enabled.")
+			return
+		}
 		if zone == gamedb.Nothing {
 			d.Send("You must specify a zone to add.")
 			return
@@ -1842,6 +1846,10 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	if HasSwitch(switches, "remove") {
+		if g.Conf != nil && !g.Conf.MultizoneEnabled {
+			d.Send("The multi-zone system is not enabled.")
+			return
+		}
 		if zone == gamedb.Nothing {
 			d.Send("You must specify a zone to remove.")
 			return
