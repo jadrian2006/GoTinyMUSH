@@ -315,16 +315,34 @@ func (ws *WebServer) handleChannels(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Header      string `json:"header"`
 		Subscribers int    `json:"subscribers"`
+		Alias       string `json:"alias,omitempty"`
+		Listening   bool   `json:"listening,omitempty"`
 	}
 
-	channels := ws.game.Comsys.AllChannels()
+	// Only return channels the logged-in player has aliases for.
+	claims := ClaimsFromContext(r.Context())
+	if claims == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"channels": []any{}})
+		return
+	}
+
+	aliases := ws.game.Comsys.PlayerAliases(claims.PlayerRef)
 	var result []chanInfo
-	for _, ch := range channels {
-		subs := ws.game.Comsys.ChannelSubscribers(ch.Name)
+	for _, ca := range aliases {
+		ch := ws.game.Comsys.GetChannel(ca.Channel)
+		subs := 0
+		header := ""
+		if ch != nil {
+			subs = len(ws.game.Comsys.ChannelSubscribers(ch.Name))
+			header = ch.Header
+		}
 		result = append(result, chanInfo{
-			Name:        ch.Name,
-			Header:      ch.Header,
-			Subscribers: len(subs),
+			Name:        ca.Channel,
+			Header:      header,
+			Subscribers: subs,
+			Alias:       ca.Alias,
+			Listening:   ca.IsListening,
 		})
 	}
 
