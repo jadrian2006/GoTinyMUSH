@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/crystal-mush/gotinymush/pkg/eval"
+	"github.com/crystal-mush/gotinymush/pkg/eval/functions"
 	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
@@ -31,6 +33,10 @@ func (cs *Comsys) LoadChannels(channels []gamedb.Channel, aliases []gamedb.ChanA
 	defer cs.mu.Unlock()
 
 	for i := range channels {
+		// Fix legacy data: zero-value Mogrifier should be Nothing
+		if channels[i].Mogrifier == 0 {
+			channels[i].Mogrifier = gamedb.Nothing
+		}
 		cs.Channels[strings.ToLower(channels[i].Name)] = &channels[i]
 	}
 	for i := range aliases {
@@ -296,6 +302,33 @@ func (g *Game) ComsysProcessAlias(d *Descriptor, ca *gamedb.ChanAlias, args stri
 	} else {
 		// Normal say
 		msg = fmt.Sprintf("%s %s says, \"%s\"", header, playerName, args)
+	}
+
+	// Apply mogrifier if set
+	if ch.Mogrifier != gamedb.Nothing {
+		mogObj, mogOk := g.DB.Objects[ch.Mogrifier]
+		if mogOk {
+			mogAttr := g.GetAttrTextByName(ch.Mogrifier, "MOGRIFIER")
+			if mogAttr != "" {
+				// Determine message type
+				msgType := "say"
+				if strings.HasPrefix(args, ":") {
+					msgType = "pose"
+				} else if strings.HasPrefix(args, ";") {
+					msgType = "semipose"
+				}
+				ctx := MakeEvalContextForObj(g, ch.Mogrifier, d.Player, func(c *eval.EvalContext) {
+					functions.RegisterAll(c)
+				})
+				_ = mogObj // used above for existence check
+				result := ctx.Exec(mogAttr, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{
+					msg, playerName, ch.Name, msgType,
+				})
+				if result != "" {
+					msg = result
+				}
+			}
+		}
 	}
 
 	g.SendToChannel(ca.Channel, d.Player, msg)

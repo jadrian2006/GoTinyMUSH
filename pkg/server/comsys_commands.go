@@ -202,9 +202,10 @@ func cmdCcreate(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	ch := &gamedb.Channel{
-		Name:  name,
-		Owner: d.Player,
-		Flags: gamedb.ChanPublic,
+		Name:      name,
+		Owner:     d.Player,
+		Flags:     gamedb.ChanPublic,
+		Mogrifier: gamedb.Nothing,
 	}
 	if err := g.Comsys.AddChannel(ch); err != nil {
 		d.Send(err.Error())
@@ -406,8 +407,23 @@ func cmdCset(g *Game, d *Descriptor, args string, _ []string) {
 	case lower == "quiet":
 		ch.Flags &^= gamedb.ChanLoud
 		d.Send(fmt.Sprintf("Channel %s set quiet.", ch.Name))
+	case strings.HasPrefix(lower, "mogrifier "):
+		objStr := strings.TrimSpace(option[10:])
+		mogRef := g.ResolveRef(d.Player, objStr)
+		if mogRef == gamedb.Nothing {
+			mogRef = g.MatchObject(d.Player, objStr)
+		}
+		if mogRef == gamedb.Nothing {
+			d.Send("I don't see that object.")
+			return
+		}
+		ch.Mogrifier = mogRef
+		d.Send(fmt.Sprintf("Channel %s mogrifier set to #%d.", ch.Name, mogRef))
+	case lower == "nomogrifier":
+		ch.Mogrifier = gamedb.Nothing
+		d.Send(fmt.Sprintf("Channel %s mogrifier cleared.", ch.Name))
 	default:
-		d.Send("Unknown option. Options: description <text>, header <text>, public, private, loud, quiet")
+		d.Send("Unknown option. Options: description <text>, header <text>, public, private, loud, quiet, mogrifier <obj>, nomogrifier")
 		return
 	}
 	if g.Store != nil {
@@ -474,6 +490,13 @@ func cmdCinfo(g *Game, d *Descriptor, args string, _ []string) {
 	d.Send(fmt.Sprintf("  Join Lock:   %s", joinLock))
 	d.Send(fmt.Sprintf("  Trans Lock:  %s", transLock))
 	d.Send(fmt.Sprintf("  Recv Lock:   %s", recvLock))
+	// Mogrifier
+	if ch.Mogrifier != gamedb.Nothing {
+		mogName := g.PlayerName(ch.Mogrifier)
+		d.Send(fmt.Sprintf("  Mogrifier:   %s (#%d)", mogName, ch.Mogrifier))
+	} else {
+		d.Send("  Mogrifier:   (none)")
+	}
 	// Charge
 	if ch.Charge > 0 || ch.ChargeCollected > 0 {
 		d.Send(fmt.Sprintf("  Charge:      %d (collected: %d)", ch.Charge, ch.ChargeCollected))

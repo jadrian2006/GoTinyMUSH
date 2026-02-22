@@ -475,6 +475,32 @@ func fnMudname(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gam
 	}
 }
 
+// --- callfn() / nextdbref() ---
+
+// fnCallfn — callfn(funcname, arg1, arg2, ...) — calls a built-in function by name.
+func fnCallfn(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
+	if len(args) < 1 {
+		buf.WriteString("#-1 FUNCTION (CALLFN) EXPECTS AT LEAST 1 ARGUMENTS")
+		return
+	}
+	funcName := strings.ToUpper(strings.TrimSpace(args[0]))
+	fn, ok := ctx.Functions[funcName]
+	if !ok {
+		buf.WriteString("#-1 FUNCTION (" + funcName + ") NOT FOUND")
+		return
+	}
+	fn.Handler(ctx, args[1:], buf, caller, cause)
+}
+
+// fnNextdbref — nextdbref() — returns the next dbref that would be assigned.
+func fnNextdbref(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if ctx.GameState == nil {
+		buf.WriteString("#-1")
+		return
+	}
+	buf.WriteString(fmt.Sprintf("#%d", ctx.GameState.NextDBRef()))
+}
+
 // --- Register functions ---
 
 // fnX — read a named variable: x(name)

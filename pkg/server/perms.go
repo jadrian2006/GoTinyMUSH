@@ -145,31 +145,35 @@ func CheckZone(g *Game, player, thing gamedb.DBRef, depth int) bool {
 		return false
 	}
 
-	// Must have a zone
-	if tObj.Zone == gamedb.Nothing {
+	// Check all zones (primary + additional)
+	zones := tObj.AllZones()
+	if len(zones) == 0 {
 		return false
 	}
 
-	zmo := tObj.Zone
+	for _, zmo := range zones {
+		// ZMO must have A_LCONTROL set
+		lockText := g.GetAttrTextDirect(zmo, aLControl)
+		if lockText == "" {
+			continue
+		}
 
-	// ZMO must have A_LCONTROL set
-	lockText := g.GetAttrTextDirect(zmo, aLControl)
-	if lockText == "" {
-		return false
-	}
+		// Player must pass the ZMO's control lock
+		parsed := ParseBoolExp(g, player, lockText)
+		if EvalBoolExp(g, player, zmo, zmo, parsed, 0) {
+			return true
+		}
 
-	// Player must pass the ZMO's control lock
-	parsed := ParseBoolExp(g, player, lockText)
-	if EvalBoolExp(g, player, zmo, zmo, parsed, 0) {
-		return true
+		// Recurse on ZMO's zone
+		zmoObj, ok := g.DB.Objects[zmo]
+		if !ok || zmoObj.Zone == gamedb.Nothing {
+			continue
+		}
+		if CheckZone(g, player, zmo, depth+1) {
+			return true
+		}
 	}
-
-	// Recurse on ZMO's zone
-	zmoObj, ok := g.DB.Objects[zmo]
-	if !ok || zmoObj.Zone == gamedb.Nothing {
-		return false
-	}
-	return CheckZone(g, player, zmo, depth+1)
+	return false
 }
 
 // Examinable returns true if player can examine target.

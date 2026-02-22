@@ -166,6 +166,8 @@ func InitCommands() map[string]*Command {
 	registerNG("@decompile", cmdDecompile)
 	registerNG("@power", cmdPower)
 	registerNG("@apikey", cmdApikey)
+	registerNG("@hook", cmdHook)
+	registerNG("@instance", cmdInstance)
 
 	// Attribute-setting @commands (all no guest)
 	// Success/Failure messages
@@ -221,6 +223,26 @@ func InitCommands() map[string]*Command {
 	registerNG("@conformat", makeAttrSetter(214))  // A_LCON_FMT = 214
 	registerNG("@exitformat", makeAttrSetter(215)) // A_LEXITS_FMT = 215
 	registerNG("@nameformat", makeAttrSetter(222)) // A_NAME_FMT = 222
+	registerNG("@roomformat", makeAttrSetter(232)) // A_ROOMFORMAT = 232
+
+	// Sensory commands
+	register("smell", makeSensoryCommand(233, 234, 235, "You don't smell anything special."))
+	register("touch", makeSensoryCommand(236, 237, 238, "You don't feel anything special."))
+	register("taste", makeSensoryCommand(239, 240, 241, "You don't taste anything special."))
+	register("listen", makeSensoryCommand(242, 243, 244, "You don't hear anything special."))
+	// Sensory attribute setters
+	registerNG("@smell", makeAttrSetter(233))    // A_SMELL
+	registerNG("@osmell", makeAttrSetter(234))   // A_OSMELL
+	registerNG("@asmell", makeAttrSetter(235))   // A_ASMELL
+	registerNG("@touch", makeAttrSetter(236))    // A_TOUCH
+	registerNG("@otouch", makeAttrSetter(237))   // A_OTOUCH
+	registerNG("@atouch", makeAttrSetter(238))   // A_ATOUCH
+	registerNG("@taste", makeAttrSetter(239))    // A_TASTE
+	registerNG("@otaste", makeAttrSetter(240))   // A_OTASTE
+	registerNG("@ataste", makeAttrSetter(241))   // A_ATASTE
+	registerNG("@sound", makeAttrSetter(242))    // A_SOUND
+	registerNG("@osound", makeAttrSetter(243))   // A_OSOUND
+	registerNG("@asound", makeAttrSetter(244))   // A_ASOUND
 	// Enter/Leave aliases
 	registerNG("@ealias", makeAttrSetter(64))      // A_EALIAS = 64
 	registerNG("@lalias", makeAttrSetter(65))      // A_LALIAS = 65
@@ -329,7 +351,14 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 			d.Send("Permission denied.")
 			return
 		}
-		cmd.Handler(g, d, args, switches)
+		// Execute with hooks if any are defined
+		if g.Hooks != nil {
+			g.executeWithHooks(d, cmdName, args, func() {
+				cmd.Handler(g, d, args, switches)
+			})
+		} else {
+			cmd.Handler(g, d, args, switches)
+		}
 		return
 	}
 
@@ -1205,6 +1234,7 @@ type Game struct {
 	queueWake chan struct{} // Signal to wake queue processor immediately (player input)
 	PeakPlayers int        // Historical peak connected player count
 	StartTime   time.Time  // Server start time
+	Hooks       map[string]*HookSet // Command hooks (uppercase cmd name -> hook set)
 }
 
 // Emit sends an event to the player specified in ev.Player via the event bus.
@@ -1491,10 +1521,109 @@ func (g *Game) AddToContents(dest, obj gamedb.DBRef) {
 }
 
 // ShowRoom displays a room to a player.
+// visibleContents returns the dbrefs of objects visible in a room to a looker.
+func (g *Game) visibleContents(room, looker gamedb.DBRef) []gamedb.DBRef {
+	var refs []gamedb.DBRef
+	for _, next := range g.DB.SafeContents(room) {
+		obj, ok := g.DB.Objects[next]
+		if !ok || next == looker || obj.IsGoing() {
+			continue
+		}
+		visible := false
+		if obj.ObjType() == gamedb.TypePlayer {
+			if g.Conns.IsConnected(next) {
+				if obj.HasFlag(gamedb.FlagDark) && !SeeAll(g, looker) && !Controls(g, looker, next) {
+					// DARK player hidden
+				} else {
+					visible = true
+				}
+			}
+		} else if obj.ObjType() == gamedb.TypeThing {
+			if !obj.HasFlag(gamedb.FlagDark) || SeeAll(g, looker) || Controls(g, looker, next) {
+				visible = true
+			}
+		}
+		if visible {
+			refs = append(refs, next)
+		}
+	}
+	return refs
+}
+
+// visibleExits returns the dbrefs of exits visible in a room to a looker.
+func (g *Game) visibleExits(room, looker gamedb.DBRef) []gamedb.DBRef {
+	roomObj, ok := g.DB.Objects[room]
+	if !ok {
+		return nil
+	}
+	roomIsDark := roomObj.HasFlag(gamedb.FlagDark)
+	exitFmt := g.GetAttrText(room, 215) // A_LEXITS_FMT
+	var refs []gamedb.DBRef
+	exitRef := roomObj.Exits
+	for exitRef != gamedb.Nothing {
+		exitObj, ok := g.DB.Objects[exitRef]
+		if !ok {
+			break
+		}
+		canSee := true
+		if exitObj.HasFlag(gamedb.FlagDark) {
+			canSee = false
+		} else if roomIsDark && exitFmt == "" && !exitObj.HasFlag2(gamedb.Flag2Light) {
+			canSee = false
+		}
+		if canSee {
+			refs = append(refs, exitRef)
+		}
+		exitRef = exitObj.Next
+	}
+	return refs
+}
+
 func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	roomObj, ok := g.DB.Objects[room]
 	if !ok {
 		d.Send("You see nothing special.")
+		return
+	}
+
+	// ROOMFORMAT (232) check — lookup chain: room → zones → master room.
+	// When set, replaces the entire ShowRoom pipeline.
+	roomFmt := g.GetAttrText(room, 232) // A_ROOMFORMAT
+	if roomFmt == "" {
+		for _, z := range roomObj.AllZones() {
+			if roomFmt = g.GetAttrText(z, 232); roomFmt != "" {
+				break
+			}
+		}
+	}
+	if roomFmt == "" {
+		masterRoom := g.MasterRoomRef()
+		if masterRoom != gamedb.Nothing {
+			roomFmt = g.GetAttrText(masterRoom, 232)
+		}
+	}
+	if roomFmt != "" {
+		contentRefs := g.visibleContents(room, d.Player)
+		exitRefs := g.visibleExits(room, d.Player)
+		var cStrs, eStrs []string
+		for _, ref := range contentRefs {
+			cStrs = append(cStrs, fmt.Sprintf("#%d", ref))
+		}
+		for _, ref := range exitRefs {
+			eStrs = append(eStrs, fmt.Sprintf("#%d", ref))
+		}
+		ctx := MakeEvalContextForObj(g, room, d.Player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		result := ctx.Exec(roomFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{
+			fmt.Sprintf("#%d", room),
+			strings.Join(cStrs, " "),
+			strings.Join(eStrs, " "),
+		})
+		if result != "" {
+			d.Send(result)
+		}
+		g.QueueAttrAction(room, d.Player, 36, nil) // A_ADESC
 		return
 	}
 
@@ -1678,6 +1807,45 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 			}
 		}
 		d.Send("  " + strings.Join(exitNames, "  "))
+	}
+
+	// Instance transparency: if this room is inside an instance THING with
+	// INSTANCE_TRANSPARENT set, also show exterior contents/exits.
+	if roomObj.Location != gamedb.Nothing {
+		if vehicleObj, ok := g.DB.Objects[roomObj.Location]; ok {
+			if vehicleObj.ObjType() == gamedb.TypeThing && vehicleObj.HasFlag3(gamedb.Flag3Instance) {
+				if g.GetAttrTextByName(roomObj.Location, "INSTANCE_TRANSPARENT") == "1" {
+					extLoc := vehicleObj.Location
+					if extLoc != gamedb.Nothing {
+						d.Send("--- Outside ---")
+						extContents := g.visibleContents(extLoc, d.Player)
+						if len(extContents) > 0 {
+							var names []string
+							for _, ref := range extContents {
+								if o, ok := g.DB.Objects[ref]; ok {
+									names = append(names, DisplayName(o.Name))
+								}
+							}
+							d.Send("Outside: " + strings.Join(names, ", "))
+						}
+						extExits := g.visibleExits(extLoc, d.Player)
+						if len(extExits) > 0 {
+							var names []string
+							for _, ref := range extExits {
+								if o, ok := g.DB.Objects[ref]; ok {
+									name := o.Name
+									if idx := strings.IndexByte(name, ';'); idx >= 0 {
+										name = name[:idx]
+									}
+									names = append(names, name)
+								}
+							}
+							d.Send("Nearby exits: " + strings.Join(names, "  "))
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// ADESC (36) — action list executed on the room when looked at
@@ -2114,6 +2282,8 @@ var flagLetters = []flagEntry{
 	{1, gamedb.Flag2HasFwd, '&', "HAS_FORWARDLIST", flagPermGod},
 	{1, gamedb.Flag2HasListen, '@', "HAS_LISTEN", flagPermGod},
 	{1, gamedb.Flag2HTML, '~', "HTML", flagPermPublic},
+	// Flag word 2
+	{2, gamedb.Flag3Instance, '^', "INSTANCE", flagPermPublic},
 }
 
 // powerNameEntry maps power word/bit pairs to their TinyMUSH display name.
@@ -2180,6 +2350,8 @@ func flagString(obj *gamedb.Object) string {
 			buf.WriteByte(fl.Letter)
 		} else if fl.Word == 1 && obj.HasFlag2(fl.Bit) {
 			buf.WriteByte(fl.Letter)
+		} else if fl.Word == 2 && obj.HasFlag3(fl.Bit) {
+			buf.WriteByte(fl.Letter)
 		}
 	}
 	return buf.String()
@@ -2201,6 +2373,8 @@ func flagDescription(g *Game, player gamedb.DBRef, obj *gamedb.Object) string {
 			hasFlag = obj.HasFlag(fl.Bit)
 		} else if fl.Word == 1 {
 			hasFlag = obj.HasFlag2(fl.Bit)
+		} else if fl.Word == 2 {
+			hasFlag = obj.HasFlag3(fl.Bit)
 		}
 		if !hasFlag {
 			continue
@@ -2937,6 +3111,46 @@ func (g *Game) CreateExit(name string, source, dest, owner gamedb.DBRef) gamedb.
 // --- Attribute-setting command factory ---
 
 // makeAttrSetter returns a CommandHandler that sets a specific attribute on a target object.
+// makeSensoryCommand creates a handler for sensory commands (smell, touch, taste, listen).
+// It follows the did_it pattern: text to player, O-text to room, queue A-text action.
+func makeSensoryCommand(attr, oAttr, aAttr int, defaultMsg string) CommandHandler {
+	return func(g *Game, d *Descriptor, args string, _ []string) {
+		target := g.PlayerLocation(d.Player) // default: current room
+		if args != "" {
+			t := g.MatchObject(d.Player, args)
+			if t == gamedb.Nothing {
+				d.Send("I don't see that here.")
+				return
+			}
+			target = t
+		}
+		text := g.GetAttrText(target, attr)
+		if text == "" {
+			d.Send(defaultMsg)
+			return
+		}
+		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		d.Send(ctx.Exec(text, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
+
+		// O-text to room
+		oText := g.GetAttrText(target, oAttr)
+		if oText != "" {
+			ctx2 := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			msg := ctx2.Exec(oText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+			name := g.PlayerName(d.Player)
+			loc := g.PlayerLocation(d.Player)
+			g.Conns.SendToRoomExcept(g.DB, loc, d.Player, name+" "+msg)
+		}
+
+		// Queue A-text action
+		g.QueueAttrAction(target, d.Player, aAttr, nil)
+	}
+}
+
 func makeAttrSetter(attrNum int) CommandHandler {
 	return func(g *Game, d *Descriptor, args string, _ []string) {
 		eqIdx := strings.IndexByte(args, '=')
@@ -3221,6 +3435,15 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 	loc := g.PlayerLocation(d.Player)
 	playerObj := g.DB.Objects[d.Player]
 
+	// Instance support: if target is an instance THING, enter its first interior room
+	enterDest := target
+	if obj.HasFlag3(gamedb.Flag3Instance) {
+		firstRoom := g.InstanceFirstRoom(target)
+		if firstRoom != gamedb.Nothing {
+			enterDest = firstRoom
+		}
+	}
+
 	// Remove from current location
 	g.RemoveFromContents(loc, d.Player)
 
@@ -3228,16 +3451,20 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 	g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
 		fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
 
-	// Move inside target
-	playerObj.Location = target
-	g.AddToContents(target, d.Player)
-	g.PersistObjects(playerObj, obj)
+	// Move inside target (or interior room for instances)
+	playerObj.Location = enterDest
+	g.AddToContents(enterDest, d.Player)
+	if destObj, ok := g.DB.Objects[enterDest]; ok {
+		g.PersistObjects(playerObj, obj, destObj)
+	} else {
+		g.PersistObjects(playerObj, obj)
+	}
 
 	d.Send(fmt.Sprintf("You enter %s.", DisplayName(obj.Name)))
-	g.Conns.SendToRoomExcept(g.DB, target, d.Player,
+	g.Conns.SendToRoomExcept(g.DB, enterDest, d.Player,
 		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 
-	g.ShowRoom(d, target)
+	g.ShowRoom(d, enterDest)
 	g.QueueAttrAction(target, d.Player, 35, nil) // A_AENTER = 35
 }
 
@@ -3252,11 +3479,20 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 		d.Send("You can't leave.")
 		return
 	}
-	// The container's location is where we go
+	// The container's location is where we go.
+	// Instance support: if we're in an interior room of an instance THING,
+	// leave goes to the instance's exterior location (skip the THING itself).
 	dest := locObj.Location
 	if dest == gamedb.Nothing {
 		d.Send("You can't leave.")
 		return
+	}
+	if destObj, ok := g.DB.Objects[dest]; ok {
+		if destObj.ObjType() == gamedb.TypeThing && destObj.HasFlag3(gamedb.Flag3Instance) {
+			if destObj.Location != gamedb.Nothing {
+				dest = destObj.Location
+			}
+		}
 	}
 	// Check leave lock — use strict check (no wizard bypass) so leave locks
 	// are absolute. Wizards can use @tel to move around if needed.

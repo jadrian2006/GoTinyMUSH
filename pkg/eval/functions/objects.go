@@ -1541,3 +1541,62 @@ func fnLrooms(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	}
 	buf.WriteString(strings.Join(results, " "))
 }
+
+// --- Multi-zone function ---
+
+// fnZones — zones(obj) — returns space-separated list of all zone dbrefs.
+func fnZones(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 {
+		return
+	}
+	ref := resolveDBRef(ctx, args[0])
+	obj, ok := ctx.DB.Objects[ref]
+	if !ok {
+		buf.WriteString("#-1 NOT FOUND")
+		return
+	}
+	zones := obj.AllZones()
+	parts := make([]string, len(zones))
+	for i, z := range zones {
+		parts[i] = fmt.Sprintf("#%d", z)
+	}
+	buf.WriteString(strings.Join(parts, " "))
+}
+
+// --- Instance functions ---
+
+// fnIsinstance — isinstance(obj) — returns 1 if obj has Flag3Instance, 0 otherwise.
+func fnIsinstance(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 {
+		buf.WriteString("0")
+		return
+	}
+	if ctx.GameState != nil && ctx.GameState.IsInstance(resolveDBRef(ctx, args[0])) {
+		buf.WriteString("1")
+	} else {
+		buf.WriteString("0")
+	}
+}
+
+// fnIrooms — irooms(instance) — returns space-separated list of interior room dbrefs.
+func fnIrooms(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		return
+	}
+	rooms := ctx.GameState.InstanceRooms(resolveDBRef(ctx, args[0]))
+	parts := make([]string, len(rooms))
+	for i, r := range rooms {
+		parts[i] = fmt.Sprintf("#%d", r)
+	}
+	buf.WriteString(strings.Join(parts, " "))
+}
+
+// fnIvehicle — ivehicle(room) — returns the instance THING this room belongs to, or #-1.
+func fnIvehicle(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		buf.WriteString("#-1")
+		return
+	}
+	v := ctx.GameState.InstanceVehicle(resolveDBRef(ctx, args[0]))
+	buf.WriteString(fmt.Sprintf("#%d", v))
+}

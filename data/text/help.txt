@@ -1955,26 +1955,36 @@ Example:
   See also: @lock, @unlock, CHOWN_OK, ATTRIBUTE OWNERSHIP.
  
 & @chzone
- 
+
   Command: @chzone[/nostrip] <object>[=<zone object>]
-  
+  Command: @chzone/add <object>=<zone object>
+  Command: @chzone/remove <object>=<zone object>
+
   Changes the zone of <object> to <zone object>. If <zone object> is not
   specified, the zone is reset to NOTHING. (If the <zone object> is "none",
   the zone is also reset; this is a compatibility feature.)
-  
+
+  The /add switch adds an additional zone to an object without replacing
+  the primary zone. Objects can belong to multiple zones, and $-commands
+  and zone-based control checks will search all zones.
+
+  The /remove switch removes a zone from an object's zone list. If the
+  zone being removed is the primary zone, it is cleared; otherwise it is
+  removed from the additional zones list.
+
   @chzone'ing a player does not automatically change the zone of their
   objects. Anyone may reset the zone of their own object, or re-zone it
   to a zone object that they control. Only Wizards may @chzone an object
   to an arbitrary zone object. Players may @chzone themselves to an
   object they own; otherwise, only Wizards may @chzone players.
- 
+
   @chzone'ing a non-player object strips special flags (such as WIZARD,
   INHERIT, etc.) from the object, as well as all powers, unless the
   /nostrip switch is specified. If /nostrip is specified by God, special
   flags and powers are not stripped; if anyone else specifies /nostrip,
   only the WIZARD flag and powers will be stripped.
- 
-  See also: ZONE OBJECTS
+
+  See also: ZONE OBJECTS, zones()
   
 & @aclone
 & @clone
@@ -16681,3 +16691,304 @@ TRUNC_LENGTH - Per-player examine output truncation
     @power <player>=!bot     Revoke bot power
 
   See also: @apikey, @power, hasapikey(), powers list.
+
+& @roomformat
+
+  Command: @roomformat <object>=<format>
+
+  Sets the ROOMFORMAT attribute on an object. When set on a room, zone
+  master object, or the master room, ROOMFORMAT replaces the entire room
+  display pipeline (name, description, contents, exits) with custom
+  softcode output.
+
+  The format string is evaluated with the following substitutions:
+    %0 - The room's dbref (e.g. #123)
+    %1 - Space-separated list of visible content dbrefs
+    %2 - Space-separated list of visible exit dbrefs
+
+  The executor is the room; the enactor is the looking player.
+
+  Lookup chain: room -> zone master objects -> master room.
+  The first ROOMFORMAT found in the chain is used.
+
+  Example:
+    @roomformat here=[name(%0)]%r[get(%0/DESC)]%r---Contents---%r[iter(%1,name(##))]%r---Exits---%r[iter(%2,name(##))]
+
+  See also: @conformat, @exitformat, @nameformat
+
+& @roomformat2
+
+  ROOMFORMAT replaces the entire ShowRoom pipeline. When ROOMFORMAT is
+  set, CONFORMAT, EXITFORMAT, and NAMEFORMAT are NOT evaluated. The
+  ROOMFORMAT function is responsible for rendering everything.
+
+  ROOMFORMAT is checked on the room first, then on each zone master
+  object (in order), then on the master room. This allows global room
+  formatting that applies to all rooms that don't have their own.
+
+  See also: @roomformat, @conformat, @exitformat
+
+& callfn()
+
+  Function: callfn(<function name>, <arg1>, <arg2>, ...)
+
+  Calls a built-in function by name, passing the remaining arguments
+  to it. This allows dynamic function dispatch based on a string name.
+
+  Example:
+    think callfn(ADD, 1, 2, 3)   =>  6
+    think callfn(UCSTR, hello)    =>  HELLO
+
+  See also: FUNCTIONS
+
+& nextdbref()
+
+  Function: nextdbref()
+
+  Returns the dbref that will be assigned to the next object created.
+  This is useful for softcode that needs to predict or reference the
+  next object before it is created.
+
+  Example:
+    think nextdbref()   =>  #1234
+
+& smell
+& taste
+& touch
+& listen
+
+  Commands: smell [<object>]
+            taste [<object>]
+            touch [<object>]
+            listen [<object>]
+
+  Sensory commands that display the corresponding sensory attribute
+  on an object. If no object is specified, defaults to the current
+  room.
+
+  Each command follows the did_it pattern:
+    - Main text shown to the player (SMELL/TASTE/TOUCH/SOUND)
+    - O-variant shown to the room (OSMELL/OTASTE/OTOUCH/OSOUND)
+    - A-variant queued as an action (ASMELL/ATASTE/ATOUCH/ASOUND)
+
+  If the sensory attribute is not set, a default message is shown.
+
+  See also: @smell, @taste, @touch, @sound
+
+& @smell
+& @osmell
+& @asmell
+
+  Commands: @smell <object>=<message>
+            @osmell <object>=<message>
+            @asmell <object>=<message>
+
+  Sets the smell-related attributes on an object.
+    @smell   - Message shown to the player who smells the object.
+    @osmell  - Message shown to others in the room.
+    @asmell  - Action list queued when the object is smelled.
+
+  See also: smell, @taste, @touch, @sound
+
+& @touch
+& @otouch
+& @atouch
+
+  Commands: @touch <object>=<message>
+            @otouch <object>=<message>
+            @atouch <object>=<message>
+
+  Sets the touch-related attributes on an object.
+    @touch   - Message shown to the player who touches the object.
+    @otouch  - Message shown to others in the room.
+    @atouch  - Action list queued when the object is touched.
+
+  See also: touch, @smell, @taste, @sound
+
+& @taste
+& @otaste
+& @ataste
+
+  Commands: @taste <object>=<message>
+            @otaste <object>=<message>
+            @ataste <object>=<message>
+
+  Sets the taste-related attributes on an object.
+    @taste   - Message shown to the player who tastes the object.
+    @otaste  - Message shown to others in the room.
+    @ataste  - Action list queued when the object is tasted.
+
+  See also: taste, @smell, @touch, @sound
+
+& @sound
+& @osound
+& @asound
+
+  Commands: @sound <object>=<message>
+            @osound <object>=<message>
+            @asound <object>=<message>
+
+  Sets the sound-related attributes on an object.
+    @sound   - Message shown to the player who listens to the object.
+    @osound  - Message shown to others in the room.
+    @asound  - Action list queued when the object is listened to.
+
+  See also: listen, @smell, @taste, @touch
+
+& mogrifier
+& channel mogrifier
+
+  A mogrifier is an object attached to a channel that transforms
+  messages before they are broadcast. The object's MOGRIFIER attribute
+  is evaluated with the following substitutions:
+    %0 - The original message text
+    %1 - The sender's name
+    %2 - The channel name
+    %3 - The message type (say, pose, or semipose)
+
+  The executor is the mogrifier object; the enactor is the sender.
+  If the result is non-empty, it replaces the original message.
+
+  To set a mogrifier on a channel:
+    @cset <channel>=mogrifier <object>
+
+  To remove it:
+    @cset <channel>=nomogrifier
+
+  Example:
+    @cset Public=mogrifier #123
+    &MOGRIFIER #123=ucstr(%0)
+
+  This would uppercase all messages on the Public channel.
+
+  See also: @cset, @cinfo, COMSYS
+
+& @hook
+
+  Command: @hook/<type> <command>=<attribute>
+  Command: @hook/list [<command>]
+  Command: @hook/clear <command>
+
+  Wizard-only. Attaches hook attributes on the master room that fire
+  before, after, instead of, or to ignore built-in commands.
+
+  Hook types:
+    /before   - Evaluated before the command runs. If the result is "0",
+                the command is cancelled.
+    /after    - Evaluated after the command runs.
+    /override - Replaces the command entirely. The built-in command
+                does not execute.
+    /ignore   - If the result is "1", the command is silently blocked
+                for this player.
+
+  All hooks are evaluated on the master room with:
+    %0 - The full input line
+    %1 - The command arguments (after the command name)
+  The executor is the master room; the enactor is the player.
+
+  @hook/list shows all configured hooks, or hooks for a specific command.
+  @hook/clear removes all hooks for a command.
+
+  Examples:
+    @hook/before say=HOOK_BEFORE_SAY
+    &HOOK_BEFORE_SAY <master room>=1
+    @hook/after look=HOOK_AFTER_LOOK
+    @hook/list say
+
+  See also: MASTER ROOM
+
+& zones()
+
+  Function: zones(<object>)
+
+  Returns a space-separated list of all zone dbrefs for <object>,
+  including both the primary zone and any additional zones added
+  with @chzone/add.
+
+  Example:
+    think zones(me)   =>  #10 #20 #30
+
+  See also: zone(), @chzone
+
+& isinstance()
+
+  Function: isinstance(<object>)
+
+  Returns 1 if <object> has the INSTANCE flag set, 0 otherwise.
+  Instance objects are vehicle/container THINGs created with
+  @instance/create that contain interior rooms.
+
+  See also: @instance, irooms(), ivehicle()
+
+& irooms()
+
+  Function: irooms(<instance>)
+
+  Returns a space-separated list of interior room dbrefs belonging
+  to the given instance THING. Returns empty if the object is not
+  an instance or has no interior rooms.
+
+  See also: @instance, isinstance(), ivehicle()
+
+& ivehicle()
+
+  Function: ivehicle(<room>)
+
+  Returns the dbref of the instance THING that <room> is an interior
+  room of. Returns #-1 if the room is not inside an instance.
+
+  See also: @instance, isinstance(), irooms()
+
+& @instance
+
+  Command: @instance/create <template> [= <name>]
+  Command: @instance/destroy <instance>
+
+  The instance system creates vehicle/container THINGs with interior
+  rooms that players can enter and explore.
+
+  @instance/create clones a template THING and all its interior rooms
+  (rooms whose Location is set to the template's dbref) plus exits
+  between those rooms. The new instance is placed at the creator's
+  location and has the INSTANCE flag set.
+
+  @instance/destroy destroys an instance and all its interior rooms
+  and exits. Players inside are ejected to the instance's exterior
+  location.
+
+  When a player enters an instance THING, they are placed in the
+  first interior room (preferring one named "entrance" or "entry").
+  Leaving from an interior room exits directly to the exterior.
+
+  See also: @instance2, isinstance(), irooms(), ivehicle()
+
+& @instance2
+& instance transparency
+
+  Instance Transparency:
+
+  Set the INSTANCE_TRANSPARENT attribute on an instance THING to "1"
+  to allow occupants of interior rooms to see the exterior:
+
+    &INSTANCE_TRANSPARENT <instance>=1
+
+  When transparency is enabled, players in interior rooms will see
+  an "--- Outside ---" section showing exterior contents and exits.
+
+  Vehicle Movement:
+
+  When an instance THING is teleported, all occupants of interior
+  rooms receive a "You feel the vehicle move." message, and the
+  AMOVE action (attribute 57) is queued on the instance.
+
+  Creating Templates:
+
+  To create a template for @instance/create:
+  1. @create Vehicle Template
+  2. @dig Interior Room
+  3. Set the interior room's Location to the template:
+     @teleport <room>=<template>
+  4. Add exits between interior rooms as desired
+  5. Set DESC, IDESC, and other attributes on template/rooms
+
+  See also: @instance, INSTANCE flag

@@ -632,6 +632,18 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("CONNLOG", fnConnlog, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("ADDRLOG", fnAddrlog, 0, eval.FnVarArgs)
 
+	// Callfn / nextdbref
+	ctx.RegisterFunction("CALLFN", fnCallfn, 1, eval.FnVarArgs)
+	ctx.RegisterFunction("NEXTDBREF", fnNextdbref, 0, 0)
+
+	// Instance functions
+	ctx.RegisterFunction("ISINSTANCE", fnIsinstance, 1, 0)
+	ctx.RegisterFunction("IROOMS", fnIrooms, 1, 0)
+	ctx.RegisterFunction("IVEHICLE", fnIvehicle, 1, 0)
+
+	// Multi-zone function
+	ctx.RegisterFunction("ZONES", fnZones, 1, 0)
+
 	// Array functions
 	ctx.RegisterFunction("ARRAY", fnArray, 1, eval.FnVarArgs)
 	ctx.RegisterFunction("ADESTROY", fnAdestroy, 1, 0)

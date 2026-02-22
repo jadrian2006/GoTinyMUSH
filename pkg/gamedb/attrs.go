@@ -164,6 +164,19 @@ var WellKnownAttrs = map[int]string{
 	227: "HearsLock",
 	228: "MovesLock",
 	231: "PROPDIR",
+	232: "ROOMFORMAT",
+	233: "SMELL",
+	234: "OSMELL",
+	235: "ASMELL",
+	236: "TOUCH",
+	237: "OTOUCH",
+	238: "ATOUCH",
+	239: "TASTE",
+	240: "OTASTE",
+	241: "ATASTE",
+	242: "SOUND",
+	243: "OSOUND",
+	244: "ASOUND",
 }
 
 // Well-known attribute number constants.

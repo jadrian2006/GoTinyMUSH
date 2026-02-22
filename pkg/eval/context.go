@@ -206,6 +206,18 @@ type GameState interface {
 	// AddrLog returns connection log IP addresses for a player.
 	// Returns space-separated IP addresses (newest first).
 	AddrLog(player gamedb.DBRef, count int) string
+
+	// NextDBRef returns the next available dbref that would be assigned.
+	NextDBRef() gamedb.DBRef
+
+	// IsInstance returns true if obj has the Flag3Instance flag.
+	IsInstance(obj gamedb.DBRef) bool
+
+	// InstanceRooms returns the interior rooms of an instance (rooms whose Location = obj).
+	InstanceRooms(obj gamedb.DBRef) []gamedb.DBRef
+
+	// InstanceVehicle returns the instance THING this room belongs to, or Nothing.
+	InstanceVehicle(room gamedb.DBRef) gamedb.DBRef
 }
 
 // EvalContext is the execution context for MUSH expression evaluation.

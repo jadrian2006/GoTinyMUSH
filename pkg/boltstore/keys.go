@@ -20,6 +20,7 @@ var (
 	bucketArrays      = []byte("arrays")
 	bucketAPIKeys     = []byte("apikeys")
 	bucketConnLog     = []byte("connlog")
+	bucketHooks       = []byte("hooks")
 )
 
 // Meta key constants.

@@ -829,6 +829,53 @@ func (g *Game) ConnLog(player gamedb.DBRef, count int) string {
 	return strings.Join(parts, " ")
 }
 
+// NextDBRef returns the next available dbref that would be assigned.
+func (g *Game) NextDBRef() gamedb.DBRef {
+	return g.NextRef
+}
+
+// IsInstance returns true if obj has the Flag3Instance flag.
+func (g *Game) IsInstance(obj gamedb.DBRef) bool {
+	o, ok := g.DB.Objects[obj]
+	if !ok {
+		return false
+	}
+	return o.HasFlag3(gamedb.Flag3Instance)
+}
+
+// InstanceRooms returns the interior rooms of an instance (rooms whose Location = obj).
+func (g *Game) InstanceRooms(obj gamedb.DBRef) []gamedb.DBRef {
+	if !g.IsInstance(obj) {
+		return nil
+	}
+	var rooms []gamedb.DBRef
+	for ref, o := range g.DB.Objects {
+		if o.ObjType() == gamedb.TypeRoom && o.Location == obj {
+			rooms = append(rooms, ref)
+		}
+	}
+	return rooms
+}
+
+// InstanceVehicle returns the instance THING this room belongs to, or Nothing.
+func (g *Game) InstanceVehicle(room gamedb.DBRef) gamedb.DBRef {
+	o, ok := g.DB.Objects[room]
+	if !ok || o.ObjType() != gamedb.TypeRoom {
+		return gamedb.Nothing
+	}
+	if o.Location == gamedb.Nothing {
+		return gamedb.Nothing
+	}
+	loc, ok := g.DB.Objects[o.Location]
+	if !ok {
+		return gamedb.Nothing
+	}
+	if loc.HasFlag3(gamedb.Flag3Instance) {
+		return o.Location
+	}
+	return gamedb.Nothing
+}
+
 // AddrLog returns connection log IP addresses for a player.
 func (g *Game) AddrLog(player gamedb.DBRef, count int) string {
 	if g.Store == nil {

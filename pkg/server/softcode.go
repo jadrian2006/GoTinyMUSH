@@ -55,13 +55,17 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 		searchObjs = append(searchObjs, g.DB.SafeContents(masterRoom)...)
 	}
 
-	// Zone-based commands: check player's zone and room's zone
-	if pObj, ok := g.DB.Objects[player]; ok && pObj.Zone != gamedb.Nothing {
-		searchObjs = g.addZoneObjects(searchObjs, pObj.Zone)
+	// Zone-based commands: check player's zones and room's zones
+	if pObj, ok := g.DB.Objects[player]; ok {
+		for _, z := range pObj.AllZones() {
+			searchObjs = g.addZoneObjects(searchObjs, z)
+		}
 	}
 	if loc != gamedb.Nothing {
-		if locObj, ok := g.DB.Objects[loc]; ok && locObj.Zone != gamedb.Nothing {
-			searchObjs = g.addZoneObjects(searchObjs, locObj.Zone)
+		if locObj, ok := g.DB.Objects[loc]; ok {
+			for _, z := range locObj.AllZones() {
+				searchObjs = g.addZoneObjects(searchObjs, z)
+			}
 		}
 	}
 

@@ -72,6 +72,9 @@ var FlagTable = map[string]*FlagDef{
 	"GAGGED":     {Name: "GAGGED", Word: 1, Bit: gamedb.Flag2Gagged},
 	"STAFF":      {Name: "STAFF", Word: 1, Bit: gamedb.Flag2Staff},
 	"FIXED":      {Name: "FIXED", Word: 1, Bit: gamedb.Flag2Fixed},
+
+	// Flag word 2
+	"INSTANCE":   {Name: "INSTANCE", Word: 2, Bit: gamedb.Flag3Instance},
 }
 
 // SetFlag sets or clears a flag on an object.

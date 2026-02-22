@@ -665,6 +665,13 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 			g.ShowRoom(descs[0], dest)
 		}
 	}
+
+	// Instance movement: if the teleported object is an instance, notify occupants
+	if obj, ok := g.DB.Objects[victim]; ok {
+		if obj.HasFlag3(gamedb.Flag3Instance) {
+			g.MoveInstanceOccupants(victim)
+		}
+	}
 }
 
 func cmdForce(g *Game, d *Descriptor, args string, _ []string) {
@@ -1811,7 +1818,58 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 		}
 	}
 
-	// Set the zone
+	// Handle /add and /remove switches for multi-zone
+	if HasSwitch(switches, "add") {
+		if zone == gamedb.Nothing {
+			d.Send("You must specify a zone to add.")
+			return
+		}
+		// Check not already in zones list
+		for _, z := range targetObj.Zones {
+			if z == zone {
+				d.Send(fmt.Sprintf("%s(#%d) is already in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
+				return
+			}
+		}
+		if targetObj.Zone == zone {
+			d.Send(fmt.Sprintf("%s(#%d) is already in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
+			return
+		}
+		targetObj.Zones = append(targetObj.Zones, zone)
+		g.PersistObject(targetObj)
+		d.Send(fmt.Sprintf("Zone %s(#%d) added to %s(#%d).", g.ObjName(zone), zone, targetObj.Name, target))
+		return
+	}
+
+	if HasSwitch(switches, "remove") {
+		if zone == gamedb.Nothing {
+			d.Send("You must specify a zone to remove.")
+			return
+		}
+		removed := false
+		// Check primary zone
+		if targetObj.Zone == zone {
+			targetObj.Zone = gamedb.Nothing
+			removed = true
+		}
+		// Check additional zones
+		for i, z := range targetObj.Zones {
+			if z == zone {
+				targetObj.Zones = append(targetObj.Zones[:i], targetObj.Zones[i+1:]...)
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			d.Send(fmt.Sprintf("%s(#%d) is not in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
+			return
+		}
+		g.PersistObject(targetObj)
+		d.Send(fmt.Sprintf("Zone %s(#%d) removed from %s(#%d).", g.ObjName(zone), zone, targetObj.Name, target))
+		return
+	}
+
+	// Set the primary zone (existing behavior)
 	targetObj.Zone = zone
 	g.PersistObject(targetObj)
 

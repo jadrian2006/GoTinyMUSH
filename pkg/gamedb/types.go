@@ -112,6 +112,11 @@ const (
 	Flag2Fixed      = 0x40000000
 )
 
+// Flag constants - third word (Flags[2])
+const (
+	Flag3Instance = 0x00000001 // Object is a vehicle/container instance
+)
+
 // Power constants - first word (Powers[0])
 const (
 	PowChgQuotas   = 0x00000001
@@ -290,6 +295,7 @@ type Object struct {
 	Name     string
 	Location DBRef
 	Zone     DBRef
+	Zones    []DBRef // Additional zones (multi-zone support)
 	Contents DBRef
 	Exits    DBRef
 	Link     DBRef
@@ -318,6 +324,29 @@ func (o *Object) HasFlag(flag int) bool {
 // HasFlag2 checks if a flag bit is set in the second flag word.
 func (o *Object) HasFlag2(flag int) bool {
 	return o.Flags[1]&flag != 0
+}
+
+// HasFlag3 checks if a flag bit is set in the third flag word.
+func (o *Object) HasFlag3(flag int) bool {
+	return o.Flags[2]&flag != 0
+}
+
+// AllZones returns the combined list of the primary Zone and additional Zones,
+// deduplicated and excluding Nothing.
+func (o *Object) AllZones() []DBRef {
+	var zones []DBRef
+	seen := make(map[DBRef]bool)
+	if o.Zone != Nothing {
+		zones = append(zones, o.Zone)
+		seen[o.Zone] = true
+	}
+	for _, z := range o.Zones {
+		if z != Nothing && !seen[z] {
+			zones = append(zones, z)
+			seen[z] = true
+		}
+	}
+	return zones
 }
 
 // IsGoing returns true if the object is marked for destruction.

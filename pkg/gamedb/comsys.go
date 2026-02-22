@@ -13,6 +13,7 @@ type Channel struct {
 	JoinLock       string // Lock expression (unparsed)
 	TransLock      string
 	RecvLock       string
+	Mogrifier      DBRef  // Object that transforms messages before broadcast
 }
 
 // ChanAlias represents a player's subscription/alias for a channel.

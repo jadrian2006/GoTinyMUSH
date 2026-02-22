@@ -391,6 +391,23 @@ func main() {
 		}
 	}()
 
+	// Load hooks from boltstore
+	if srv.Game.Store != nil {
+		hooks := srv.Game.Store.GetHooks()
+		if len(hooks) > 0 {
+			srv.Game.Hooks = make(map[string]*server.HookSet)
+			for name, bh := range hooks {
+				srv.Game.Hooks[name] = &server.HookSet{
+					Before:   bh.Before,
+					After:    bh.After,
+					Override: bh.Override,
+					Ignore:   bh.Ignore,
+				}
+			}
+			log.Printf("Loaded %d command hooks from boltstore", len(hooks))
+		}
+	}
+
 	// Repair any corrupted content chains before startup
 	srv.Game.RepairContentChains()
 

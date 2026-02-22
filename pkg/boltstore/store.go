@@ -28,7 +28,7 @@ func Open(path string) (*Store, error) {
 
 	// Ensure all buckets exist.
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketArrays, bucketAPIKeys, bucketConnLog} {
+		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketArrays, bucketAPIKeys, bucketConnLog, bucketHooks} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
@@ -827,4 +827,57 @@ func (s *Store) GetConnLog(player gamedb.DBRef, count int) ([]ConnLogEntry, erro
 		return nil
 	})
 	return entries, err
+}
+
+// HookSet holds hook attribute names for a command.
+type HookSet struct {
+	Before   string
+	After    string
+	Override string
+	Ignore   string
+}
+
+// PutHooks persists the entire hooks map to bbolt.
+func (s *Store) PutHooks(hooks map[string]*HookSet) {
+	if hooks == nil {
+		return
+	}
+	s.bolt.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketHooks)
+		// Clear existing
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			b.Delete(k)
+		}
+		// Write new
+		for name, hs := range hooks {
+			var buf bytes.Buffer
+			if err := gob.NewEncoder(&buf).Encode(hs); err != nil {
+				continue
+			}
+			b.Put([]byte(name), buf.Bytes())
+		}
+		return nil
+	})
+}
+
+// GetHooks loads all hooks from bbolt.
+func (s *Store) GetHooks() map[string]*HookSet {
+	hooks := make(map[string]*HookSet)
+	s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketHooks)
+		if b == nil {
+			return nil
+		}
+		b.ForEach(func(k, v []byte) error {
+			var hs HookSet
+			if err := gob.NewDecoder(bytes.NewReader(v)).Decode(&hs); err != nil {
+				return nil
+			}
+			hooks[string(k)] = &hs
+			return nil
+		})
+		return nil
+	})
+	return hooks
 }
