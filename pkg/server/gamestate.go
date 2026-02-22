@@ -214,10 +214,24 @@ func (g *Game) LookupPlayer(name string) gamedb.DBRef {
 	if name[0] == '*' {
 		name = name[1:]
 	}
-	// Try exact match first
+	// Try exact match first (name then alias)
 	for _, obj := range g.DB.Objects {
 		if obj.ObjType() == gamedb.TypePlayer && !obj.IsGoing() && strings.EqualFold(obj.Name, name) {
 			return obj.DBRef
+		}
+	}
+	for _, obj := range g.DB.Objects {
+		if obj.ObjType() != gamedb.TypePlayer || obj.IsGoing() {
+			continue
+		}
+		for _, attr := range obj.Attrs {
+			if attr.Number == 58 { // A_ALIAS
+				alias := eval.StripAttrPrefix(attr.Value)
+				if alias != "" && strings.EqualFold(alias, name) {
+					return obj.DBRef
+				}
+				break
+			}
 		}
 	}
 	// Try prefix match
