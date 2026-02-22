@@ -287,6 +287,8 @@ func (ws *WebServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		ws.game.Conns.Login(d, claims.PlayerRef)
 		if pObj, ok := ws.game.DB.Objects[claims.PlayerRef]; ok {
 			pObj.Flags[1] |= gamedb.Flag2Connected
+			// Web clients always support ANSI rendering
+			pObj.Flags[1] |= gamedb.Flag2Ansi
 		}
 		wc.sendJSON(WSMessage{
 			Type: "login",
@@ -401,6 +403,8 @@ func handleWSLogin(ws *WebServer, d *Descriptor, wc *wsConn, input string) {
 		ws.game.Conns.Login(d, player)
 		if pObj, ok := ws.game.DB.Objects[player]; ok {
 			pObj.Flags[1] |= gamedb.Flag2Connected
+			// Web clients always support ANSI rendering
+			pObj.Flags[1] |= gamedb.Flag2Ansi
 		}
 		playerName := ws.game.PlayerName(player)
 		wc.sendJSON(WSMessage{
