@@ -55,6 +55,7 @@ var FlagTable = map[string]*FlagDef{
 	"PARENT_OK":  {Name: "PARENT_OK", Word: 1, Bit: gamedb.Flag2ParentOK},
 	"LIGHT":      {Name: "LIGHT", Word: 1, Bit: gamedb.Flag2Light},
 	"HAS_LISTEN": {Name: "HAS_LISTEN", Word: 1, Bit: gamedb.Flag2HasListen},
+	"OOB":        {Name: "OOB", Word: 1, Bit: gamedb.Flag2OOB},
 	"CONNECTED":  {Name: "CONNECTED", Word: 1, Bit: gamedb.Flag2Connected},
 	"SLAVE":      {Name: "SLAVE", Word: 1, Bit: gamedb.Flag2Slave},
 	"HTML":       {Name: "HTML", Word: 1, Bit: gamedb.Flag2HTML},

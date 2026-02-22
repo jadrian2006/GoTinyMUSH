@@ -178,6 +178,23 @@ type GameState interface {
 	// GetObjLockStr returns the serialized default lock (obj.Lock BoolExp) for an object.
 	// Returns "" if no header lock is set. Used as fallback when attr 42 is empty.
 	GetObjLockStr(obj gamedb.DBRef) string
+
+	// SendOOB sends a GMCP message to a connected player's client(s).
+	// Returns true if at least one GMCP-capable descriptor received it.
+	SendOOB(player gamedb.DBRef, pkg string, data string) bool
+
+	// HasGMCP returns true if player has at least one GMCP-capable connection.
+	HasGMCP(player gamedb.DBRef) bool
+
+	// GMCPPackages returns the GMCP package subscriptions for a player.
+	GMCPPackages(player gamedb.DBRef) []string
+
+	// HasMSDP returns true if player has at least one MSDP-capable connection.
+	HasMSDP(player gamedb.DBRef) bool
+
+	// HelpSearch searches help file entry contents for a pattern.
+	// Returns matching topic names (case-insensitive substring match).
+	HelpSearch(player gamedb.DBRef, fileID string, pattern string) []string
 }
 
 // EvalContext is the execution context for MUSH expression evaluation.

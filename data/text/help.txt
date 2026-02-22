@@ -5848,9 +5848,11 @@ See also: @link, @open.
   Array Functions: mutable variable-length containers (push/pop/shift).
   Attribute Functions: retrievel of attribute-related information.
   Comsys Functions: available only when the comsys is enabled.
+  JSON Functions: creation, querying, and modification of JSON data.
   List Functions: manipulation of lists.
   Math Functions: math and logic.
   Misc Functions: miscellaneous utilities.
+  OOB Functions: out-of-band GMCP/MSDP protocol queries.
   Object Functions: retrieval of object-property-related information.
   Pueblo Functions: available only when Pueblo is enabled.
   Side-Effect Functions: side-effect functions.
@@ -5966,18 +5968,19 @@ See also: @link, @open.
  
 & MISC FUNCTIONS
   Topic: Miscellaneous Functions
- 
-	case()		ccount()	cdepth()	config()
-	connrecord()	convsecs()	convtime()	die()		
-	fcount()	fdepth()	hasmodule()	helptext()	
-	ifelse()	iffalse()	iftrue()	ifzero()
-	localize()	lregs()		mudname()	nonzero()
-	oemit()		pemit()		private()	r()		
-	rand()		remit()		restarts()	restarttime()	
-	s()		secs()		setq()		setr()		
-	speak()		sql()		starttime()	subeval()	
-	switch()	switchall()	time()		timefmt()	
-	usefalse()	usetrue()	version()
+
+	align()		case()		ccount()	cdepth()
+	config()	connrecord()	convsecs()	convtime()
+	die()		fcount()	fdepth()	hasmodule()
+	helptext()	ifelse()	iffalse()	iftrue()
+	ifzero()	localize()	lregs()		mudname()
+	nonzero()	oemit()		pemit()		private()
+	r()		rand()		remit()		restarts()
+	restarttime()	s()		secs()		setq()
+	setr()		speak()		sql()		starttime()
+	subeval()	switch()	switchall()	textsearch()
+	time()		timefmt()	usefalse()	usetrue()
+	version()
  
 & STRING FUNCTIONS
   Topic: String Functions
@@ -16075,3 +16078,383 @@ TRUNC_LENGTH - Per-player examine output truncation
     You say, "inventory queue scores"
 
   See also: array(), adestroy(), ARRAY FUNCTIONS.
+
+& JSON FUNCTIONS
+  Topic: JSON Functions
+
+  Functions for creating, querying, and modifying JSON data structures.
+  JSON enables structured data exchange with GMCP clients and complex
+  softcode data manipulation.
+
+	json()		json_query()	json_mod()	json_pp()
+	json_test()	json_to_array()	array_to_json()
+
+  See also: OOB FUNCTIONS, ARRAY FUNCTIONS.
+
+& JSON()
+  Function: json(<type>[, <args>...])
+
+  Creates a JSON value of the specified type.
+
+  Types:
+    json(object, <key1>, <val1>[, <key2>, <val2>...])
+      Creates a JSON object from key-value pairs.
+      Requires an even number of arguments after 'object'.
+
+    json(array, <val1>[, <val2>...])
+      Creates a JSON array from the given values.
+
+    json(string, <text>)
+      Creates a JSON string (quoted).
+
+    json(number, <num>)
+      Creates a JSON number.
+
+    json(bool, <0|1>)
+      Creates a JSON boolean. 1/true = true, 0/false = false.
+
+    json(null)
+      Creates a JSON null value.
+
+  Values are auto-detected: strings that look like JSON objects, arrays,
+  numbers, or booleans are preserved as their JSON type. This allows
+  nesting: json(object, items, json(array, 1, 2, 3))
+
+  Examples:
+    > say json(object, name, Bob, age, 25)
+    You say, "{"age":25,"name":"Bob"}"
+    > say json(array, red, green, blue)
+    You say, "["red","green","blue"]"
+    > say json(object, pos, json(array, 10, 20))
+    You say, "{"pos":[10,20]}"
+    > say json(string, hello world)
+    You say, ""hello world""
+    > say json(bool, 1)
+    You say, "true"
+    > say json(null)
+    You say, "null"
+
+  See also: json_query(), json_mod(), json_pp(), json_test(), JSON FUNCTIONS.
+
+& JSON_QUERY()
+  Function: json_query(<json>, <operation>[, <path>])
+
+  Queries a JSON value. <path> uses dot-notation (e.g., "a.b.0" to
+  access nested keys and array indices, 0-based).
+
+  Operations:
+    get      - Returns value at path. Strings are unquoted.
+    exists   - Returns 1 if path exists, 0 if not.
+    type     - Returns: object, array, string, number, boolean, or null.
+    members  - Object: space-separated keys. Array: "0 1 2 ...".
+    keys     - Alias for members.
+    count    - Object: key count. Array: length. Scalar: 1.
+    isnull   - Returns 1 if value at path is null, 0 otherwise.
+
+  Examples:
+    > say json_query({"a":{"b":[10,20]}}, get, a.b.1)
+    You say, "20"
+    > say json_query({"x":1,"y":2}, members)
+    You say, "x y"
+    > say json_query({"x":1}, exists, x)
+    You say, "1"
+    > say json_query({"x":1}, exists, z)
+    You say, "0"
+    > say json_query([1,2,3], count)
+    You say, "3"
+    > say json_query({"x":null}, isnull, x)
+    You say, "1"
+    > say json_query({"x":1}, type, x)
+    You say, "number"
+
+  See also: json(), json_mod(), JSON FUNCTIONS.
+
+& JSON_MOD()
+  Function: json_mod(<json>, <operation>, <path>[, <value>])
+
+  Modifies a JSON value and returns the result.
+
+  Operations:
+    set      - Set value at path (create or overwrite).
+    insert   - Set only if key does NOT exist (#-1 KEY ALREADY EXISTS).
+    replace  - Set only if key DOES exist (#-1 KEY NOT FOUND).
+    remove   - Remove key or array element at path.
+    delete   - Alias for remove.
+    push     - Append value to array at path.
+    append   - Alias for push.
+    patch    - Merge keys from a JSON object value into target object.
+
+  All operations return the modified JSON string.
+
+  Examples:
+    > say json_mod({"x":1}, set, y, 2)
+    You say, "{"x":1,"y":2}"
+    > say json_mod({"a":[1,2]}, push, a, 3)
+    You say, "{"a":[1,2,3]}"
+    > say json_mod({"x":1,"y":2}, remove, y)
+    You say, "{"x":1}"
+    > say json_mod({"a":1}, patch, , {"b":2})
+    You say, "{"a":1,"b":2}"
+
+  See also: json(), json_query(), JSON FUNCTIONS.
+
+& JSON_PP()
+  Function: json_pp(<json>)
+
+  Pretty-prints a JSON value with 2-space indentation.
+  Returns #-1 INVALID JSON if the input is not valid JSON.
+
+  Example:
+    > say json_pp({"a":1,"b":[2,3]})
+    You say, "{
+      "a": 1,
+      "b": [
+        2,
+        3
+      ]
+    }"
+
+  See also: json(), json_test(), JSON FUNCTIONS.
+
+& JSON_TEST()
+  Function: json_test(<json>)
+
+  Validates a JSON string. Returns 1 if the input is valid JSON.
+  Returns a descriptive error string if the input is invalid.
+
+  Examples:
+    > say json_test({"valid":true})
+    You say, "1"
+    > say json_test({broken)
+    You say, "invalid character 'b' looking for beginning of object key string"
+
+  See also: json(), json_pp(), JSON FUNCTIONS.
+
+& JSON_TO_ARRAY()
+  Function: json_to_array(<json>, <arrayname>)
+
+  Loads a JSON value into an existing named array.
+
+  - JSON array: each element becomes an array entry. Nested objects/arrays
+    are stored as JSON strings, creating natural "stanzas."
+  - JSON object: loaded as "key:value" pairs, sorted by key.
+  - Scalar: stored as a single element.
+
+  Returns the number of elements loaded.
+
+  Examples:
+    > array(inv)
+    1
+    > json_to_array(["sword","shield","potion"], inv)
+    3
+    > alist(inv)
+    sword shield potion
+    > json_to_array({"hp":100,"mp":50}, inv)
+    2
+    > alist(inv)
+    hp:100 mp:50
+    > json_to_array([{"name":"Bob"},{"name":"Sue"}], inv)
+    2
+    > aget(inv, 1)
+    {"name":"Bob"}
+
+  See also: array_to_json(), json(), ARRAY FUNCTIONS, JSON FUNCTIONS.
+
+& ARRAY_TO_JSON()
+  Function: array_to_json(<arrayname>[, <mode>])
+
+  Converts a named array to a JSON string.
+
+  Modes:
+    array   (default) - Produces a JSON array of string values.
+    object  - If values contain "key:value" pairs, produces a JSON object.
+    nested  - Values that are valid JSON are preserved as parsed types.
+
+  Examples:
+    > array(items) && apush(items, sword, shield)
+    > say array_to_json(items)
+    You say, "["sword","shield"]"
+    > array(stats) && apush(stats, hp:100, mp:50)
+    > say array_to_json(stats, object)
+    You say, "{"hp":100,"mp":50}"
+    > array(mix) && apush(mix, hello, [1,2,3])
+    > say array_to_json(mix, nested)
+    You say, "["hello",[1,2,3]]"
+
+  See also: json_to_array(), json(), ARRAY FUNCTIONS, JSON FUNCTIONS.
+
+& OOB FUNCTIONS
+  Topic: OOB Functions
+
+  Functions for querying and using Out-of-Band (OOB) protocol capabilities.
+  OOB protocols (GMCP, MSDP) allow sending structured data to MUD clients
+  that support rich features like maps, health bars, and custom UIs.
+
+	oob()		hasgmcp()	gmcppackages()	hasmsdp()
+
+  See also: JSON FUNCTIONS.
+
+& OOB()
+  Function: oob(<target>, <package>, <json_data>)
+
+  Sends a GMCP (Generic MUD Communication Protocol) message to the
+  specified player's client. The data must be valid JSON.
+
+  Requirements:
+    - Caller must control the target or be a wizard.
+    - Target player must have the OOB flag set (@set me=OOB).
+      This is an opt-in safety measure -- without it, softcode cannot
+      push OOB data to a player. Client-originated GMCP (subscriptions,
+      etc.) is NOT affected by this flag.
+
+  Returns:
+    1  - At least one GMCP-capable connection received the message.
+    0  - Player has no GMCP connections (but flag was set).
+    #-1 TARGET NOT OOB-ENABLED - Target lacks the OOB flag.
+
+  Examples:
+    > @set me=OOB
+    Set.
+    > say oob(%#, Custom.Test, json(object, msg, hello))
+    You say, "1"
+    > say oob(%#, Char.Vitals, json(object, hp, 100, maxhp, 100))
+    You say, "1"
+
+  See also: OOB FLAG, hasgmcp(), gmcppackages(), json(), OOB FUNCTIONS.
+
+& OOB FLAG
+  Flag: OOB (player)
+
+  When set on a player, allows softcode to send GMCP data to that
+  player's client via the oob() function.
+
+  By default, this flag is OFF. Players must opt in with:
+    @set me=OOB
+
+  This flag ONLY controls softcode-initiated pushes (the oob() function).
+  It does NOT affect client-originated GMCP traffic -- client protocol
+  negotiation, package subscriptions, and other client-to-server GMCP
+  messages work regardless of this flag.
+
+  To disable softcode pushes:
+    @set me=!OOB
+
+  See also: oob(), OOB FUNCTIONS, hasgmcp().
+
+& HASGMCP()
+  Function: hasgmcp(<player>)
+
+  Returns 1 if the specified player has at least one connection with
+  GMCP (Generic MUD Communication Protocol) support negotiated.
+  Returns 0 otherwise.
+
+  Example:
+    > say hasgmcp(%#)
+    You say, "1"
+
+  See also: oob(), gmcppackages(), hasmsdp(), OOB FUNCTIONS.
+
+& GMCPPACKAGES()
+  Function: gmcppackages(<player>)
+
+  Returns a space-separated sorted list of GMCP package names that the
+  player's client has subscribed to. Returns empty if the player has
+  no GMCP connection.
+
+  Example:
+    > say gmcppackages(%#)
+    You say, "Char.Login Char.Vitals Comm.Channel.Text Room.Info"
+
+  See also: hasgmcp(), oob(), OOB FUNCTIONS.
+
+& HASMSDP()
+  Function: hasmsdp(<player>)
+
+  Returns 1 if the specified player has at least one connection with
+  MSDP (MUD Server Data Protocol) support negotiated.
+  Returns 0 otherwise.
+
+  Example:
+    > say hasmsdp(%#)
+    You say, "0"
+
+  See also: hasgmcp(), OOB FUNCTIONS.
+
+& TEXTSEARCH()
+  Function: textsearch(<file>, <pattern>)
+
+  Searches help file entry contents for a case-insensitive substring
+  match and returns a space-separated sorted list of matching topic names.
+
+  Valid file IDs: help, wizhelp, news, wiznews, qhelp, plushelp, man.
+  Wizard-only files (wizhelp, wiznews) require wizard privileges.
+
+  Examples:
+    > say textsearch(help, array)
+    You say, "aget() alen() alist() aload() apop() apush() ..."
+    > say textsearch(help, GMCP)
+    You say, "gmcppackages() hasgmcp() oob() oob functions"
+
+  See also: helptext(), help.
+
+& ALIGN()
+  Function: align(<spec>, <col1>[, <col2>...][, <filler>][, <linesep>][, <colsep>])
+
+  Formats text into aligned columns. Each column is specified in the
+  <spec> string as a space-separated token: digits for width, followed
+  by an optional alignment character (< left, > right, - center),
+  followed by an optional pad character.
+
+  Column values may contain newlines for multi-row output. If columns
+  have different numbers of lines, shorter columns are padded with
+  empty strings.
+
+  ANSI escape codes are handled correctly -- padding is based on
+  visible character width, not raw string length.
+
+  Spec examples:
+    "20< 10> 15-"   3 columns: 20-wide left, 10-wide right, 15 center
+    "30< 10>."      2 columns: 30-wide left, 10-wide right padded with .
+
+  Examples:
+    > say align(15< 10> 10-, Alice, 100, Warrior)
+    You say, "Alice               100  Warrior  "
+    > say align(10< 10< 10<, Name, Score, Class, Alice, 100, Mage, Bob, 200, Tank)
+    You say, "Name      Score     Class
+    Alice     100       Mage
+    Bob       200       Tank"
+
+  See also: ljust(), rjust(), center(), columns(), table().
+
+& 256-Color
+& 256-color
+& TrueColor
+& truecolor
+& Extended Colors
+& extended colors
+  Topic: Extended Colors (256-Color and TrueColor ANSI)
+
+  goTinyMUSH supports extended ANSI color codes in the ansi() function
+  and in substitution strings. These work with modern terminals and
+  MUD clients that support xterm-256 or 24-bit color.
+
+  256-Color: Use <NNN> for foreground and /<NNN> for background,
+  where NNN is 0-255.
+    ansi(<196>, text)          - Bright red foreground
+    ansi(/<21>, text)          - Blue background
+
+  TrueColor (24-bit): Use <#RRGGBB> for foreground and /<#RRGGBB>
+  for background.
+    ansi(<#FF6600>, text)      - Orange foreground
+    ansi(/<#003366>, text)     - Dark blue background
+
+  Combine with standard ANSI codes:
+    ansi(h<#FF0000>, text)     - Bold + red foreground
+
+  In substitution strings (attributes, @desc, etc.), use:
+    %x<NNN>    - 256-color foreground
+    %x/<NNN>   - 256-color background
+    %x<#RGB>   - TrueColor foreground
+    %x/<#RGB>  - TrueColor background
+
+  See also: ansi(), SUBSTITUTIONS.

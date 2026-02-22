@@ -1,6 +1,7 @@
 package functions
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"regexp"
@@ -1624,6 +1625,99 @@ func fnHelptext(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if ctx.GameState == nil { return }
 	text := ctx.GameState.HelpLookup(ctx.Player, args[0], args[1])
 	buf.WriteString(text)
+}
+
+// --- OOB / GMCP functions ---
+
+// fnOob sends a GMCP message to a player's client.
+// oob(target, package, json_data) → 1 if sent, 0 otherwise
+// The target player must have the OOB flag set to receive softcode pushes.
+func fnOob(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 3 || ctx.GameState == nil {
+		buf.WriteString("#-1 TOO FEW ARGUMENTS")
+		return
+	}
+	target := resolveDBRef(ctx, args[0])
+	if target == gamedb.Nothing {
+		buf.WriteString("#-1 NOT FOUND")
+		return
+	}
+	// Permission check: must control target or be wizard
+	if !ctx.GameState.Controls(ctx.Player, target) && !ctx.GameState.IsWizard(ctx.Player) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
+	// Check OOB flag — target must opt in to receive softcode pushes
+	if tObj, ok := ctx.DB.Objects[target]; !ok || !tObj.HasFlag2(gamedb.Flag2OOB) {
+		buf.WriteString("#-1 TARGET NOT OOB-ENABLED")
+		return
+	}
+	// Validate JSON
+	pkg := strings.TrimSpace(args[1])
+	data := args[2]
+	var js interface{}
+	if err := json.Unmarshal([]byte(data), &js); err != nil {
+		buf.WriteString("#-1 INVALID JSON")
+		return
+	}
+	if ctx.GameState.SendOOB(target, pkg, data) {
+		buf.WriteString("1")
+	} else {
+		buf.WriteString("0")
+	}
+}
+
+// fnHasGMCP returns 1 if the player has a GMCP-capable connection.
+func fnHasGMCP(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		buf.WriteString("0")
+		return
+	}
+	target := resolveDBRef(ctx, args[0])
+	if target == gamedb.Nothing {
+		buf.WriteString("0")
+		return
+	}
+	buf.WriteString(boolToStr(ctx.GameState.HasGMCP(target)))
+}
+
+// fnGMCPPackages returns space-separated list of a player's GMCP subscriptions.
+func fnGMCPPackages(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		return
+	}
+	target := resolveDBRef(ctx, args[0])
+	if target == gamedb.Nothing {
+		return
+	}
+	pkgs := ctx.GameState.GMCPPackages(target)
+	buf.WriteString(strings.Join(pkgs, " "))
+}
+
+// fnHasMSDP returns 1 if the player has an MSDP-capable connection.
+func fnHasMSDP(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		buf.WriteString("0")
+		return
+	}
+	target := resolveDBRef(ctx, args[0])
+	if target == gamedb.Nothing {
+		buf.WriteString("0")
+		return
+	}
+	buf.WriteString(boolToStr(ctx.GameState.HasMSDP(target)))
+}
+
+// --- Help search ---
+
+// fnTextsearch searches help file contents for a pattern.
+// textsearch(file, pattern) → space-separated list of matching topic names
+func fnTextsearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 || ctx.GameState == nil {
+		return
+	}
+	topics := ctx.GameState.HelpSearch(ctx.Player, args[0], args[1])
+	buf.WriteString(strings.Join(topics, " "))
 }
 
 // fnObjcall — call a u-function from another object's perspective.

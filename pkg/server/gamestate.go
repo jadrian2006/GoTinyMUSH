@@ -10,6 +10,7 @@ import (
 
 	"github.com/crystal-mush/gotinymush/pkg/eval"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
+	"github.com/crystal-mush/gotinymush/pkg/oob"
 )
 
 // Ensure Game implements eval.GameState.
@@ -693,4 +694,113 @@ func sortStrings(s []string) {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
+}
+
+// SendOOB sends a GMCP message to a connected player's client(s).
+// Format: IAC SB 201 <pkg> <space> <data> IAC SE
+// Returns true if at least one GMCP-capable descriptor received it.
+func (g *Game) SendOOB(player gamedb.DBRef, pkg string, data string) bool {
+	descs := g.Conns.GetByPlayer(player)
+	if len(descs) == 0 {
+		return false
+	}
+	payload := fmt.Sprintf("%s %s", pkg, data)
+	buf := make([]byte, 0, len(payload)+4)
+	buf = append(buf, oob.IAC, oob.SB, oob.TeloptGMCP)
+	buf = append(buf, []byte(payload)...)
+	buf = append(buf, oob.IAC, oob.SE)
+
+	sent := false
+	for _, d := range descs {
+		if d.OOB != nil && d.OOB.GMCP {
+			d.SendRaw(buf)
+			sent = true
+		}
+	}
+	return sent
+}
+
+// HasGMCP returns true if player has at least one GMCP-capable connection.
+func (g *Game) HasGMCP(player gamedb.DBRef) bool {
+	descs := g.Conns.GetByPlayer(player)
+	for _, d := range descs {
+		if d.OOB != nil && d.OOB.GMCP {
+			return true
+		}
+	}
+	return false
+}
+
+// GMCPPackages returns the GMCP package subscriptions for a player.
+func (g *Game) GMCPPackages(player gamedb.DBRef) []string {
+	descs := g.Conns.GetByPlayer(player)
+	for _, d := range descs {
+		if d.OOB != nil && d.OOB.GMCP && d.OOB.GMCPPackages != nil {
+			var pkgs []string
+			for pkg := range d.OOB.GMCPPackages {
+				pkgs = append(pkgs, pkg)
+			}
+			sort.Strings(pkgs)
+			return pkgs
+		}
+	}
+	return nil
+}
+
+// HasMSDP returns true if player has at least one MSDP-capable connection.
+func (g *Game) HasMSDP(player gamedb.DBRef) bool {
+	descs := g.Conns.GetByPlayer(player)
+	for _, d := range descs {
+		if d.OOB != nil && d.OOB.MSDP {
+			return true
+		}
+	}
+	return false
+}
+
+// HelpSearch searches help file entry contents for a pattern.
+// Returns matching topic names (case-insensitive substring match).
+func (g *Game) HelpSearch(player gamedb.DBRef, fileID string, pattern string) []string {
+	var hf *HelpFile
+	switch strings.ToLower(fileID) {
+	case "help":
+		hf = g.HelpMain
+	case "wizhelp":
+		if !Wizard(g, player) {
+			return nil
+		}
+		hf = g.HelpWiz
+	case "news":
+		hf = g.HelpNews
+	case "wiznews":
+		if !Wizard(g, player) {
+			return nil
+		}
+		hf = g.HelpWizNews
+	case "qhelp":
+		hf = g.HelpQuick
+	case "plushelp", "+help":
+		hf = g.HelpPlus
+	case "man", "mushman":
+		hf = g.HelpMan
+	default:
+		return nil
+	}
+	if hf == nil {
+		return nil
+	}
+
+	patLower := strings.ToLower(pattern)
+	seen := make(map[string]bool)
+	var results []string
+	for topic, content := range hf.Entries {
+		if strings.Contains(strings.ToLower(content), patLower) {
+			if !seen[topic] {
+				seen[topic] = true
+				results = append(results, topic)
+			}
+		}
+	}
+	sort.Strings(results)
+	return results
 }

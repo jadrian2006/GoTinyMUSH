@@ -1209,6 +1209,151 @@ func soundexCode(s string) string {
 	return string(result)
 }
 
+// --- Column alignment ---
+
+// colSpec describes a single column for align().
+type colSpec struct {
+	width int
+	align byte // '<' left (default), '>' right, '-' center
+	pad   byte // padding character (default ' ')
+}
+
+// parseColSpecs parses the align() spec string into column descriptors.
+// Each token: leading digits = width, optional </>/- for alignment, optional pad char.
+// Example: "20< 10> 15-." → [{20,'<',' '}, {10,'>','.'}, {15,'-',' '}]
+func parseColSpecs(spec string) []colSpec {
+	tokens := strings.Fields(spec)
+	cols := make([]colSpec, 0, len(tokens))
+	for _, tok := range tokens {
+		var cs colSpec
+		cs.align = '<'
+		cs.pad = ' '
+		// Parse width digits from start
+		i := 0
+		for i < len(tok) && tok[i] >= '0' && tok[i] <= '9' {
+			i++
+		}
+		if i > 0 {
+			cs.width, _ = strconv.Atoi(tok[:i])
+		}
+		// Parse alignment char
+		if i < len(tok) {
+			switch tok[i] {
+			case '<', '>', '-':
+				cs.align = tok[i]
+				i++
+			}
+		}
+		// Parse optional pad char
+		if i < len(tok) {
+			cs.pad = tok[i]
+		}
+		if cs.width > 0 {
+			cols = append(cols, cs)
+		}
+	}
+	return cols
+}
+
+// fnAlign formats columns with alignment.
+// align(spec, col1[, col2...][, filler][, linesep][, colsep])
+func fnAlign(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 {
+		buf.WriteString("#-1 TOO FEW ARGUMENTS")
+		return
+	}
+
+	cols := parseColSpecs(args[0])
+	if len(cols) == 0 {
+		return
+	}
+
+	n := len(cols) // number of columns
+	// Column values are args[1] through args[n]
+	colValues := make([]string, n)
+	for i := 0; i < n && i+1 < len(args); i++ {
+		colValues[i] = args[i+1]
+	}
+
+	// Optional trailing args after column values
+	nextArg := n + 1
+	// linesep (default \n)
+	linesep := "\n"
+	if nextArg+1 < len(args) && args[nextArg+1] != "" {
+		linesep = args[nextArg+1]
+	}
+	// colsep (default empty)
+	colsep := ""
+	if nextArg+2 < len(args) && args[nextArg+2] != "" {
+		colsep = args[nextArg+2]
+	}
+
+	// Split each column value on \n for multi-row support
+	splitCols := make([][]string, n)
+	maxRows := 0
+	for i := 0; i < n; i++ {
+		if colValues[i] != "" {
+			splitCols[i] = strings.Split(colValues[i], "\n")
+		} else {
+			splitCols[i] = []string{""}
+		}
+		if len(splitCols[i]) > maxRows {
+			maxRows = len(splitCols[i])
+		}
+	}
+	if maxRows == 0 {
+		maxRows = 1
+	}
+
+	// Render each row
+	for row := 0; row < maxRows; row++ {
+		if row > 0 {
+			buf.WriteString(linesep)
+		}
+		for col := 0; col < n; col++ {
+			if col > 0 {
+				buf.WriteString(colsep)
+			}
+			cell := ""
+			if row < len(splitCols[col]) {
+				cell = splitCols[col][row]
+			}
+			cs := cols[col]
+			vLen := ansiStrLen(cell)
+			padChar := string(cs.pad)
+
+			if vLen > cs.width {
+				// Truncate
+				buf.WriteString(ansiTruncate(cell, cs.width))
+			} else {
+				padNeeded := cs.width - vLen
+				switch cs.align {
+				case '>': // right
+					for i := 0; i < padNeeded; i++ {
+						buf.WriteString(padChar)
+					}
+					buf.WriteString(cell)
+				case '-': // center
+					leftPad := padNeeded / 2
+					rightPad := padNeeded - leftPad
+					for i := 0; i < leftPad; i++ {
+						buf.WriteString(padChar)
+					}
+					buf.WriteString(cell)
+					for i := 0; i < rightPad; i++ {
+						buf.WriteString(padChar)
+					}
+				default: // '<' left
+					buf.WriteString(cell)
+					for i := 0; i < padNeeded; i++ {
+						buf.WriteString(padChar)
+					}
+				}
+			}
+		}
+	}
+}
+
 // fnGarble — garble/corrupt text with random character substitution.
 // garble(text[, percent]) → garbled text
 // percent defaults to 50. Each character has that % chance of being replaced.

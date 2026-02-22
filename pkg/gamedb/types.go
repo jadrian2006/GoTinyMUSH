@@ -91,6 +91,7 @@ const (
 	Flag2Light      = 0x00000020
 	Flag2HasListen  = 0x00000040
 	Flag2HasFwd     = 0x00000080
+	Flag2OOB        = 0x00000100 // Player opts in to receiving softcode OOB pushes
 	Flag2Connected  = 0x00000200
 	Flag2Slave      = 0x00000800
 	Flag2HTML       = 0x00001000

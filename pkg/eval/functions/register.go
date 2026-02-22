@@ -594,6 +594,27 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("STORE", fnStore, 2, 0)
 	ctx.RegisterFunction("ITEMS", fnItems, 1, 0)
 
+	// JSON functions
+	ctx.RegisterFunction("JSON", fnJson, 1, eval.FnVarArgs)
+	ctx.RegisterFunction("JSON_QUERY", fnJsonQuery, 2, eval.FnVarArgs)
+	ctx.RegisterFunction("JSON_MOD", fnJsonMod, 2, eval.FnVarArgs)
+	ctx.RegisterFunction("JSON_PP", fnJsonPP, 1, 0)
+	ctx.RegisterFunction("JSON_TEST", fnJsonTest, 1, 0)
+	ctx.RegisterFunction("JSON_TO_ARRAY", fnJsonToArray, 2, 0)
+	ctx.RegisterFunction("ARRAY_TO_JSON", fnArrayToJson, 1, eval.FnVarArgs)
+
+	// Formatting
+	ctx.RegisterFunction("ALIGN", fnAlign, 2, eval.FnVarArgs)
+
+	// OOB / GMCP
+	ctx.RegisterFunction("OOB", fnOob, 3, 0)
+	ctx.RegisterFunction("HASGMCP", fnHasGMCP, 1, 0)
+	ctx.RegisterFunction("GMCPPACKAGES", fnGMCPPackages, 1, 0)
+	ctx.RegisterFunction("HASMSDP", fnHasMSDP, 1, 0)
+
+	// Help search
+	ctx.RegisterFunction("TEXTSEARCH", fnTextsearch, 2, 0)
+
 	// Array functions
 	ctx.RegisterFunction("ARRAY", fnArray, 1, eval.FnVarArgs)
 	ctx.RegisterFunction("ADESTROY", fnAdestroy, 1, 0)
