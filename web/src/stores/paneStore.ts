@@ -15,6 +15,17 @@ const DEFAULT_FILTER: PaneFilter = {
   channels: [],
 };
 
+/** Generate a unique ID that works in non-secure contexts (plain HTTP). */
+function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try { return crypto.randomUUID(); } catch { /* non-secure context */ }
+  }
+  // Fallback: random hex string
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function makeMainPane(): PaneConfig {
   return {
     id: "main",
@@ -128,7 +139,7 @@ function nextGridSlot(): { gridRow: number; gridCol: number } {
 export function addPane(partial: Partial<PaneConfig> = {}): PaneConfig {
   const slot = nextGridSlot();
   const pane: PaneConfig = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     title: partial.title ?? "New Pane",
     filter: partial.filter ?? { ...DEFAULT_FILTER, types: [...DEFAULT_FILTER.types], channels: [...DEFAULT_FILTER.channels] },
     style: partial.style ?? { ...DEFAULT_STYLE },
