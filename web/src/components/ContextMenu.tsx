@@ -1,5 +1,4 @@
 import { signal } from "@preact/signals";
-import { useEffect, useRef } from "preact/hooks";
 
 interface ContextMenuItem {
   label: string;
@@ -34,48 +33,36 @@ export function hideContextMenu() {
 
 export function ContextMenu() {
   const state = menuState.value;
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!state.visible) return;
-
-    const handleClick = (e: MouseEvent) => {
-      // Don't dismiss if click is inside the context menu
-      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
-      hideContextMenu();
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hideContextMenu();
-    };
-
-    document.addEventListener("click", handleClick, true);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("click", handleClick, true);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [state.visible]);
 
   if (!state.visible || state.items.length === 0) return null;
 
   return (
-    <div
-      ref={menuRef}
-      class="context-menu"
-      style={{ left: `${state.x}px`, top: `${state.y}px` }}
-    >
-      {state.items.map((item, i) => (
-        <button
-          key={i}
-          class="context-menu-item"
-          onClick={() => {
-            item.action();
-            hideContextMenu();
-          }}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
+    <>
+      {/* Invisible backdrop — click to dismiss */}
+      <div
+        class="fixed inset-0"
+        style={{ zIndex: 99 }}
+        onClick={() => hideContextMenu()}
+        onContextMenu={(e) => { e.preventDefault(); hideContextMenu(); }}
+      />
+      {/* Menu */}
+      <div
+        class="context-menu"
+        style={{ left: `${state.x}px`, top: `${state.y}px` }}
+      >
+        {state.items.map((item, i) => (
+          <button
+            key={i}
+            class="context-menu-item"
+            onClick={() => {
+              item.action();
+              hideContextMenu();
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
