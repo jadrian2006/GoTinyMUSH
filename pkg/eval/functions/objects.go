@@ -351,6 +351,7 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if f2&gamedb.Flag2Fixed != 0 { buf.WriteByte('f') }
 	if f1&gamedb.FlagHalt != 0 { buf.WriteByte('h') }
 	if f1&gamedb.FlagImmortal != 0 { buf.WriteByte('i') }
+	if f2&gamedb.Flag2OOB != 0 { buf.WriteByte('g') }
 	if f2&gamedb.Flag2Gagged != 0 { buf.WriteByte('j') }
 	if f2&gamedb.Flag2Light != 0 { buf.WriteByte('l') }
 	if f1&gamedb.FlagMyopic != 0 { buf.WriteByte('m') }
@@ -397,7 +398,7 @@ var knownFlags = map[string][2]int{
 	"CONTROL_OK": {1, gamedb.Flag2ControlOK}, "SLAVE": {1, gamedb.Flag2Slave},
 	"BOUNCE": {1, gamedb.Flag2Bounce}, "STOP": {1, gamedb.Flag2StopMatch},
 	"NO_BLEED": {1, gamedb.Flag2NoBLeed}, "GAGGED": {1, gamedb.Flag2Gagged},
-	"FIXED": {1, gamedb.Flag2Fixed},
+	"FIXED": {1, gamedb.Flag2Fixed}, "OOB": {1, gamedb.Flag2OOB},
 	"HEAR_THROUGH": {0, gamedb.FlagHearThru}, "AUDIBLE": {0, gamedb.FlagHearThru},
 	"SEE_THROUGH": {0, gamedb.FlagSeeThru}, "TRANSPARENT": {0, gamedb.FlagSeeThru},
 	"HAS_STARTUP": {0, gamedb.FlagHasStartup},

@@ -832,14 +832,16 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	// Handle key commands that objects can execute
 	switch cmdLower {
 	case "think":
-		// Args arrive already evaluated from queue — send directly to owner
+		// Args arrive already evaluated from queue — send directly to owner.
+		// stripAllBraces: C TinyMUSH strips remaining {} from output (both
+		// syntax braces that survived eval and \{-escaped literal braces).
 		if obj, ok := g.DB.Objects[player]; ok {
-			g.Conns.SendToPlayer(obj.Owner, args)
+			g.Conns.SendToPlayer(obj.Owner, stripAllBraces(args))
 		}
 	case "@pemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(args[eqIdx+1:])
+			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
 			DebugLog("OBJEXEC @pemit target=%q message=%q switches=%q", targetStr, truncDebug(message, 120), switches)
 			target := g.ResolveRef(player, targetStr)
 			if target == gamedb.Nothing {
@@ -878,12 +880,12 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@emit":
 		loc := g.PlayerLocation(player)
 		if loc != gamedb.Nothing {
-			g.SendMarkedToRoom(loc, "EMIT", args)
+			g.SendMarkedToRoom(loc, "EMIT", stripAllBraces(args))
 		}
 	case "@oemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			targetStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(args[eqIdx+1:])
+			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
 			target := g.ResolveRef(player, targetStr)
 			if target != gamedb.Nothing {
 				if tObj, ok := g.DB.Objects[target]; ok {
@@ -894,7 +896,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@remit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 			roomStr := strings.TrimSpace(args[:eqIdx])
-			message := strings.TrimSpace(args[eqIdx+1:])
+			message := strings.TrimSpace(stripAllBraces(args[eqIdx+1:]))
 			room := g.ResolveRef(player, roomStr)
 			if room != gamedb.Nothing {
 				g.SendMarkedToRoom(room, "EMIT", message)
