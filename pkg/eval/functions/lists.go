@@ -267,6 +267,35 @@ func fnSetinter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	buf.WriteString(strings.Join(result, outDelim))
 }
 
+// fnSetsymdiff — symmetric difference of two lists: (A-B) ∪ (B-A).
+// setsymdiff(list1, list2[, delim[, odelim]])
+func fnSetsymdiff(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { return }
+	delim := " "
+	if len(args) > 2 && args[2] != "" { delim = args[2] }
+	outDelim := delim
+	if len(args) > 3 && args[3] != "" { outDelim = args[3] }
+	a := splitList(args[0], delim)
+	b := splitList(args[1], delim)
+	aSet := make(map[string]bool)
+	for _, w := range a { aSet[strings.ToLower(w)] = true }
+	bSet := make(map[string]bool)
+	for _, w := range b { bSet[strings.ToLower(w)] = true }
+	var result []string
+	seen := make(map[string]bool)
+	// Items in A but not in B
+	for _, w := range a {
+		lw := strings.ToLower(w)
+		if !bSet[lw] && !seen[lw] { seen[lw] = true; result = append(result, w) }
+	}
+	// Items in B but not in A
+	for _, w := range b {
+		lw := strings.ToLower(w)
+		if !aSet[lw] && !seen[lw] { seen[lw] = true; result = append(result, w) }
+	}
+	buf.WriteString(strings.Join(result, outDelim))
+}
+
 func fnRevwords(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	delim := " "

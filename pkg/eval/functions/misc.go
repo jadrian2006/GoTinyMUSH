@@ -1747,3 +1747,17 @@ func fnObjcall(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	result := ctx.CallUFun(args[1], uargs)
 	buf.WriteString(result)
 }
+
+// fnHasapikey — check if an object has an API key.
+// hasapikey(object) → 1 if object has an API key, 0 otherwise.
+func fnHasapikey(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 { buf.WriteString("0"); return }
+	if ctx.GameState == nil { buf.WriteString("0"); return }
+	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("0"); return }
+	if ctx.GameState.HasAPIKey(ref) {
+		buf.WriteString("1")
+	} else {
+		buf.WriteString("0")
+	}
+}

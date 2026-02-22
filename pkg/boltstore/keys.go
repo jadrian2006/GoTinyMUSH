@@ -18,6 +18,8 @@ var (
 	bucketStructInsts = []byte("structinsts")
 	bucketMail        = []byte("mail")
 	bucketArrays      = []byte("arrays")
+	bucketAPIKeys     = []byte("apikeys")
+	bucketConnLog     = []byte("connlog")
 )
 
 // Meta key constants.

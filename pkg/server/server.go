@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crystal-mush/gotinymush/pkg/boltstore"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 	"github.com/crystal-mush/gotinymush/pkg/oob"
 )
@@ -478,6 +479,15 @@ func (s *Server) handleConnect(d *Descriptor, user, password string, dark bool) 
 		if total > 0 && unread > 0 {
 			d.Send(fmt.Sprintf("You have %d unread mail message(s). Type @mail to read.", unread))
 		}
+	}
+
+	// Log connection for connlog()/addrlog()
+	if s.Game.Store != nil {
+		s.Game.Store.AppendConnLog(boltstore.ConnLogEntry{
+			Player:    player,
+			Addr:      d.Addr,
+			ConnectAt: time.Now().Unix(),
+		}, 20)
 	}
 
 	// Fire ACONNECT triggers

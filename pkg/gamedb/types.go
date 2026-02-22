@@ -156,6 +156,7 @@ const (
 	Pow2UseSQL     = 0x00000010
 	Pow2LinkHome   = 0x00000020
 	Pow2Cloak      = 0x00000040
+	Pow2Bot        = 0x00000080 // Bot power: allows managing API keys for owned objects
 )
 
 // HasPower checks if a power bit is set in the given power word (0 or 1).

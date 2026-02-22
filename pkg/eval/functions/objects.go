@@ -973,6 +973,73 @@ func grepHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, case
 	buf.WriteString(strings.Join(results, " "))
 }
 
+// pgrepHelper implements pgrep/pgrepi: grep across an object's parent chain.
+// pgrep(obj, attr-pattern, search-pattern)
+func pgrepHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, caseInsensitive bool) {
+	if len(args) < 3 { return }
+	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+
+	attrPattern := args[1]
+	searchPattern := args[2]
+	if caseInsensitive { searchPattern = strings.ToLower(searchPattern) }
+
+	// Walk parent chain (like fnLparent) collecting unique matching attr names
+	seenAttrs := make(map[string]bool)
+	var results []string
+	visited := make(map[gamedb.DBRef]bool)
+	current := ref
+	for i := 0; i < 100; i++ {
+		obj, ok := ctx.DB.Objects[current]
+		if !ok { break }
+		if visited[current] { break }
+		visited[current] = true
+
+		for _, attr := range obj.Attrs {
+			attrName := ""
+			if def, ok := ctx.DB.AttrNames[attr.Number]; ok {
+				attrName = def.Name
+			} else if wk, ok := gamedb.WellKnownAttrs[attr.Number]; ok {
+				attrName = wk
+			}
+			if attrName == "" { continue }
+			if seenAttrs[attrName] { continue }
+			if !wildMatch(attrPattern, attrName) { continue }
+
+			text := attr.Value
+			if len(text) > 0 && text[0] == '\x01' {
+				if colonIdx := strings.Index(text[1:], ":"); colonIdx >= 0 {
+					afterOwner := text[1+colonIdx+1:]
+					if colonIdx2 := strings.Index(afterOwner, ":"); colonIdx2 >= 0 {
+						text = afterOwner[colonIdx2+1:]
+					}
+				}
+			}
+
+			searchIn := text
+			if caseInsensitive { searchIn = strings.ToLower(text) }
+			if strings.Contains(searchIn, searchPattern) {
+				seenAttrs[attrName] = true
+				results = append(results, attrName)
+			}
+		}
+
+		if obj.Parent == gamedb.Nothing { break }
+		current = obj.Parent
+	}
+	buf.WriteString(strings.Join(results, " "))
+}
+
+// fnPgrep — grep across an object's parent chain.
+func fnPgrep(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	pgrepHelper(ctx, args, buf, false)
+}
+
+// fnPgrepi — case-insensitive pgrep.
+func fnPgrepi(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	pgrepHelper(ctx, args, buf, true)
+}
+
 // fnAndflags — returns 1 if object has ALL specified flags.
 // andflags(<object>, <flag-list>)
 func fnAndflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -1130,6 +1197,7 @@ var knownPowers = map[string][2]int{
 	"TEL_ANYWHERE": {0, gamedb.PowTelAnywhr}, "UNKILLABLE": {0, gamedb.PowUnkillable},
 	"USE_SQL": {1, gamedb.Pow2UseSQL}, "WATCH_LOGINS": {0, gamedb.PowWatch},
 	"LINK_TO_ANYTHING": {1, gamedb.Pow2LinkToAny}, "OPEN_ANYWHERE": {1, gamedb.Pow2OpenAnyLoc},
+	"BOT": {1, gamedb.Pow2Bot},
 }
 
 // fnHaspower — test if object has a power.

@@ -103,6 +103,10 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("SWITCH", fnSwitch, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("SWITCHALL", fnSwitchAll, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("CASE", fnCase, 0, eval.FnVarArgs|eval.FnNoEval)
+	ctx.RegisterFunction("RESWITCH", fnReswitch, 0, eval.FnVarArgs|eval.FnNoEval)
+	ctx.RegisterFunction("RESWITCHALL", fnReswitchAll, 0, eval.FnVarArgs|eval.FnNoEval)
+	ctx.RegisterFunction("RESWITCHI", fnReswitchi, 0, eval.FnVarArgs|eval.FnNoEval)
+	ctx.RegisterFunction("RESWITCHALLI", fnReswitchalli, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("IFFALSE", fnIffalse, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("IFTRUE", fnIftrue, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("IFZERO", fnIfzero, 0, eval.FnVarArgs|eval.FnNoEval)
@@ -206,6 +210,8 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("LDIFF", fnSetdiff, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("SETINTER", fnSetinter, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("LINTER", fnSetinter, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("SETSYMDIFF", fnSetsymdiff, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("LSYMDIFF", fnSetsymdiff, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("REVWORDS", fnRevwords, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("SHUFFLE", fnShuffle, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("ITEMIZE", fnItemize, 0, eval.FnVarArgs)
@@ -345,6 +351,8 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("MONEY", fnMoney, 1, 0)
 	ctx.RegisterFunction("GREP", fnGrep, 3, 0)
 	ctx.RegisterFunction("GREPI", fnGrepi, 3, 0)
+	ctx.RegisterFunction("PGREP", fnPgrep, 3, 0)
+	ctx.RegisterFunction("PGREPI", fnPgrepi, 3, 0)
 	ctx.RegisterFunction("ANDFLAGS", fnAndflags, 2, 0)
 	ctx.RegisterFunction("ORFLAGS", fnOrflags, 2, 0)
 	ctx.RegisterFunction("HASFLAGS", fnHasflags, 2, 0)
@@ -401,6 +409,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("DECODE64", fnDecode64, 1, 0)
 	ctx.RegisterFunction("DIGEST", fnDigest, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("CRC32", fnCrc32, 1, 0)
+	ctx.RegisterFunction("HMAC", fnHmac, 3, 0)
 
 	// Database / SQL
 	ctx.RegisterFunction("SQL", fnSQL, 0, eval.FnVarArgs)
@@ -614,6 +623,14 @@ func RegisterAll(ctx *eval.EvalContext) {
 
 	// Help search
 	ctx.RegisterFunction("TEXTSEARCH", fnTextsearch, 2, 0)
+
+	// Bot/API key
+	ctx.RegisterFunction("HASAPIKEY", fnHasapikey, 1, 0)
+	ctx.RegisterFunction("ISAPIKEY", fnHasapikey, 1, 0) // alias
+
+	// Connection logging
+	ctx.RegisterFunction("CONNLOG", fnConnlog, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("ADDRLOG", fnAddrlog, 0, eval.FnVarArgs)
 
 	// Array functions
 	ctx.RegisterFunction("ARRAY", fnArray, 1, eval.FnVarArgs)

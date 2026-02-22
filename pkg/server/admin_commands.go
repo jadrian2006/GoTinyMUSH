@@ -1,6 +1,9 @@
 package server
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -2177,6 +2180,96 @@ var powerTable = map[string]powerEntry{
 	"use_sql":        {1, gamedb.Pow2UseSQL},
 	"link_any_home":  {1, gamedb.Pow2LinkHome},
 	"cloak":          {1, gamedb.Pow2Cloak},
+	"bot":            {1, gamedb.Pow2Bot},
+}
+
+// --- @apikey command ---
+
+// cmdApikey implements @apikey generate|revoke <object>
+// Generates or revokes an API key for a Player or Thing.
+// Permission: Wizard OR (caller has bot power AND owns target).
+func cmdApikey(g *Game, d *Descriptor, args string, _ []string) {
+	parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
+	if len(parts) < 2 || args == "" {
+		d.Send("Usage: @apikey generate|revoke <object>")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(parts[0]))
+	targetStr := strings.TrimSpace(parts[1])
+
+	target := g.MatchObject(d.Player, targetStr)
+	if target == gamedb.Nothing {
+		d.Send("I don't see that here.")
+		return
+	}
+	obj, ok := g.DB.Objects[target]
+	if !ok {
+		d.Send("No such object.")
+		return
+	}
+
+	// Only Player and Thing types can have API keys
+	if obj.ObjType() != gamedb.TypePlayer && obj.ObjType() != gamedb.TypeThing {
+		d.Send("Only players and things can have API keys.")
+		return
+	}
+
+	// Permission: Wizard OR (caller has bot power AND owns target)
+	callerObj, cOK := g.DB.Objects[d.Player]
+	isWiz := Wizard(g, d.Player)
+	hasBotPower := cOK && callerObj.HasPower(1, gamedb.Pow2Bot)
+	ownsTarget := cOK && (obj.Owner == d.Player || d.Player == target)
+
+	if !isWiz && !(hasBotPower && ownsTarget) {
+		d.Send("Permission denied.")
+		return
+	}
+
+	if g.Store == nil {
+		d.Send("Storage not available.")
+		return
+	}
+
+	switch action {
+	case "generate":
+		// Generate a 64-char hex key (32 random bytes)
+		keyBytes := make([]byte, 32)
+		rand.Read(keyBytes)
+		rawKey := hex.EncodeToString(keyBytes)
+
+		// Store SHA-256 hash
+		h := sha256.Sum256([]byte(rawKey))
+		hash := hex.EncodeToString(h[:])
+
+		if err := g.Store.PutAPIKey(target, hash); err != nil {
+			d.Send(fmt.Sprintf("Error storing API key: %s", err))
+			return
+		}
+
+		// Warn if player doesn't have ROBOT flag
+		if obj.ObjType() == gamedb.TypePlayer && !obj.HasFlag(gamedb.FlagRobot) {
+			d.Send(fmt.Sprintf("Warning: %s(#%d) does not have the ROBOT flag set.", obj.Name, target))
+		}
+
+		d.Send(fmt.Sprintf("API key generated for %s(#%d).", obj.Name, target))
+		d.Send(fmt.Sprintf("Key: %s", rawKey))
+		d.Send("Store this key securely - it will not be shown again.")
+		d.Send(fmt.Sprintf("Authenticate via: POST /api/v1/auth/apikey with {\"key\":\"%s\",\"dbref\":\"#%d\"}", rawKey, target))
+
+	case "revoke":
+		if !g.Store.HasAPIKey(target) {
+			d.Send(fmt.Sprintf("%s(#%d) does not have an API key.", obj.Name, target))
+			return
+		}
+		if err := g.Store.DeleteAPIKey(target); err != nil {
+			d.Send(fmt.Sprintf("Error revoking API key: %s", err))
+			return
+		}
+		d.Send(fmt.Sprintf("API key revoked for %s(#%d).", obj.Name, target))
+
+	default:
+		d.Send("Usage: @apikey generate|revoke <object>")
+	}
 }
 
 // --- SQL Commands ---

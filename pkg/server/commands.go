@@ -165,6 +165,7 @@ func InitCommands() map[string]*Command {
 	registerNG("@search", cmdSearch)
 	registerNG("@decompile", cmdDecompile)
 	registerNG("@power", cmdPower)
+	registerNG("@apikey", cmdApikey)
 
 	// Attribute-setting @commands (all no guest)
 	// Success/Failure messages
@@ -2161,6 +2162,7 @@ var powerNames = []powerNameEntry{
 	{0, gamedb.PowTelUnrst, "tel_anything"},
 	{0, gamedb.PowUnkillable, "unkillable"},
 	{0, gamedb.PowWatch, "watch_logins"},
+	{1, gamedb.Pow2Bot, "bot"},
 }
 
 func flagString(obj *gamedb.Object) string {
@@ -3440,6 +3442,11 @@ func (g *Game) DisconnectPlayer(d *Descriptor) {
 	if d.State == ConnConnected {
 		playerName := g.PlayerName(d.Player)
 		loc := g.PlayerLocation(d.Player)
+
+		// Update connlog with disconnect timestamp
+		if g.Store != nil {
+			g.Store.UpdateConnLogDisconnect(d.Player, time.Now().Unix())
+		}
 
 		// Fire ADISCONNECT triggers (player + master room + master room contents)
 		connCount := len(g.Conns.GetByPlayer(d.Player))

@@ -1,6 +1,9 @@
 package boltstore
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"os"
@@ -25,7 +28,7 @@ func Open(path string) (*Store, error) {
 
 	// Ensure all buckets exist.
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketArrays} {
+		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketArrays, bucketAPIKeys, bucketConnLog} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
@@ -657,4 +660,171 @@ func (s *Store) HasArrayData() bool {
 		return nil
 	})
 	return has
+}
+
+// --- API Key Storage ---
+
+// PutAPIKey stores a SHA-256 hash of an API key for an object.
+func (s *Store) PutAPIKey(ref gamedb.DBRef, hash string) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketAPIKeys).Put(refToKey(ref), []byte(hash))
+	})
+}
+
+// GetAPIKey returns the stored SHA-256 hash for an object's API key.
+// Returns "" if no key exists.
+func (s *Store) GetAPIKey(ref gamedb.DBRef) (string, error) {
+	var hash string
+	err := s.bolt.View(func(tx *bbolt.Tx) error {
+		v := tx.Bucket(bucketAPIKeys).Get(refToKey(ref))
+		if v != nil {
+			hash = string(v)
+		}
+		return nil
+	})
+	return hash, err
+}
+
+// DeleteAPIKey removes the API key for an object.
+func (s *Store) DeleteAPIKey(ref gamedb.DBRef) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketAPIKeys).Delete(refToKey(ref))
+	})
+}
+
+// HasAPIKey returns true if an object has an API key stored.
+func (s *Store) HasAPIKey(ref gamedb.DBRef) bool {
+	has := false
+	s.bolt.View(func(tx *bbolt.Tx) error {
+		v := tx.Bucket(bucketAPIKeys).Get(refToKey(ref))
+		has = v != nil
+		return nil
+	})
+	return has
+}
+
+// --- Connection Log Storage ---
+
+// ConnLogEntry records a single connection event.
+type ConnLogEntry struct {
+	Player    gamedb.DBRef
+	Addr      string
+	ConnectAt int64 // Unix timestamp
+	DisconnAt int64 // 0 if still connected
+}
+
+// connLogKey builds a composite key: refToKey(player) + bigEndian(timestamp).
+func connLogKey(player gamedb.DBRef, timestamp int64) []byte {
+	key := make([]byte, 16)
+	copy(key[:8], refToKey(player))
+	binary.BigEndian.PutUint64(key[8:], uint64(timestamp))
+	return key
+}
+
+// AppendConnLog appends a connection log entry and prunes to maxEntries per player.
+func (s *Store) AppendConnLog(entry ConnLogEntry, maxEntries int) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketConnLog)
+
+		// Encode the entry
+		var buf bytes.Buffer
+		if err := gob.NewEncoder(&buf).Encode(entry); err != nil {
+			return fmt.Errorf("encode connlog: %w", err)
+		}
+
+		key := connLogKey(entry.Player, entry.ConnectAt)
+		if err := b.Put(key, buf.Bytes()); err != nil {
+			return err
+		}
+
+		// Prune old entries beyond maxEntries
+		prefix := refToKey(entry.Player)
+		c := b.Cursor()
+		// Count entries for this player
+		var keys [][]byte
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			keyCopy := make([]byte, len(k))
+			copy(keyCopy, k)
+			keys = append(keys, keyCopy)
+		}
+		// Delete oldest entries beyond maxEntries
+		if len(keys) > maxEntries {
+			for _, k := range keys[:len(keys)-maxEntries] {
+				b.Delete(k)
+			}
+		}
+		return nil
+	})
+}
+
+// UpdateConnLogDisconnect updates the most recent connlog entry for a player
+// with a disconnect timestamp.
+func (s *Store) UpdateConnLogDisconnect(player gamedb.DBRef, disconnAt int64) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketConnLog)
+		prefix := refToKey(player)
+		c := b.Cursor()
+
+		// Find the last entry for this player (cursor to end of prefix range)
+		var lastKey []byte
+		var lastVal []byte
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			lastKey = make([]byte, len(k))
+			copy(lastKey, k)
+			lastVal = make([]byte, len(v))
+			copy(lastVal, v)
+		}
+		if lastKey == nil {
+			return nil // no entries
+		}
+
+		// Decode, update, re-encode
+		var entry ConnLogEntry
+		if err := gob.NewDecoder(bytes.NewReader(lastVal)).Decode(&entry); err != nil {
+			return err
+		}
+		if entry.DisconnAt != 0 {
+			return nil // already disconnected
+		}
+		entry.DisconnAt = disconnAt
+		var buf bytes.Buffer
+		if err := gob.NewEncoder(&buf).Encode(entry); err != nil {
+			return err
+		}
+		return b.Put(lastKey, buf.Bytes())
+	})
+}
+
+// GetConnLog retrieves the most recent count connection log entries for a player.
+// Returns entries in reverse chronological order (newest first).
+func (s *Store) GetConnLog(player gamedb.DBRef, count int) ([]ConnLogEntry, error) {
+	var entries []ConnLogEntry
+	err := s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketConnLog)
+		prefix := refToKey(player)
+		c := b.Cursor()
+
+		// Collect all entries for this player
+		var all [][]byte
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			valCopy := make([]byte, len(v))
+			copy(valCopy, v)
+			all = append(all, valCopy)
+		}
+
+		// Take last 'count' entries in reverse order
+		start := 0
+		if len(all) > count {
+			start = len(all) - count
+		}
+		for i := len(all) - 1; i >= start; i-- {
+			var entry ConnLogEntry
+			if err := gob.NewDecoder(bytes.NewReader(all[i])).Decode(&entry); err != nil {
+				continue
+			}
+			entries = append(entries, entry)
+		}
+		return nil
+	})
+	return entries, err
 }

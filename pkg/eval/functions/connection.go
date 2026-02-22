@@ -177,6 +177,46 @@ func fnLparent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	buf.WriteString(strings.Join(chain, " "))
 }
 
+// fnConnlog — return connection log timestamps for a player.
+// connlog(player[, count]) → space-separated Unix timestamps (newest first)
+// Permission: wizard or self-only.
+func fnConnlog(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil { return }
+	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	// Permission check: wizard or self
+	if ref != ctx.Player && !ctx.GameState.IsWizard(ctx.Player) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
+	count := 10
+	if len(args) > 1 {
+		n := toInt(args[1])
+		if n > 0 { count = n }
+	}
+	buf.WriteString(ctx.GameState.ConnLog(ref, count))
+}
+
+// fnAddrlog — return connection log IP addresses for a player.
+// addrlog(player[, count]) → space-separated IP addresses (newest first)
+// Permission: wizard or self-only.
+func fnAddrlog(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil { return }
+	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	// Permission check: wizard or self
+	if ref != ctx.Player && !ctx.GameState.IsWizard(ctx.Player) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
+	count := 10
+	if len(args) > 1 {
+		n := toInt(args[1])
+		if n > 0 { count = n }
+	}
+	buf.WriteString(ctx.GameState.AddrLog(ref, count))
+}
+
 // fnEntrances returns exits that link to this object.
 func fnEntrances(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 {

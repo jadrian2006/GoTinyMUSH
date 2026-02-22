@@ -111,6 +111,7 @@ func (ws *WebServer) registerRoutes(cfg WebConfig) {
 	// Auth endpoints
 	ws.mux.HandleFunc("POST /api/v1/auth/login", ws.handleAuthLogin)
 	ws.mux.HandleFunc("POST /api/v1/auth/refresh", ws.handleAuthRefresh)
+	ws.mux.HandleFunc("POST /api/v1/auth/apikey", ws.handleAuthAPIKey)
 
 	// REST API endpoints
 	ws.RegisterRESTRoutes()
@@ -452,6 +453,36 @@ func (ws *WebServer) handleAuthRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": newToken})
+}
+
+func (ws *WebServer) handleAuthAPIKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key   string `json:"key"`
+		DBRef string `json:"dbref"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Key == "" || req.DBRef == "" {
+		http.Error(w, `{"error":"key and dbref are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	ref, err := parseDBRef(req.DBRef)
+	if err != nil {
+		http.Error(w, `{"error":"invalid dbref"}`, http.StatusBadRequest)
+		return
+	}
+
+	token, err := ws.auth.LoginAPIKey(ref, req.Key)
+	if err != nil {
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
 // --- Health Handler ---

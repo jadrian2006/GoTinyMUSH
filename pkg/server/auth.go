@@ -2,6 +2,8 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -14,6 +16,8 @@ import (
 type Claims struct {
 	PlayerRef  gamedb.DBRef `json:"player_ref"`
 	PlayerName string       `json:"player_name"`
+	IsBot      bool         `json:"is_bot,omitempty"`
+	ObjType    string       `json:"obj_type,omitempty"` // "PLAYER" or "THING"
 	jwt.RegisteredClaims
 }
 
@@ -100,6 +104,49 @@ func (a *AuthService) RefreshToken(tokenStr string) (string, error) {
 	now := time.Now()
 	claims.IssuedAt = jwt.NewNumericDate(now)
 	claims.ExpiresAt = jwt.NewNumericDate(now.Add(a.expiry))
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(a.jwtKey)
+}
+
+// LoginAPIKey authenticates via API key and returns a JWT token.
+// The key is SHA-256 hashed and compared (constant-time) against the stored hash.
+func (a *AuthService) LoginAPIKey(ref gamedb.DBRef, key string) (string, error) {
+	if a.game.Store == nil {
+		return "", fmt.Errorf("storage not available")
+	}
+	storedHash, err := a.game.Store.GetAPIKey(ref)
+	if err != nil || storedHash == "" {
+		return "", fmt.Errorf("invalid credentials")
+	}
+
+	// Hash the provided key and constant-time compare
+	h := sha256.Sum256([]byte(key))
+	providedHash := hex.EncodeToString(h[:])
+	if subtle.ConstantTimeCompare([]byte(storedHash), []byte(providedHash)) != 1 {
+		return "", fmt.Errorf("invalid credentials")
+	}
+
+	// Determine object name and type
+	obj, ok := a.game.DB.Objects[ref]
+	if !ok {
+		return "", fmt.Errorf("object not found")
+	}
+	objType := obj.ObjType().String()
+
+	now := time.Now()
+	claims := Claims{
+		PlayerRef:  ref,
+		PlayerName: obj.Name,
+		IsBot:      true,
+		ObjType:    objType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   fmt.Sprintf("#%d", ref),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(a.expiry)),
+			Issuer:    "gotinymush",
+		},
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(a.jwtKey)

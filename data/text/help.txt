@@ -5873,19 +5873,21 @@ See also: @link, @open.
 	aposs()		default()	edefault()	eval()
 	get()		get_eval()	grep()		grepi()
 	hasattr()	hasattrp()	lattr()		nattr()
-	obj()		objcall()	objeval()	poss()		
-	regrep()	regrepi()	subj()		u()		
+	obj()		objcall()	objeval()	pgrep()
+	pgrepi()	poss()		regrep()	regrepi()
+	subj()		u()		
 	udefault()	ulocal()	uprivate()	v()
 	wildgrep()	xget()		zfun()
  
 & OBJECT FUNCTIONS
   Topic: Object Functions
  
-	andflags()	children()	con()		conn()
-	controls()	doing()		elock()		elockstr()
-	entrances()	exit()		flags()		findable()	
-	fullname()	hasflag()	hasflags()	haspower()	
-	hastype()	hears()		home()		idle()	
+	addrlog()	andflags()	children()	con()
+	conn()		connlog()	controls()	doing()
+	elock()		elockstr()	entrances()	exit()
+	flags()		findable()	fullname()	hasflag()
+	hasflags()	hasapikey()	haspower()	hastype()
+	hears()		home()		idle()	
 	inzone()	knows()		lastaccess()	lastcreate()	
 	lastmod()	lcon()		lexits()	lparent()	
 	loc()		locate()	lock()		lwho()		
@@ -5916,12 +5918,13 @@ See also: @link, @open.
 	istrue()	last()		ldelete()	ldiff()		
 	ledit()		linter()	list()		list2()
 	lnum()		loop()		lpos()		lrand()
-	lreplace()	lunion()	map()		match()		
-	matchall()	member()	mix()		munge()		
-	qvars()		remove()	replace()	regrab()	
-	regraball()	regraballi()	regrabi()	rest()		
-	revwords()	rtables()	setdiff()	setinter()	
-	setunion()	shuffle()	sortby()	sort()		
+	lreplace()	lsymdiff()	lunion()	map()
+	match()		matchall()	member()	mix()
+	munge()		qvars()		remove()	replace()
+	regrab()	regraball()	regraballi()	regrabi()
+	rest()		revwords()	rtables()	setdiff()
+	setinter()	setsymdiff()	setunion()	shuffle()
+	sortby()	sort()		
 	splice()	step()		table()		tables()
 	until()		whenfalse()	whenfalse2()	whentrue()
 	whentrue2()	while()		words()
@@ -5975,7 +5978,8 @@ See also: @link, @open.
 	helptext()	ifelse()	iffalse()	iftrue()
 	ifzero()	localize()	lregs()		mudname()
 	nonzero()	oemit()		pemit()		private()
-	r()		rand()		remit()		restarts()
+	r()		rand()		remit()		reswitch()
+	reswitchall()	reswitchi()	reswitchalli()	restarts()
 	restarttime()	s()		secs()		setq()
 	setr()		speak()		sql()		starttime()
 	subeval()	switch()	switchall()	textsearch()
@@ -5990,9 +5994,10 @@ See also: @link, @open.
 	border()	capstr()	cat()		cborder()
 	center()	chomp()		comp()		decrypt()
 	delete()	edit()		encrypt()	escape()
-	foreach()	isdbref()	isnum()		isword()
-	lcstr()		left()		lit()		ljust()
-	merge()		mid()		nescape()	nsecure()
+	foreach()	hmac()		isdbref()	isnum()
+	isword()	lcstr()		left()		lit()
+	ljust()		merge()		mid()		nescape()
+	nsecure()
 	null()		pos()		rborder()	regedit()
 	regediti()	regeditall()	regeditalli()	regmatch()
 	regmatchi()	repeat()	reverse()	right()
@@ -12543,6 +12548,7 @@ performed and the walk down the list stops.
   attr_read		Can read attributes that have the 'hidden' flag.
   attr_write		Can write to attributes that have the 'wizard' flag.
   boot			Can use the @boot command.
+  bot			Can manage API keys for owned bot objects.
   builder		Can build, if the builder power is enabled.
   chown_anything	Can @chown anything to anyone.
   cloak			Can be DARK and unseen, even if a listening object.
@@ -16458,3 +16464,220 @@ TRUNC_LENGTH - Per-player examine output truncation
     %x/<#RGB>  - TrueColor background
 
   See also: ansi(), SUBSTITUTIONS.
+
+& HMAC()
+  Function: hmac(<algorithm>, <key>, <message>)
+
+  Returns a hex-encoded HMAC (Hash-based Message Authentication Code) of
+  <message> using the specified <key> and hash <algorithm>.
+
+  Supported algorithms: sha256, sha1, md5, sha512.
+
+  Examples:
+    > say hmac(sha256, secret, hello)
+    You say, "88aab3ede8d3adf94d26ab90d3bafd4a2083070c3bcce9c014ee04a443847c0b"
+    > say hmac(sha1, mykey, test data)
+    You say, "7f44a57af29e0e1e2b89066c02c1e9a7e75de52e"
+
+  See also: digest().
+
+& SETSYMDIFF()
+& LSYMDIFF()
+  Function: setsymdiff(<list1>, <list2>[, <delim>[, <output delim>]])
+  Function: lsymdiff(<list1>, <list2>[, <delim>[, <output delim>]])
+
+  Returns the symmetric difference of two sets -- i.e., the elements
+  that are in <list1> or <list2> but not in both. The list that is
+  returned is sorted.
+
+  If delimiters are specified, they are used to separate the lists.
+
+  Examples:
+    > say setsymdiff(a b c, b c d)
+    You say, "a d"
+    > say setsymdiff(foo bar baz, bar quux)
+    You say, "baz foo quux"
+    > say setsymdiff(a-b-c, b-c-d, -, +)
+    You say, "a+d"
+
+  See also: setdiff(), setinter(), setunion().
+
+& RESWITCH()
+  Function: reswitch(<str>[, <re1>, <res1>]...[, <dflt>])
+
+  The reswitch() function works like switch(), but uses regular expression
+  patterns instead of wildcard patterns. It compares <str> against <re1>,
+  <re2>, etc., and returns the corresponding <resN> for the first <reN>
+  that matches. If none match, the default result <dflt> is returned.
+
+  The evaluated value of <str> can be obtained as '#$'.
+
+  Examples:
+    > say reswitch(hello, ^hel, YES, NO)
+    You say, "YES"
+    > say reswitch(world, ^hel, YES, NO)
+    You say, "NO"
+    > say reswitch(test123, [0-9]+$, Has numbers, No numbers)
+    You say, "Has numbers"
+
+  See also: reswitchall(), reswitchi(), reswitchalli(), switch().
+
+& RESWITCHALL()
+  Function: reswitchall(<str>[, <re1>, <res1>]...[, <dflt>])
+
+  The reswitchall() function works like switchall(), but uses regular
+  expression patterns instead of wildcard patterns. It compares <str>
+  against all <reN> patterns and returns the corresponding <resN>
+  parameters (without delimiters) for ALL patterns that match. If none
+  match, the default result <dflt> is returned.
+
+  The evaluated value of <str> can be obtained as '#$'.
+
+  Examples:
+    > say reswitchall(abc123, [a-z], Letters, [0-9], Numbers, Neither)
+    You say, "LettersNumbers"
+
+  See also: reswitch(), reswitchi(), reswitchalli(), switchall().
+
+& RESWITCHI()
+  Function: reswitchi(<str>[, <re1>, <res1>]...[, <dflt>])
+
+  Case-insensitive version of reswitch(). Compares <str> against
+  regular expression patterns case-insensitively and returns the
+  result for the first match.
+
+  Examples:
+    > say reswitchi(HELLO, ^hel, YES, NO)
+    You say, "YES"
+
+  See also: reswitch(), reswitchall(), reswitchalli().
+
+& RESWITCHALLI()
+  Function: reswitchalli(<str>[, <re1>, <res1>]...[, <dflt>])
+
+  Case-insensitive version of reswitchall(). Compares <str> against
+  regular expression patterns case-insensitively and returns results
+  for ALL patterns that match.
+
+  See also: reswitch(), reswitchall(), reswitchi().
+
+& PGREP()
+& PGREPI()
+  Function: pgrep(<object>, <attr-pattern>, <search-string>)
+  Function: pgrepi(<object>, <attr-pattern>, <search-string>)
+
+  Like grep()/grepi(), but searches the entire parent chain of <object>.
+  Starting from <object>, it walks up through each parent object,
+  searching attributes that match the wildcard <attr-pattern> for the
+  <search-string>. Results are deduplicated by attribute name (the first
+  match in the parent chain takes precedence).
+
+  The parent chain is walked up to 100 levels deep.
+
+  pgrep() does a case-sensitive search. pgrepi() is case-insensitive.
+
+  Examples:
+    > say pgrep(me, *, hello)
+    DESC STARTUP
+    > say pgrepi(#123, CMD_*, test)
+    CMD_FOO CMD_BAR
+
+  See also: grep(), grepi(), lparent().
+
+& HASAPIKEY()
+& ISAPIKEY()
+  Function: hasapikey(<object>)
+
+  Returns 1 if <object> has an API key set, 0 otherwise.
+
+  Only Players and Things can have API keys. API keys are used for
+  external bot/AI authentication via the REST API.
+
+  Examples:
+    > say hasapikey(#123)
+    You say, "1"
+    > say hasapikey(me)
+    You say, "0"
+
+  See also: @apikey, bot power.
+
+& CONNLOG()
+  Function: connlog(<player>[, <count>])
+
+  Returns a space-separated list of Unix timestamps recording the
+  connection times for <player>, most recent first.
+
+  <count> specifies how many entries to return (default 10).
+
+  Permission: You may only view your own connection log unless you
+  are a wizard.
+
+  Examples:
+    > say connlog(%#)
+    You say, "1708531200 1708444800 1708358400"
+    > say connlog(%#, 2)
+    You say, "1708531200 1708444800"
+
+  See also: addrlog(), conn().
+
+& ADDRLOG()
+  Function: addrlog(<player>[, <count>])
+
+  Returns a space-separated list of IP addresses from which <player>
+  has connected, most recent first.
+
+  <count> specifies how many entries to return (default 10).
+
+  Permission: You may only view your own address log unless you
+  are a wizard. This data is considered private.
+
+  Examples:
+    > say addrlog(%#, 3)
+    You say, "192.168.1.100 10.0.0.5 172.16.0.1"
+
+  See also: connlog(), conn().
+
+& @apikey
+  Command: @apikey generate <object>
+           @apikey revoke <object>
+
+  Generates or revokes an API key for an object. API keys allow
+  external programs (bots, AI agents, MCP servers) to authenticate
+  as the object via the REST API endpoint POST /api/v1/auth/apikey.
+
+  Only Player and Thing type objects can have API keys. A Player
+  with an API key should also have the ROBOT flag set.
+
+  Permission: You must be a wizard, or have the 'bot' power and
+  own the target object.
+
+  When generating, the API key is displayed exactly once and cannot
+  be retrieved again. Store it securely. The server stores only a
+  SHA-256 hash of the key.
+
+  Examples:
+    > @apikey generate #1234
+    API key generated for TestBot(#1234):
+    a1b2c3d4e5f6...
+    Store this key securely -- it will not be shown again.
+
+    > @apikey revoke #1234
+    API key revoked for TestBot(#1234).
+
+  See also: hasapikey(), bot power, @power.
+
+& bot power
+  Power: bot
+
+  The bot power allows a non-wizard player to manage API keys for
+  objects they own, using the @apikey command. Without this power,
+  only wizards can generate and revoke API keys.
+
+  This power is intended for players who run external bots or AI
+  agents that interact with the game through the REST API.
+
+  Usage:
+    @power <player>=bot      Grant bot power
+    @power <player>=!bot     Revoke bot power
+
+  See also: @apikey, @power, hasapikey(), powers list.

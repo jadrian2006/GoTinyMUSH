@@ -804,3 +804,43 @@ func (g *Game) HelpSearch(player gamedb.DBRef, fileID string, pattern string) []
 	sort.Strings(results)
 	return results
 }
+
+// HasAPIKey returns true if the object has an API key set.
+func (g *Game) HasAPIKey(obj gamedb.DBRef) bool {
+	if g.Store == nil {
+		return false
+	}
+	return g.Store.HasAPIKey(obj)
+}
+
+// ConnLog returns connection log timestamps for a player.
+func (g *Game) ConnLog(player gamedb.DBRef, count int) string {
+	if g.Store == nil {
+		return ""
+	}
+	entries, err := g.Store.GetConnLog(player, count)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	parts := make([]string, len(entries))
+	for i, e := range entries {
+		parts[i] = fmt.Sprintf("%d", e.ConnectAt)
+	}
+	return strings.Join(parts, " ")
+}
+
+// AddrLog returns connection log IP addresses for a player.
+func (g *Game) AddrLog(player gamedb.DBRef, count int) string {
+	if g.Store == nil {
+		return ""
+	}
+	entries, err := g.Store.GetConnLog(player, count)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	parts := make([]string, len(entries))
+	for i, e := range entries {
+		parts[i] = e.Addr
+	}
+	return strings.Join(parts, " ")
+}

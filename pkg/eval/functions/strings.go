@@ -1,6 +1,7 @@
 package functions
 
 import (
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -1055,6 +1056,32 @@ func fnDigest(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	}
 	h.Write([]byte(args[0]))
 	buf.WriteString(fmt.Sprintf("%x", h.Sum(nil)))
+}
+
+// fnHmac — compute HMAC of a message with a key.
+// hmac(algorithm, key, message) — supports sha256, sha1, md5, sha512.
+func fnHmac(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 3 { buf.WriteString("#-1 FUNCTION EXPECTS 3 ARGUMENTS"); return }
+	algo := strings.ToLower(strings.TrimSpace(args[0]))
+	key := args[1]
+	message := args[2]
+	var h func() hash.Hash
+	switch algo {
+	case "sha256":
+		h = sha256.New
+	case "sha1":
+		h = sha1.New
+	case "md5":
+		h = md5.New
+	case "sha512":
+		h = sha512.New
+	default:
+		buf.WriteString("#-1 UNKNOWN ALGORITHM")
+		return
+	}
+	mac := hmac.New(h, []byte(key))
+	mac.Write([]byte(message))
+	buf.WriteString(fmt.Sprintf("%x", mac.Sum(nil)))
 }
 
 // fnCrc32 — CRC32 checksum of a string.

@@ -1,6 +1,7 @@
 package functions
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/crystal-mush/gotinymush/pkg/eval"
@@ -96,6 +97,72 @@ func fnSwitchAll(ctx *eval.EvalContext, args []string, buf *strings.Builder, cal
 
 	ctx.Loop.InSwitch = oldSwitch
 	ctx.Loop.SwitchToken = oldToken
+}
+
+// reswitchHelper implements reswitch/reswitchall/reswitchi/reswitchalli.
+// Like switch() but uses regex instead of wildcard matching.
+func reswitchHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, caseInsensitive, matchAll bool) {
+	if len(args) < 2 { return }
+	expr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
+
+	oldSwitch := ctx.Loop.InSwitch
+	oldToken := ctx.Loop.SwitchToken
+	ctx.Loop.InSwitch++
+	ctx.Loop.SwitchToken = expr
+
+	matched := false
+	i := 1
+	for i+1 < len(args) {
+		pattern := ctx.Exec(args[i], eval.EvFCheck|eval.EvEval, nil)
+		if caseInsensitive {
+			pattern = "(?i)" + pattern
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			// Skip invalid regex patterns
+			i += 2
+			continue
+		}
+		if re.MatchString(expr) {
+			result := ctx.Exec(args[i+1], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+			buf.WriteString(result)
+			matched = true
+			if !matchAll {
+				ctx.Loop.InSwitch = oldSwitch
+				ctx.Loop.SwitchToken = oldToken
+				return
+			}
+		}
+		i += 2
+	}
+	// Default case (odd trailing arg)
+	if !matched && i < len(args) {
+		result := ctx.Exec(args[i], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+		buf.WriteString(result)
+	}
+
+	ctx.Loop.InSwitch = oldSwitch
+	ctx.Loop.SwitchToken = oldToken
+}
+
+// fnReswitch — like switch() but uses regex matching.
+func fnReswitch(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
+	reswitchHelper(ctx, args, buf, false, false)
+}
+
+// fnReswitchAll — like switchall() but uses regex matching.
+func fnReswitchAll(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
+	reswitchHelper(ctx, args, buf, false, true)
+}
+
+// fnReswitchi — case-insensitive reswitch.
+func fnReswitchi(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
+	reswitchHelper(ctx, args, buf, true, false)
+}
+
+// fnReswitchalli — case-insensitive reswitchall.
+func fnReswitchalli(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
+	reswitchHelper(ctx, args, buf, true, true)
 }
 
 // fnCase is like switch() but uses exact matching instead of wildcard.

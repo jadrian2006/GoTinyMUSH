@@ -195,6 +195,17 @@ type GameState interface {
 	// HelpSearch searches help file entry contents for a pattern.
 	// Returns matching topic names (case-insensitive substring match).
 	HelpSearch(player gamedb.DBRef, fileID string, pattern string) []string
+
+	// HasAPIKey returns true if the object has an API key set.
+	HasAPIKey(obj gamedb.DBRef) bool
+
+	// ConnLog returns connection log timestamps for a player.
+	// Returns space-separated Unix timestamps (newest first).
+	ConnLog(player gamedb.DBRef, count int) string
+
+	// AddrLog returns connection log IP addresses for a player.
+	// Returns space-separated IP addresses (newest first).
+	AddrLog(player gamedb.DBRef, count int) string
 }
 
 // EvalContext is the execution context for MUSH expression evaluation.
