@@ -1390,3 +1390,97 @@ func TestFnJsonEscape(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// stripTelnet: handle SB...SE subnegotiation properly
+// Bug: stripTelnet treated IAC SB as a 3-byte command, leaking subneg
+// payload bytes (GMCP JSON etc.) into the command stream.
+// ============================================================================
+
+func TestStripTelnet_SimpleIAC(t *testing.T) {
+	// IAC DO GMCP followed by normal text
+	input := string([]byte{0xFF, 0xFD, 0xC9}) + "hello"
+	got := stripTelnet(input)
+	if got != "hello" {
+		t.Errorf("stripTelnet simple IAC: got %q, want %q", got, "hello")
+	}
+}
+
+func TestStripTelnet_Subnegotiation(t *testing.T) {
+	// IAC SB GMCP "Core.Hello {}" IAC SE + "connect test pw"
+	var input []byte
+	input = append(input, 0xFF, 0xFA, 0xC9)               // IAC SB GMCP
+	input = append(input, []byte("Core.Hello {}")...)       // subneg payload
+	input = append(input, 0xFF, 0xF0)                       // IAC SE
+	input = append(input, []byte("connect test pw")...)     // real command
+	got := stripTelnet(string(input))
+	if got != "connect test pw" {
+		t.Errorf("stripTelnet subneg: got %q, want %q", got, "connect test pw")
+	}
+}
+
+func TestStripTelnet_MixedSequences(t *testing.T) {
+	// IAC DO GMCP + IAC SB GMCP payload IAC SE + IAC WILL MSDP + "test"
+	var input []byte
+	input = append(input, 0xFF, 0xFD, 0xC9)               // IAC DO GMCP
+	input = append(input, 0xFF, 0xFA, 0xC9)               // IAC SB GMCP
+	input = append(input, []byte("data")...)               // subneg data
+	input = append(input, 0xFF, 0xF0)                      // IAC SE
+	input = append(input, 0xFF, 0xFB, 0x45)               // IAC WILL MSDP
+	input = append(input, []byte("test")...)               // real text
+	got := stripTelnet(string(input))
+	if got != "test" {
+		t.Errorf("stripTelnet mixed: got %q, want %q", got, "test")
+	}
+}
+
+// ============================================================================
+// toTelnetCRLF: convert bare \n to \r\n for telnet
+// ============================================================================
+
+func TestToTelnetCRLF_BareNewline(t *testing.T) {
+	got := toTelnetCRLF("hello\nworld\n")
+	want := "hello\r\nworld\r\n"
+	if got != want {
+		t.Errorf("toTelnetCRLF bare: got %q, want %q", got, want)
+	}
+}
+
+func TestToTelnetCRLF_AlreadyCRLF(t *testing.T) {
+	got := toTelnetCRLF("hello\r\nworld\r\n")
+	want := "hello\r\nworld\r\n"
+	if got != want {
+		t.Errorf("toTelnetCRLF already CRLF: got %q, want %q", got, want)
+	}
+}
+
+func TestToTelnetCRLF_Mixed(t *testing.T) {
+	got := toTelnetCRLF("line1\r\nline2\nline3\r\n")
+	want := "line1\r\nline2\r\nline3\r\n"
+	if got != want {
+		t.Errorf("toTelnetCRLF mixed: got %q, want %q", got, want)
+	}
+}
+
+func TestToTelnetCRLF_NoNewlines(t *testing.T) {
+	got := toTelnetCRLF("hello world")
+	want := "hello world"
+	if got != want {
+		t.Errorf("toTelnetCRLF no newlines: got %q, want %q", got, want)
+	}
+}
+
+func TestToTelnetCRLF_Empty(t *testing.T) {
+	got := toTelnetCRLF("")
+	if got != "" {
+		t.Errorf("toTelnetCRLF empty: got %q, want %q", got, "")
+	}
+}
+
+func TestToTelnetCRLF_LeadingNewline(t *testing.T) {
+	got := toTelnetCRLF("\nhello")
+	want := "\r\nhello"
+	if got != want {
+		t.Errorf("toTelnetCRLF leading newline: got %q, want %q", got, want)
+	}
+}
+

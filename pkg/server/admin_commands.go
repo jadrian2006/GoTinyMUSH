@@ -2921,6 +2921,8 @@ func getAdminParam(c *GameConf, param string) (string, bool) {
 		return strconv.Itoa(c.TraceOutputLimit), true
 	case "idle_timeout":
 		return strconv.Itoa(c.IdleTimeout), true
+	case "keepalive_interval":
+		return strconv.Itoa(c.KeepaliveInterval), true
 	case "output_limit":
 		return strconv.Itoa(c.OutputLimit), true
 	case "function_invocation_limit":
@@ -2997,6 +2999,8 @@ func setAdminParam(c *GameConf, param, value string) bool {
 		c.TraceOutputLimit, _ = strconv.Atoi(value); return true
 	case "idle_timeout":
 		c.IdleTimeout, _ = strconv.Atoi(value); return true
+	case "keepalive_interval":
+		c.KeepaliveInterval, _ = strconv.Atoi(value); return true
 	case "output_limit":
 		c.OutputLimit, _ = strconv.Atoi(value); return true
 	case "function_invocation_limit":

@@ -37,8 +37,9 @@ type GameConf struct {
 	LinkCost          int    `yaml:"link_cost"`
 
 	// --- Idle/timeout ---
-	IdleTimeout int  `yaml:"idle_timeout"`
-	IdleWizDark bool `yaml:"idle_wiz_dark"`
+	IdleTimeout       int  `yaml:"idle_timeout"`
+	IdleWizDark       bool `yaml:"idle_wiz_dark"`
+	KeepaliveInterval int  `yaml:"keepalive_interval"` // Seconds between IAC NOP keepalives (0 = disabled)
 
 	// --- Queue ---
 	QueueIdleChunk          int `yaml:"queue_idle_chunk"`
@@ -168,6 +169,7 @@ func DefaultGameConf() *GameConf {
 		LinkCost:                1,
 		IdleTimeout:             3600,
 		IdleWizDark:             false,
+		KeepaliveInterval:      60,
 		QueueIdleChunk:          3,
 		FunctionInvocationLimit: 2500,
 		MachineCommandCost:      64,
@@ -363,6 +365,8 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.IdleTimeout = atoi(val, gc.IdleTimeout)
 		case "idle_wiz_dark":
 			gc.IdleWizDark = parseBool(val)
+		case "keepalive_interval":
+			gc.KeepaliveInterval = atoi(val, gc.KeepaliveInterval)
 
 		// --- Queue ---
 		case "queue_idle_chunk":

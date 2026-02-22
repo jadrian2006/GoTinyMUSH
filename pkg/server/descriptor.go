@@ -96,6 +96,10 @@ func (d *Descriptor) Send(msg string) {
 	if !strings.HasSuffix(msg, "\n") {
 		msg += "\r\n"
 	}
+	// Convert bare \n to \r\n for telnet clients
+	if d.Transport != TransportWebSocket {
+		msg = toTelnetCRLF(msg)
+	}
 	d.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	n, _ := d.Conn.Write([]byte(msg))
 	d.BytesSent += n
@@ -116,14 +120,36 @@ func (d *Descriptor) SendRaw(data []byte) {
 
 // SendNoNewline writes a string without appending a newline.
 func (d *Descriptor) SendNoNewline(msg string) {
+	if d.SendFunc != nil {
+		d.SendFunc(msg)
+		return
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
 		return
 	}
+	// Convert bare \n to \r\n for telnet clients
+	if d.Transport != TransportWebSocket {
+		msg = toTelnetCRLF(msg)
+	}
 	d.Conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	n, _ := d.Conn.Write([]byte(msg))
 	d.BytesSent += n
+}
+
+// toTelnetCRLF converts bare \n to \r\n for telnet compliance.
+// It skips \n that is already preceded by \r.
+func toTelnetCRLF(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s) + len(s)/40) // small over-allocation for added \r's
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' && (i == 0 || s[i-1] != '\r') {
+			buf.WriteByte('\r')
+		}
+		buf.WriteByte(s[i])
+	}
+	return buf.String()
 }
 
 // Close shuts down the connection.

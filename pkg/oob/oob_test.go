@@ -2,8 +2,10 @@ package oob
 
 import (
 	"encoding/json"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
@@ -161,5 +163,107 @@ func TestCapabilities(t *testing.T) {
 	caps.GMCP = true
 	if !caps.HasAny() {
 		t.Error("should have GMCP")
+	}
+}
+
+func TestNegotiate_PreservesLeftover(t *testing.T) {
+	// Create a pipe pair to simulate a client connection
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	done := make(chan struct{})
+	var caps *Capabilities
+	var leftover []byte
+
+	go func() {
+		caps, leftover = Negotiate(server, 500*time.Millisecond)
+		close(done)
+	}()
+
+	// Read the WILL commands the server sends
+	buf := make([]byte, 64)
+	client.SetReadDeadline(time.Now().Add(time.Second))
+	client.Read(buf)
+
+	// Send DO GMCP followed by a connect command (simulating autologin)
+	response := []byte{IAC, DO, TeloptGMCP}
+	response = append(response, []byte("connect Player pass123\r\n")...)
+	client.Write(response)
+
+	<-done
+
+	if !caps.GMCP {
+		t.Error("expected GMCP to be negotiated")
+	}
+	want := "connect Player pass123\r\n"
+	if string(leftover) != want {
+		t.Errorf("leftover = %q, want %q", string(leftover), want)
+	}
+}
+
+func TestNegotiate_SubnegotiationSkipped(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	done := make(chan struct{})
+	var caps *Capabilities
+	var leftover []byte
+
+	go func() {
+		caps, leftover = Negotiate(server, 500*time.Millisecond)
+		close(done)
+	}()
+
+	buf := make([]byte, 64)
+	client.SetReadDeadline(time.Now().Add(time.Second))
+	client.Read(buf)
+
+	// Send DO GMCP + a GMCP subnegotiation + a connect command
+	response := []byte{IAC, DO, TeloptGMCP}
+	// IAC SB GMCP "Core.Hello {}" IAC SE
+	response = append(response, IAC, SB, TeloptGMCP)
+	response = append(response, []byte("Core.Hello {}")...)
+	response = append(response, IAC, SE)
+	response = append(response, []byte("connect Test pw\n")...)
+	client.Write(response)
+
+	<-done
+
+	if !caps.GMCP {
+		t.Error("expected GMCP negotiated")
+	}
+	if string(leftover) != "connect Test pw\n" {
+		t.Errorf("leftover = %q, want %q", string(leftover), "connect Test pw\n")
+	}
+}
+
+func TestNegotiate_NoResponse(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	done := make(chan struct{})
+	var caps *Capabilities
+	var leftover []byte
+
+	go func() {
+		caps, leftover = Negotiate(server, 200*time.Millisecond)
+		close(done)
+	}()
+
+	// Read but send nothing — simulates dumb client
+	buf := make([]byte, 64)
+	client.SetReadDeadline(time.Now().Add(time.Second))
+	client.Read(buf)
+
+	<-done
+
+	if caps.HasAny() {
+		t.Error("expected no capabilities for silent client")
+	}
+	if len(leftover) != 0 {
+		t.Errorf("expected no leftover, got %q", leftover)
 	}
 }

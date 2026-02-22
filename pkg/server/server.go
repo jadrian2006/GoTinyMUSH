@@ -2,10 +2,12 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"strings"
@@ -218,7 +220,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	// OOB protocol negotiation (GMCP/MSDP/MSSP) with 1-second timeout.
 	// Non-OOB clients simply don't respond and we move on.
-	caps := oob.Negotiate(conn, 1*time.Second)
+	caps, leftover := oob.Negotiate(conn, 1*time.Second)
 	if caps.HasAny() {
 		d.OOB = caps
 		log.Printf("[%d] OOB negotiated: GMCP=%v MSDP=%v MSSP=%v", d.ID, caps.GMCP, caps.MSDP, caps.MSSP)
@@ -227,6 +229,23 @@ func (s *Server) handleConnection(conn net.Conn) {
 	// Send MSSP response immediately after negotiation
 	if caps.MSSP {
 		d.SendRaw(oob.EncodeMSSP(s.buildMSSPData()))
+	}
+
+	// Start keepalive: send IAC NOP periodically to prevent NAT timeout
+	if s.Game.Conf != nil && s.Game.Conf.KeepaliveInterval > 0 {
+		interval := time.Duration(s.Game.Conf.KeepaliveInterval) * time.Second
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			nop := []byte{oob.IAC, oob.NOP}
+			for {
+				<-ticker.C
+				if d.IsClosed() {
+					return
+				}
+				d.SendRaw(nop)
+			}
+		}()
 	}
 
 	defer func() {
@@ -252,8 +271,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 		d.SendNoNewline(s.Config.WelcomeText)
 	}
 
-	// Main read loop
-	scanner := bufio.NewScanner(d.Conn)
+	// Main read loop — prepend any leftover bytes from OOB negotiation
+	var reader io.Reader = d.Conn
+	if len(leftover) > 0 {
+		reader = io.MultiReader(bytes.NewReader(leftover), d.Conn)
+	}
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 8192), 8192)
 
 	for scanner.Scan() {
@@ -571,12 +594,29 @@ func stripTelnet(s string) string {
 	var buf strings.Builder
 	i := 0
 	for i < len(s) {
-		if s[i] == 0xFF && i+2 < len(s) {
-			// IAC command: skip 3 bytes (IAC + cmd + option)
-			i += 3
-			continue
-		}
 		if s[i] == 0xFF && i+1 < len(s) {
+			cmd := s[i+1]
+			if cmd == 0xFA { // IAC SB — subnegotiation
+				// Skip forward to IAC SE (0xFF 0xF0)
+				found := false
+				for j := i + 2; j+1 < len(s); j++ {
+					if s[j] == 0xFF && s[j+1] == 0xF0 {
+						i = j + 2
+						found = true
+						break
+					}
+				}
+				if !found {
+					i = len(s) // incomplete subneg, skip rest
+				}
+				continue
+			}
+			if i+2 < len(s) {
+				// 3-byte IAC command: IAC + cmd + option
+				i += 3
+				continue
+			}
+			// 2-byte IAC (IAC IAC or incomplete)
 			i += 2
 			continue
 		}
