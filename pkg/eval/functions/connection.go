@@ -287,21 +287,25 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		return
 	}
 
-	// C TinyMUSH locate() flags: type filters (R,E,P,T) and scope flags (i,n,*,X, etc.)
+	// C TinyMUSH locate() flags: type filters (R,E,P,T,*) and scope flags (i,n,N,X,a,F,L,V etc.)
 	// Separate type filter chars from scope/modifier chars.
 	hasTypeFilter := false
+	allTypes := false
 	typeChars := ""
 	for _, ch := range typeFilter {
 		switch ch {
+		case '*':
+			hasTypeFilter = true
+			allTypes = true
 		case 'R', 'E', 'P', 'T':
 			hasTypeFilter = true
 			typeChars += string(ch)
 		}
-		// Scope/modifier flags (i,n,N,X,*,a,F,L,V etc.) are ignored for type matching
+		// Scope/modifier flags (i,n,N,X,a,F,L,V etc.) are ignored for type matching
 	}
 
 	matchType := func(obj *gamedb.Object) bool {
-		if !hasTypeFilter {
+		if !hasTypeFilter || allTypes {
 			return true
 		}
 		for _, ch := range typeChars {
