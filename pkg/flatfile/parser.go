@@ -467,23 +467,14 @@ func (p *Parser) parseObject() error {
 		}
 		obj.Attrs = attrs
 
-		// When VAtrKey is set and no header lock was found, check if attr 42
-		// (A_LOCK) contains a lock expression and promote it to obj.Lock.
-		if obj.Lock == nil {
-			for i, attr := range obj.Attrs {
-				if attr.Number == 42 { // A_LOCK
-					lockText := stripAttrInfoPrefix(attr.Value)
-					if lockText != "" {
-						// Parse inline using a simple boolexp text parser.
-						// The value is stored as text like "#0" or "=SECURED_TYPE:*crystal*"
-						obj.Lock = parseBoolExpText(lockText)
-					}
-					// Remove A_LOCK from attrs since it's now in obj.Lock
-					obj.Attrs = append(obj.Attrs[:i], obj.Attrs[i+1:]...)
-					break
-				}
-			}
-		}
+		// When VAtrKey is set, attribute 42 (A_LOCK) contains the lock as
+		// text. Keep it as a regular attribute — the runtime lock evaluator
+		// (CouldDoIt → ParseBoolExp) reads attr 42, parses it with a
+		// full-featured parser that correctly handles parenthesised
+		// sub-expressions, and evaluates it. The old approach of promoting
+		// to obj.Lock via parseBoolExpText was lossy for complex locks
+		// like "(!+547:pattern|=547:pattern*)&!=11069:INACTIVE" because
+		// the naive text parser split on '|'/'&' without respecting '()'.
 	}
 
 	p.db.Objects[obj.DBRef] = obj
