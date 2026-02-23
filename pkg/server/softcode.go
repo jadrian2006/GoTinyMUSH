@@ -1844,18 +1844,20 @@ func (g *Game) semaphoreAddTo(obj gamedb.DBRef, attr int, amount int) int {
 }
 
 // semaphoreWait implements the semaphore wait logic for @wait obj[/attr]={cmd}.
-// Increments the semaphore count. If count <= 0, the semaphore was pre-notified
-// so the command executes immediately. Otherwise, queue it.
-// This matches C TinyMUSH's behavior in cque_do_wait().
+// Increments the semaphore count. If count was <= 0 before the increment (i.e.
+// the result is <= 1), the semaphore is idle or pre-notified, so the command
+// executes immediately. Otherwise, another command is in-flight and this one
+// queues behind it. This matches TinyMUX's mutex-style @wait behavior where
+// the common pattern "@wait me={...;@notify me}" works on fresh objects (count=0).
 func (g *Game) semaphoreWait(target gamedb.DBRef, attr int, qe *QueueEntry) {
 	count := g.semaphoreAddTo(target, attr, 1)
 	DebugLog("SEMWAIT target=#%d attr=%d count=%d player=#%d cmd=%q", target, attr, count, qe.Player, truncDebug(qe.Command, 200))
-	if count <= 0 {
-		// Pre-notified: execute immediately
+	if count <= 1 {
+		// Idle (was 0) or pre-notified (was negative): execute immediately
 		g.Queue.Add(qe)
 		g.WakeQueue()
 	} else {
-		// Wait for notification
+		// Another command is in-flight (count > 1): queue for serialization
 		qe.SemObj = target
 		qe.SemAttr = attr
 		g.Queue.AddSemaphore(qe)
