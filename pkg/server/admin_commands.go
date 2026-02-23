@@ -644,9 +644,12 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	if obj, ok := g.DB.Objects[victim]; ok {
 		oldLoc := obj.Location
 		isDark := obj.HasFlag(gamedb.FlagDark)
+		// In C TinyMUSH, @tel only generates "has left"/"has arrived"
+		// notifications for players, not for objects/things.
+		isPlayer := obj.ObjType() == gamedb.TypePlayer
 		if oldLoc != gamedb.Nothing {
 			g.RemoveFromContents(oldLoc, victim)
-			if !isDark {
+			if isPlayer && !isDark {
 				g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
 					fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
 			}
@@ -663,7 +666,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 			}
 		}
 		g.PersistObjects(persistList...)
-		if !isDark {
+		if isPlayer && !isDark {
 			g.Conns.SendToRoomExcept(g.DB, dest, victim,
 				fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
 		}
