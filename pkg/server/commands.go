@@ -2677,14 +2677,19 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 
 	// matchAliases checks name and semicolon-separated aliases for exact or prefix match.
 	// Returns 2 for exact match, 1 for prefix match, 0 for no match.
+	// Exact matches on any alias take priority over prefix matches on earlier aliases.
 	// Uses word-boundary matching: "bath" matches "Radiant Bath" (C TinyMUSH string_match).
 	matchAliases := func(objName string) int {
-		for _, alias := range strings.Split(objName, ";") {
-			alias = strings.TrimSpace(alias)
-			aliasLower := strings.ToLower(alias)
-			if aliasLower == nameLower {
+		aliases := strings.Split(objName, ";")
+		// First pass: check for exact match on any alias
+		for _, alias := range aliases {
+			if strings.EqualFold(strings.TrimSpace(alias), nameLower) {
 				return 2 // exact
 			}
+		}
+		// Second pass: check for prefix/word match
+		for _, alias := range aliases {
+			aliasLower := strings.ToLower(strings.TrimSpace(alias))
 			if stringMatchWord(aliasLower, nameLower) {
 				return 1 // prefix/word match
 			}
@@ -2739,15 +2744,24 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 		return found
 	}
 
-	// Search room contents
+	// Search room contents and exits
 	loc := playerObj.Location
-	if found := searchContents(g.DB.SafeContents(loc)); found != gamedb.Nothing {
-		return found
+	if loc != gamedb.Nothing {
+		if found := searchContents(g.DB.SafeContents(loc)); found != gamedb.Nothing {
+			return found
+		}
+		// Search room exits (C TinyMUSH match_exit searches exits by name/alias)
+		if found := searchContents(g.DB.SafeExits(loc)); found != gamedb.Nothing {
+			return found
+		}
 	}
 
-	// Search room exits (C TinyMUSH match_exit searches exits by name/alias)
-	if found := searchContents(g.DB.SafeExits(loc)); found != gamedb.Nothing {
-		return found
+	// If the player IS a room (or has no location), search its own exits.
+	// In C TinyMUSH, rooms can match their own exits for $-commands like @tel.
+	if playerObj.ObjType() == gamedb.TypeRoom {
+		if found := searchContents(g.DB.SafeExits(player)); found != gamedb.Nothing {
+			return found
+		}
 	}
 
 	return gamedb.Nothing

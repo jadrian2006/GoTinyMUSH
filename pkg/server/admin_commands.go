@@ -625,6 +625,18 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 
+	// If dest is an EXIT, follow it to its destination room.
+	// In C TinyMUSH, @tel obj=exit sends the object through the exit.
+	// An exit's Location field holds the destination room.
+	if destObj, ok := g.DB.Objects[dest]; ok && destObj.ObjType() == gamedb.TypeExit {
+		exitDest := destObj.Location
+		if exitDest == gamedb.Nothing {
+			d.Send("That exit doesn't lead anywhere.")
+			return
+		}
+		dest = exitDest
+	}
+
 	// Find descriptor for victim (if connected)
 	descs := g.Conns.GetByPlayer(victim)
 
