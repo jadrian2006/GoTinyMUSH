@@ -429,16 +429,16 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// 4. Abbreviation aliases from goTinyAlias.conf (e.g., "i" → "inventory")
-	// These must come before exit matching so built-in abbreviations like
-	// "i", "l", "n", "s" are not intercepted by exits with matching names.
-	if cmd, ok := g.Commands[lower]; ok && cmd.IsAlias {
-		execCmd(cmd)
+	// 4. Exit matching — exits take priority over command abbreviations,
+	// matching C TinyMUSH dispatch order. Exit aliases require exact match
+	// (only the exit name allows prefix matching), so "i" won't match "inf".
+	if tryMoveByExit(g, d, input) {
 		return
 	}
 
-	// 5. Exit matching
-	if tryMoveByExit(g, d, input) {
+	// 5. Abbreviation aliases from goTinyAlias.conf (e.g., "i" → "inventory")
+	if cmd, ok := g.Commands[lower]; ok && cmd.IsAlias {
+		execCmd(cmd)
 		return
 	}
 
