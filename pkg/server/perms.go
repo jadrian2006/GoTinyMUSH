@@ -424,11 +424,12 @@ func StripPrivFlags(g *Game, obj gamedb.DBRef) {
 	g.PersistObject(o)
 }
 
-// PassLocks returns true if player has the POW_PASS_LOCKS power.
+// PassLocks returns true if player has the POW_PASS_LOCKS power or is a wizard.
+// Matches C TinyMUSH: #define Pass_Locks(x) (Wizard(x) || has_power(Pass_Locks))
 func PassLocks(g *Game, player gamedb.DBRef) bool {
 	o, ok := g.DB.Objects[player]
 	if !ok {
 		return false
 	}
-	return o.HasPower(0, gamedb.PowPassLocks)
+	return o.HasFlag(gamedb.FlagWizard) || o.HasPower(0, gamedb.PowPassLocks)
 }

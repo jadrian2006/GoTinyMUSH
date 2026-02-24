@@ -482,11 +482,15 @@ func CouldDoItStrict(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
 }
 
 // CouldDoIt checks if player passes the lock on thing for the given lock attribute.
-// Unlike controls(), this does NOT bypass for wizards — matching C TinyMUSH's
-// could_doit() which always evaluates the lock. Wizard privilege is handled
-// separately via controls() where appropriate.
+// Matches C TinyMUSH's could_doit(): Pass_Locks power bypasses all locks.
+// Unlike controls(), general wizard privilege does NOT bypass — only Pass_Locks.
 // Empty lock = unlocked (pass).
 func CouldDoIt(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
+	// Pass_Locks power bypasses all lock evaluation (matches C TinyMUSH)
+	if PassLocks(g, player) {
+		return true
+	}
+
 	// Check attribute-stored lock
 	lockText := g.GetAttrText(thing, lockAttr)
 	if lockText != "" {

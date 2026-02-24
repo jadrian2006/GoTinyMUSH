@@ -365,6 +365,13 @@ func (cm *ConnManager) SendToRoom(db *gamedb.Database, room gamedb.DBRef, msg st
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
+	// If the location itself is a connected player, notify it (C TinyMUSH
+	// notify_all_from_inside behavior for objects in player inventory)
+	if descs, ok := cm.byPlayer[room]; ok {
+		for _, d := range descs {
+			d.Send(msg)
+		}
+	}
 	for _, next := range db.SafeContents(room) {
 		if descs, ok := cm.byPlayer[next]; ok {
 			for _, d := range descs {
@@ -379,6 +386,13 @@ func (cm *ConnManager) SendToRoomExcept(db *gamedb.Database, room gamedb.DBRef, 
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
+	if room != except {
+		if descs, ok := cm.byPlayer[room]; ok {
+			for _, d := range descs {
+				d.Send(msg)
+			}
+		}
+	}
 	for _, next := range db.SafeContents(room) {
 		if next != except {
 			if descs, ok := cm.byPlayer[next]; ok {

@@ -673,7 +673,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	args = evalExpr(g, d.Player, args)
-	loc := g.RoomOf(d.Player)
+	loc := g.PlayerLocation(d.Player)
 	g.EmitEventToRoom(loc, "EMIT", events.Event{
 		Type:   events.EvEmit,
 		Source: d.Player,
@@ -800,9 +800,13 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 		return false
 	}
 	prefixMatchExit := func(exitObj *gamedb.Object) bool {
+		// Only prefix-match on the exit NAME (first segment before ";").
+		// Aliases (segments after ";") require exact match in pass 1.
+		// This matches C TinyMUSH behavior: name is prefix-matchable,
+		// aliases are exact-only.
 		exitNames := strings.Split(exitObj.Name, ";")
-		for _, ename := range exitNames {
-			ename = strings.TrimSpace(ename)
+		if len(exitNames) > 0 {
+			ename := strings.TrimSpace(exitNames[0])
 			if len(name) > 0 && len(ename) >= len(name) && strings.EqualFold(ename[:len(name)], name) {
 				return true
 			}

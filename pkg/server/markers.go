@@ -29,9 +29,16 @@ func (g *Game) SendMarkedToPlayer(player gamedb.DBRef, markerType string, msg st
 	g.Conns.SendToPlayer(player, wrapped)
 }
 
-// SendMarkedToRoom sends a message to all connected players in a room,
+// SendMarkedToRoom sends a message to all connected players in a location,
 // wrapping per-player with their configured marker.
+// Matches C TinyMUSH's notify_all_from_inside(): if the location itself is a
+// connected player (e.g. @emit from an object in a player's inventory), the
+// player receives the message.
 func (g *Game) SendMarkedToRoom(room gamedb.DBRef, markerType string, msg string) {
+	// If the location itself is a connected player, notify it
+	if g.Conns.IsConnected(room) {
+		g.SendMarkedToPlayer(room, markerType, msg)
+	}
 	for _, next := range g.DB.SafeContents(room) {
 		if g.Conns.IsConnected(next) {
 			g.SendMarkedToPlayer(next, markerType, msg)
@@ -39,9 +46,12 @@ func (g *Game) SendMarkedToRoom(room gamedb.DBRef, markerType string, msg string
 	}
 }
 
-// SendMarkedToRoomExcept sends a message to all connected players in a room
+// SendMarkedToRoomExcept sends a message to all connected players in a location
 // except the specified player, wrapping per-player with their configured marker.
 func (g *Game) SendMarkedToRoomExcept(room gamedb.DBRef, except gamedb.DBRef, markerType string, msg string) {
+	if room != except && g.Conns.IsConnected(room) {
+		g.SendMarkedToPlayer(room, markerType, msg)
+	}
 	for _, next := range g.DB.SafeContents(room) {
 		if next != except && g.Conns.IsConnected(next) {
 			g.SendMarkedToPlayer(next, markerType, msg)
@@ -57,9 +67,13 @@ func (g *Game) EmitEvent(player gamedb.DBRef, markerType string, ev events.Event
 	g.EventBus.Emit(ev)
 }
 
-// EmitEventToRoom sends a structured event to all connected players in a room.
+// EmitEventToRoom sends a structured event to all connected players in a location.
 // Each player's copy has marker-wrapped text.
+// If the location itself is a connected player, it receives the event.
 func (g *Game) EmitEventToRoom(room gamedb.DBRef, markerType string, ev events.Event) {
+	if g.Conns.IsConnected(room) {
+		g.EmitEvent(room, markerType, ev)
+	}
 	for _, next := range g.DB.SafeContents(room) {
 		if g.Conns.IsConnected(next) {
 			g.EmitEvent(next, markerType, ev)
@@ -68,8 +82,11 @@ func (g *Game) EmitEventToRoom(room gamedb.DBRef, markerType string, ev events.E
 }
 
 // EmitEventToRoomExcept sends a structured event to all connected players in a
-// room except one. Each player's copy has marker-wrapped text.
+// location except one. Each player's copy has marker-wrapped text.
 func (g *Game) EmitEventToRoomExcept(room gamedb.DBRef, except gamedb.DBRef, markerType string, ev events.Event) {
+	if room != except && g.Conns.IsConnected(room) {
+		g.EmitEvent(room, markerType, ev)
+	}
 	for _, next := range g.DB.SafeContents(room) {
 		if next != except && g.Conns.IsConnected(next) {
 			g.EmitEvent(next, markerType, ev)
