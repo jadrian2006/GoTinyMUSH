@@ -119,6 +119,13 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		return false
 	}
 
+	// Collect the child's own attribute numbers so parent attrs with the
+	// same number are skipped — in C TinyMUSH, child attrs override parents.
+	childAttrs := make(map[int]bool)
+	for _, attr := range obj.Attrs {
+		childAttrs[attr.Number] = true
+	}
+
 	found := false
 	dollarCount := 0
 	for _, attr := range obj.Attrs {
@@ -172,7 +179,7 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		found = true
 	}
 
-	// Check parent chain
+	// Check parent chain — skip attrs the child already defines (override).
 	parentRef := obj.Parent
 	if IsDebug() && parentRef != gamedb.Nothing {
 		if pObj, ok := g.DB.Objects[parentRef]; ok {
@@ -185,10 +192,14 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 	visited[objRef] = true
 	for parentRef != gamedb.Nothing && !visited[parentRef] {
 		visited[parentRef] = true
-		if g.matchDollarOnParent(parentRef, objRef, player, cause, input) {
+		if g.matchDollarOnParent(parentRef, objRef, player, cause, input, childAttrs) {
 			found = true
 		}
 		if pObj, ok := g.DB.Objects[parentRef]; ok {
+			// Add this parent's attrs to the override set for deeper ancestors
+			for _, attr := range pObj.Attrs {
+				childAttrs[attr.Number] = true
+			}
 			parentRef = pObj.Parent
 		} else {
 			break
@@ -198,8 +209,9 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 	return found
 }
 
-// matchDollarOnParent checks a parent object's attributes, skipping AF_PRIVATE.
-func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBRef, input string) bool {
+// matchDollarOnParent checks a parent object's attributes, skipping AF_PRIVATE
+// and any attribute numbers already defined on the child (child overrides parent).
+func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBRef, input string, childAttrs map[int]bool) bool {
 	parent, ok := g.DB.Objects[parentRef]
 	if !ok {
 		return false
@@ -208,6 +220,10 @@ func (g *Game) matchDollarOnParent(parentRef, childRef, player, cause gamedb.DBR
 	found := false
 	dollarCount := 0
 	for _, attr := range parent.Attrs {
+		// Child attrs override parent — skip if child already defines this attr
+		if childAttrs[attr.Number] {
+			continue
+		}
 		text := eval.StripAttrPrefix(attr.Value)
 		if !strings.HasPrefix(text, "$") {
 			continue
