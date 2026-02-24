@@ -3297,12 +3297,15 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 	playerObj := g.DB.Objects[d.Player]
 	g.PersistObjects(obj, playerObj)
 
-	d.Send(fmt.Sprintf("You pick up %s.", DisplayName(obj.Name)))
-	g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-		fmt.Sprintf("%s picks up %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
-
-	// Fire ASUCC if present
-	g.QueueAttrAction(target, d.Player, 12, nil) // A_ASUCC = 12
+	// C TinyMUSH did_it pattern: SUCC to player, OSUCC to room, ASUCC action
+	if g.GetAttrText(target, aSucc) != "" || g.GetAttrText(target, aOSucc) != "" {
+		g.DidIt(d.Player, target, aSucc, aOSucc, aASucc)
+	} else {
+		d.Send(fmt.Sprintf("You pick up %s.", DisplayName(obj.Name)))
+		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
+			fmt.Sprintf("%s picks up %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
+		g.QueueAttrAction(target, d.Player, aASucc, nil)
+	}
 }
 
 func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
@@ -3336,12 +3339,15 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 	g.AddToContents(loc, target)
 	g.PersistObjects(obj, locObj)
 
-	d.Send(fmt.Sprintf("You drop %s.", DisplayName(obj.Name)))
-	g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-		fmt.Sprintf("%s drops %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
-
-	// Fire ADROP if present
-	g.QueueAttrAction(target, d.Player, 14, nil) // A_ADROP = 14
+	// C TinyMUSH did_it pattern: DROP to player, ODROP to room, ADROP action
+	if g.GetAttrText(target, aDrop) != "" || g.GetAttrText(target, aODrop) != "" {
+		g.DidIt(d.Player, target, aDrop, aODrop, aADrop)
+	} else {
+		d.Send(fmt.Sprintf("You drop %s.", DisplayName(obj.Name)))
+		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
+			fmt.Sprintf("%s drops %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
+		g.QueueAttrAction(target, d.Player, aADrop, nil)
+	}
 }
 
 func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
