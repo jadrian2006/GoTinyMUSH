@@ -771,7 +771,73 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 		return false
 	}
 
-	// Walk exits chain
+	// Walk exits chain — two-pass matching like C TinyMUSH.
+	// Pass 1: exact alias match (e.g., "s" exactly matches alias "s")
+	// Pass 2: prefix match (e.g., "s" matches prefix of "sled")
+	// This ensures "s" goes to an exit with alias "s" rather than one named "Sled".
+	matchExit := func(exitObj *gamedb.Object) bool {
+		exitNames := strings.Split(exitObj.Name, ";")
+		for _, ename := range exitNames {
+			if strings.EqualFold(strings.TrimSpace(ename), name) {
+				return true
+			}
+		}
+		return false
+	}
+	prefixMatchExit := func(exitObj *gamedb.Object) bool {
+		exitNames := strings.Split(exitObj.Name, ";")
+		for _, ename := range exitNames {
+			ename = strings.TrimSpace(ename)
+			if len(name) > 0 && len(ename) >= len(name) && strings.EqualFold(ename[:len(name)], name) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Helper to execute exit traversal (SUCC/OSUCC/ASUCC messages + move)
+	doExit := func(exitRef gamedb.DBRef, exitObj *gamedb.Object) bool {
+		dest := exitObj.Location
+		if dest == gamedb.Nothing || dest == gamedb.Home {
+			playerObj := g.DB.Objects[d.Player]
+			dest = playerObj.Link
+		}
+		if dest == gamedb.Nothing {
+			d.Send("That exit doesn't lead anywhere.")
+			return true
+		}
+		if !CouldDoIt(g, d.Player, exitRef, aLock) {
+			HandleLockFailure(g, d, exitRef, aFail, aOFail, aAFail, "You can't go that way.")
+			return true
+		}
+		if succ := g.GetAttrText(exitRef, 4); succ != "" {
+			ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			msg := ctx.Exec(succ, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+			if msg != "" {
+				d.Send(msg)
+			}
+		}
+		if osucc := g.GetAttrText(exitRef, 1); osucc != "" {
+			pObj := g.DB.Objects[d.Player]
+			if pObj != nil && !pObj.HasFlag(gamedb.FlagDark) {
+				ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
+					functions.RegisterAll(c)
+				})
+				msg := ctx.Exec(osucc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+				if msg != "" {
+					g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
+						DisplayName(pObj.Name)+" "+msg)
+				}
+			}
+		}
+		g.QueueAttrAction(exitRef, d.Player, 12, nil) // exit ASUCC
+		g.MovePlayer(d, dest)
+		return true
+	}
+
+	// Pass 1: exact alias match
 	seenExits := make(map[gamedb.DBRef]bool)
 	exitRef := locObj.Exits
 	for exitRef != gamedb.Nothing && !seenExits[exitRef] {
@@ -780,57 +846,23 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 		if !ok {
 			break
 		}
-		// Exit names can have aliases separated by ;
-		// TinyMUSH uses prefix matching: "o" matches "Out", "ou" matches "Out", etc.
-		exitNames := strings.Split(exitObj.Name, ";")
-		for _, ename := range exitNames {
-			ename = strings.TrimSpace(ename)
-			if len(name) > 0 && len(ename) >= len(name) && strings.EqualFold(ename[:len(name)], name) {
-				// Found matching exit - move player
-				// TinyMUSH stores exit destination in Location field
-				dest := exitObj.Location
-				if dest == gamedb.Nothing || dest == gamedb.Home {
-					// Home exit
-					playerObj := g.DB.Objects[d.Player]
-					dest = playerObj.Link
-				}
-				if dest == gamedb.Nothing {
-					d.Send("That exit doesn't lead anywhere.")
-					return true
-				}
-				// Check exit lock
-				if !CouldDoIt(g, d.Player, exitRef, aLock) {
-					HandleLockFailure(g, d, exitRef, aFail, aOFail, aAFail, "You can't go that way.")
-					return true
-				}
-				// Exit SUCC (4) to player, OSUCC (1) to room, ASUCC (12) action
-				if succ := g.GetAttrText(exitRef, 4); succ != "" {
-					ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
-						functions.RegisterAll(c)
-					})
-					msg := ctx.Exec(succ, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-					if msg != "" {
-						d.Send(msg)
-					}
-				}
-				// OSUCC: prepend player name, skip if player is DARK
-				if osucc := g.GetAttrText(exitRef, 1); osucc != "" {
-					pObj := g.DB.Objects[d.Player]
-					if pObj != nil && !pObj.HasFlag(gamedb.FlagDark) {
-						ctx := MakeEvalContextForObj(g, exitRef, d.Player, func(c *eval.EvalContext) {
-							functions.RegisterAll(c)
-						})
-						msg := ctx.Exec(osucc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-						if msg != "" {
-							g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-								DisplayName(pObj.Name)+" "+msg)
-						}
-					}
-				}
-				g.QueueAttrAction(exitRef, d.Player, 12, nil) // exit ASUCC
-				g.MovePlayer(d, dest)
-				return true
-			}
+		if matchExit(exitObj) {
+			return doExit(exitRef, exitObj)
+		}
+		exitRef = exitObj.Next
+	}
+
+	// Pass 2: prefix match
+	seenExits = make(map[gamedb.DBRef]bool)
+	exitRef = locObj.Exits
+	for exitRef != gamedb.Nothing && !seenExits[exitRef] {
+		seenExits[exitRef] = true
+		exitObj, ok := g.DB.Objects[exitRef]
+		if !ok {
+			break
+		}
+		if prefixMatchExit(exitObj) {
+			return doExit(exitRef, exitObj)
 		}
 		exitRef = exitObj.Next
 	}

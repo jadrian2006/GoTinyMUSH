@@ -115,13 +115,16 @@ func fnObjmem(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 // beginning of any word in the name (e.g., "bath" matches "Radiant Bath").
 func matchNameAlias(objName, searchName string) int {
 	searchLower := strings.ToLower(searchName)
-	for _, alias := range strings.Split(objName, ";") {
-		alias = strings.TrimSpace(alias)
-		aliasLower := strings.ToLower(alias)
-		if aliasLower == searchLower {
+	aliases := strings.Split(objName, ";")
+	// Pass 1: check ALL aliases for exact match first
+	for _, alias := range aliases {
+		if strings.ToLower(strings.TrimSpace(alias)) == searchLower {
 			return 2 // exact match
 		}
-		if stringMatch(aliasLower, searchLower) {
+	}
+	// Pass 2: check for prefix/word match
+	for _, alias := range aliases {
+		if stringMatch(strings.ToLower(strings.TrimSpace(alias)), searchLower) {
 			return 1 // prefix/word match
 		}
 	}
