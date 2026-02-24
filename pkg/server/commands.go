@@ -37,6 +37,7 @@ type Command struct {
 	Name    string
 	Handler CommandHandler
 	NoGuest bool // if true, guests cannot use this command
+	IsAlias bool // true for abbreviation aliases loaded from goTinyAlias.conf
 }
 
 // InitCommands registers all available game commands.
@@ -116,6 +117,7 @@ func InitCommands() map[string]*Command {
 	// Database (no guest)
 	registerNG("@dump", cmdDump)
 	registerNG("@fixdb", cmdFixDB)
+	registerNG("@fixall", cmdFixAll)
 	registerNG("@backup", cmdBackup)
 	registerNG("@readcache", cmdReadCache)
 	registerNG("@archive", cmdArchive)
@@ -358,14 +360,23 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		switches = parts[1:]
 	}
 
-	// Look up command (exact match first)
+	// C TinyMUSH resolution order:
+	// 1. Exact built-in command (non-alias)
+	// 2. @-command prefix matching
+	// 3. Channel aliases
+	// 4. Exit matching (exits beat abbreviation aliases like "sa" for "say")
+	// 5. Abbreviation aliases from goTinyAlias.conf
+	// 6. Enter/leave aliases
+	// 7. $-commands
+
 	lower := strings.ToLower(cmdName)
-	if cmd, ok := g.Commands[lower]; ok {
+
+	// Helper to execute a matched command with hooks
+	execCmd := func(cmd *Command) {
 		if cmd.NoGuest && g.IsGuest(d.Player) {
 			d.Send("Permission denied.")
 			return
 		}
-		// Execute with hooks if any are defined
 		if g.Hooks != nil {
 			g.executeWithHooks(d, cmdName, args, func() {
 				cmd.Handler(g, d, args, switches)
@@ -373,11 +384,15 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		} else {
 			cmd.Handler(g, d, args, switches)
 		}
+	}
+
+	// 1. Exact match on non-alias (built-in) commands
+	if cmd, ok := g.Commands[lower]; ok && !cmd.IsAlias {
+		execCmd(cmd)
 		return
 	}
 
-	// Prefix matching for @-commands: C TinyMUSH allows abbreviations
-	// (e.g., @fo = @force, @sw = @switch, @tr = @trigger)
+	// 2. Prefix matching for @-commands
 	if len(lower) > 1 && lower[0] == '@' {
 		var matchedCmd *Command
 		matchCount := 0
@@ -388,20 +403,14 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 			}
 		}
 		if matchCount == 1 && matchedCmd != nil {
-			if matchedCmd.NoGuest && g.IsGuest(d.Player) {
-				d.Send("Permission denied.")
-				return
-			}
-			matchedCmd.Handler(g, d, args, switches)
+			execCmd(matchedCmd)
 			return
 		}
 	}
 
 	// Unrecognized @<attr> commands: treat as &<attr> (set variable attribute).
-	// Many MUSHes use @va-@vz and similar as shorthand for setting attributes.
 	if len(lower) > 1 && lower[0] == '@' && args != "" {
 		attrName := lower[1:]
-		// Only do this if it looks like an attribute set (has obj=value)
 		if strings.Contains(args, "=") {
 			if g.IsGuest(d.Player) {
 				d.Send("Permission denied.")
@@ -412,7 +421,7 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// Try channel alias matching
+	// 3. Channel alias matching
 	if g.Comsys != nil {
 		if ca := g.Comsys.LookupAlias(d.Player, strings.ToLower(cmdName)); ca != nil {
 			g.ComsysProcessAlias(d, ca, args)
@@ -420,19 +429,23 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// Try to match as an exit name
+	// 4. Exit matching — exits take priority over abbreviation aliases
 	if tryMoveByExit(g, d, input) {
 		return
 	}
 
-	// Check enter/leave aliases (C TinyMUSH: A_LALIAS/A_EALIAS on objects)
-	// When inside an object, its LALIAS lists aliases that trigger "leave".
-	// EALIAS on objects in the room lists aliases that trigger "enter <obj>".
+	// 5. Abbreviation aliases from goTinyAlias.conf (e.g., "sa" → "say")
+	if cmd, ok := g.Commands[lower]; ok && cmd.IsAlias {
+		execCmd(cmd)
+		return
+	}
+
+	// 6. Enter/leave aliases (A_LALIAS/A_EALIAS on objects)
 	if tryEnterLeaveAlias(g, d, input) {
 		return
 	}
 
-	// Try $-command matching on objects in room/inventory
+	// 7. $-command matching on objects in room/inventory
 	if g.MatchDollarCommands(d.Player, d.Player, input) {
 		return
 	}

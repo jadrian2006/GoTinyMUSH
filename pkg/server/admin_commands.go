@@ -811,8 +811,8 @@ func cmdWall(g *Game, d *Descriptor, args string, _ []string) {
 	}
 }
 
-// cmdFixDB repairs the contents chain for a location by rebuilding it from
-// all objects whose Location field points to the given dbref.
+// cmdFixDB rebuilds all content/exit chains in the database. The argument
+// is accepted for backward compatibility but the full rebuild runs regardless.
 // Usage: @fixdb #<dbref>
 func cmdFixDB(g *Game, d *Descriptor, args string, _ []string) {
 	if !IsGod(g, d.Player) {
@@ -824,38 +824,25 @@ func cmdFixDB(g *Game, d *Descriptor, args string, _ []string) {
 		d.Send("I don't see that here.")
 		return
 	}
-	locObj, ok := g.DB.Objects[target]
-	if !ok {
+	if _, ok := g.DB.Objects[target]; !ok {
 		d.Send("No such object.")
 		return
 	}
+	// Run full chain rebuild (affects all containers, not just this one,
+	// but that's fine — it's idempotent and fast)
+	containers, objects := g.RepairAllChains()
+	d.Send(fmt.Sprintf("Database check complete: %d containers, %d objects updated.", containers, objects))
+}
 
-	// Collect all objects whose Location == target
-	var members []gamedb.DBRef
-	for ref, obj := range g.DB.Objects {
-		if obj.Location == target && ref != target {
-			members = append(members, ref)
-		}
+// @fixall — rebuild all content/exit chains across the entire database.
+// Usage: @fixall
+func cmdFixAll(g *Game, d *Descriptor, args string, _ []string) {
+	if !IsGod(g, d.Player) {
+		d.Send("Permission denied.")
+		return
 	}
-
-	// Rebuild chain: set Contents to first, link via Next
-	if len(members) == 0 {
-		locObj.Contents = gamedb.Nothing
-	} else {
-		locObj.Contents = members[0]
-		for i := 0; i < len(members)-1; i++ {
-			g.DB.Objects[members[i]].Next = members[i+1]
-		}
-		g.DB.Objects[members[len(members)-1]].Next = gamedb.Nothing
-	}
-
-	// Persist all modified objects
-	g.PersistObject(locObj)
-	for _, ref := range members {
-		g.PersistObject(g.DB.Objects[ref])
-	}
-
-	d.Send(fmt.Sprintf("Fixed contents chain for #%d: %d objects.", target, len(members)))
+	containers, objects := g.RepairAllChains()
+	d.Send(fmt.Sprintf("Database check complete: %d containers, %d objects updated.", containers, objects))
 }
 
 func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {

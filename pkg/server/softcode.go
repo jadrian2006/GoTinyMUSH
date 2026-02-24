@@ -1548,23 +1548,20 @@ func (g *Game) FireConnectAttr(player gamedb.DBRef, connCount int, attrNum int) 
 }
 
 // RunStartup walks all objects and queues STARTUP (attr #19).
-// Checks both the HAS_STARTUP flag and the actual attribute, since imported
-// databases may not have the flag set consistently.
+// Only fires on objects that have @Startup directly set (not inherited from
+// parent), matching C TinyMUSH behaviour where parent @Startup runs once
+// on the parent, not on every child.
 func (g *Game) RunStartup() {
 	count := 0
 	for ref, obj := range g.DB.Objects {
 		if obj.IsGoing() {
 			continue
 		}
-		// Check flag first (fast path), then fall back to attribute scan
-		text := ""
-		if obj.HasFlag(gamedb.FlagHasStartup) {
-			text = g.GetAttrText(ref, 19) // A_STARTUP = 19
-		}
-		if text == "" {
-			// Flag may not be set on imported objects — check attr directly
-			text = g.GetAttrText(ref, 19)
-		}
+		// Use GetAttrTextDirect: @Startup must be set directly on the
+		// object, not inherited from a parent. Otherwise every child
+		// of a parent with @Startup would fire it (e.g., 9 sorter carts
+		// all scheduling timers on every server restart).
+		text := g.GetAttrTextDirect(ref, 19) // A_STARTUP = 19
 		if text != "" {
 			entry := &QueueEntry{
 				Player:  ref,

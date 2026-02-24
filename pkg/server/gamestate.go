@@ -94,90 +94,125 @@ func (g *Game) IsConnected(player gamedb.DBRef) bool {
 	return g.Conns.IsConnected(player)
 }
 
-// RepairContentChains validates and rebuilds contents chains from Location data.
-// It detects orphaned objects (Location set but not reachable via Contents/Next chain)
-// and self-referencing Next pointers, then rebuilds affected chains.
-func (g *Game) RepairContentChains() {
+// RepairAllChains rebuilds ALL Contents and Exits chains from authoritative
+// Location data.  This fixes both orphans (missing from chain) and intruders
+// (present in chain but Location points elsewhere).  Safe to run on startup
+// and via @fixall.  Returns (containers fixed, exits fixed).
+func (g *Game) RepairAllChains() (int, int) {
+	// --- Phase 1: Rebuild Contents chains from Location fields ---
+	// contentsOf[loc] = ordered list of non-exit dbrefs whose Location == loc
+	contentsOf := make(map[gamedb.DBRef][]gamedb.DBRef)
+	for ref, obj := range g.DB.Objects {
+		if obj.IsGoing() || obj.Location == gamedb.Nothing {
+			continue
+		}
+		if obj.ObjType() != gamedb.TypeExit {
+			contentsOf[obj.Location] = append(contentsOf[obj.Location], ref)
+		}
+	}
+
+	// --- Phase 2: Rebuild Exits chains from exit source field ---
+	// exitsOf[source] = ordered list of exit dbrefs whose Exits == source
+	exitsOf := make(map[gamedb.DBRef][]gamedb.DBRef)
+	for ref, obj := range g.DB.Objects {
+		if obj.IsGoing() {
+			continue
+		}
+		if obj.ObjType() == gamedb.TypeExit && obj.Exits != gamedb.Nothing {
+			exitsOf[obj.Exits] = append(exitsOf[obj.Exits], ref)
+		}
+	}
+
+	// --- Phase 3: Apply rebuilt chains and detect changes ---
 	modified := make(map[gamedb.DBRef]bool)
+	containersFixed := 0
 
-	// Phase 1: Fix self-referencing Next pointers
-	selfRefFixed := 0
-	for ref, obj := range g.DB.Objects {
-		if obj.Next == ref {
-			log.Printf("[REPAIR] Object #%d (%s) has self-referencing Next pointer", ref, obj.Name)
-			obj.Next = gamedb.Nothing
-			modified[ref] = true
-			selfRefFixed++
+	// All containers that might have contents or exits
+	containers := make(map[gamedb.DBRef]bool)
+	for loc := range contentsOf {
+		containers[loc] = true
+	}
+	for src := range exitsOf {
+		containers[src] = true
+	}
+	// Also include any container whose existing chain is non-empty
+	for _, obj := range g.DB.Objects {
+		if obj.Contents != gamedb.Nothing || obj.Exits != gamedb.Nothing {
+			containers[obj.DBRef] = true
 		}
 	}
 
-	// Phase 2: Build expected contents from Location fields
-	// expectedContents[loc] = set of objects that claim Location=loc
-	expectedContents := make(map[gamedb.DBRef]map[gamedb.DBRef]bool)
-	for ref, obj := range g.DB.Objects {
-		if obj.Location != gamedb.Nothing && !obj.IsGoing() {
-			// Only non-exit objects go in Contents chains
-			if obj.ObjType() != gamedb.TypeExit {
-				if expectedContents[obj.Location] == nil {
-					expectedContents[obj.Location] = make(map[gamedb.DBRef]bool)
-				}
-				expectedContents[obj.Location][ref] = true
-			}
-		}
-	}
-
-	// Phase 3: Walk existing chains and find orphans
-	orphansFixed := 0
-	for loc, expected := range expectedContents {
-		locObj, ok := g.DB.Objects[loc]
+	for cRef := range containers {
+		cObj, ok := g.DB.Objects[cRef]
 		if !ok {
 			continue
 		}
+		changed := false
 
-		// Walk the existing chain, marking what we find
-		inChain := make(map[gamedb.DBRef]bool)
-		seen := make(map[gamedb.DBRef]bool)
-		next := locObj.Contents
-		for next != gamedb.Nothing && !seen[next] {
-			seen[next] = true
-			inChain[next] = true
-			if nObj, ok := g.DB.Objects[next]; ok {
-				next = nObj.Next
-			} else {
-				break
+		// Rebuild Contents chain
+		members := contentsOf[cRef]
+		newHead := gamedb.Nothing
+		if len(members) > 0 {
+			newHead = members[0]
+		}
+		if cObj.Contents != newHead {
+			cObj.Contents = newHead
+			changed = true
+		}
+		for i, ref := range members {
+			obj := g.DB.Objects[ref]
+			newNext := gamedb.Nothing
+			if i < len(members)-1 {
+				newNext = members[i+1]
+			}
+			if obj.Next != newNext {
+				obj.Next = newNext
+				modified[ref] = true
 			}
 		}
 
-		// Find objects that should be in chain but aren't
-		for ref := range expected {
-			if !inChain[ref] {
-				obj := g.DB.Objects[ref]
-				obj.Next = locObj.Contents
-				if obj.Next == ref {
-					obj.Next = gamedb.Nothing
-				}
-				locObj.Contents = ref
-				modified[ref] = true
-				modified[loc] = true
-				log.Printf("[REPAIR] Object #%d (%s) orphaned from #%d (%s) contents, re-linking",
-					ref, obj.Name, loc, locObj.Name)
-				orphansFixed++
+		// Rebuild Exits chain
+		exitMembers := exitsOf[cRef]
+		newExitHead := gamedb.Nothing
+		if len(exitMembers) > 0 {
+			newExitHead = exitMembers[0]
+		}
+		if cObj.Exits != newExitHead {
+			cObj.Exits = newExitHead
+			changed = true
+		}
+		for i, ref := range exitMembers {
+			obj := g.DB.Objects[ref]
+			newNext := gamedb.Nothing
+			if i < len(exitMembers)-1 {
+				newNext = exitMembers[i+1]
 			}
+			if obj.Next != newNext {
+				obj.Next = newNext
+				modified[ref] = true
+			}
+		}
+
+		if changed {
+			modified[cRef] = true
+			containersFixed++
 		}
 	}
 
-	if selfRefFixed > 0 || orphansFixed > 0 {
-		log.Printf("[REPAIR] Fixed %d self-references, %d orphaned objects", selfRefFixed, orphansFixed)
+	// Persist all changed objects
+	if len(modified) > 0 {
 		var batch []*gamedb.Object
 		for ref := range modified {
 			if obj, ok := g.DB.Objects[ref]; ok {
 				batch = append(batch, obj)
 			}
 		}
-		if len(batch) > 0 {
-			g.PersistObjects(batch...)
-		}
+		g.PersistObjects(batch...)
+		log.Printf("[REPAIR] Rebuilt chains: %d containers touched, %d objects updated",
+			containersFixed, len(modified))
 	}
+
+	return containersFixed, len(modified)
 }
 
 // Teleport moves victim to destination, updating contents chains and persisting.

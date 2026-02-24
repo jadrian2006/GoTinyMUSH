@@ -133,13 +133,19 @@ func (g *Game) ApplyAliasConfig(ac *AliasConfig) {
 			origHandler := cmd.Handler
 			sw := prependSwitches // capture for closure
 			g.Commands[alias] = &Command{
-				Name: cmd.Name,
+				Name:    cmd.Name,
 				Handler: func(g *Game, d *Descriptor, args string, switches []string) {
 					origHandler(g, d, args, append(sw, switches...))
 				},
+				IsAlias: true,
 			}
 		} else {
-			g.Commands[alias] = cmd
+			g.Commands[alias] = &Command{
+				Name:    cmd.Name,
+				Handler: cmd.Handler,
+				NoGuest: cmd.NoGuest,
+				IsAlias: true,
+			}
 		}
 		cmdCount++
 	}

@@ -408,8 +408,8 @@ func main() {
 		}
 	}
 
-	// Repair any corrupted content chains before startup
-	srv.Game.RepairContentChains()
+	// Rebuild all content/exit chains from authoritative Location data
+	srv.Game.RepairAllChains()
 
 	// Run @startup actions
 	srv.Game.RunStartup()

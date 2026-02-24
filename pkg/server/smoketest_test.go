@@ -369,15 +369,15 @@ func TestContentChainCycleDetection(t *testing.T) {
 	}
 }
 
-func TestRepairContentChains_SelfRef(t *testing.T) {
+func TestRepairAllChains_SelfRef(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Corrupt: self-referencing Next
 	env.game.DB.Objects[2].Next = 2
-	env.game.RepairContentChains()
+	env.game.RepairAllChains()
 
 	if env.game.DB.Objects[2].Next == 2 {
-		t.Error("RepairContentChains did not fix self-referencing Next pointer")
+		t.Error("RepairAllChains did not fix self-referencing Next pointer")
 	}
 }
 
