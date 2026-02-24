@@ -111,6 +111,38 @@ func (g *Game) RepairAllChains() (int, int) {
 		}
 	}
 
+	// Track all modified objects across all phases
+	modified := make(map[gamedb.DBRef]bool)
+
+	// --- Phase 1b: Migrate exit source fields from existing chains ---
+	// FLAT-imported exits may not have Exits set to their source room.
+	// Walk each room/thing's existing exit chain to discover which exits
+	// belong to which container, then stamp exitObj.Exits = source.
+	for ref, obj := range g.DB.Objects {
+		if obj.IsGoing() || obj.Exits == gamedb.Nothing {
+			continue
+		}
+		// Only rooms and things can own exit chains
+		if obj.ObjType() == gamedb.TypeExit {
+			continue
+		}
+		// Walk this container's exit chain
+		cur := obj.Exits
+		seen := make(map[gamedb.DBRef]bool)
+		for cur != gamedb.Nothing && !seen[cur] {
+			seen[cur] = true
+			exitObj, ok := g.DB.Objects[cur]
+			if !ok {
+				break
+			}
+			if exitObj.ObjType() == gamedb.TypeExit && exitObj.Exits != ref {
+				exitObj.Exits = ref
+				modified[cur] = true
+			}
+			cur = exitObj.Next
+		}
+	}
+
 	// --- Phase 2: Rebuild Exits chains from exit source field ---
 	// exitsOf[source] = ordered list of exit dbrefs whose Exits == source
 	exitsOf := make(map[gamedb.DBRef][]gamedb.DBRef)
@@ -124,7 +156,6 @@ func (g *Game) RepairAllChains() (int, int) {
 	}
 
 	// --- Phase 3: Apply rebuilt chains and detect changes ---
-	modified := make(map[gamedb.DBRef]bool)
 	containersFixed := 0
 
 	// All containers that might have contents or exits
