@@ -392,12 +392,12 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	}
 
-	// 2. Prefix matching for @-commands
+	// 2. Prefix matching for @-commands (skip aliases — they are exact-match only)
 	if len(lower) > 1 && lower[0] == '@' {
 		var matchedCmd *Command
 		matchCount := 0
 		for name, cmd := range g.Commands {
-			if strings.HasPrefix(name, lower) {
+			if !cmd.IsAlias && strings.HasPrefix(name, lower) {
 				matchedCmd = cmd
 				matchCount++
 			}

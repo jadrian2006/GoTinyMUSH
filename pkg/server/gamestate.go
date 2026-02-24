@@ -166,8 +166,13 @@ func (g *Game) RepairAllChains() (int, int) {
 	for src := range exitsOf {
 		containers[src] = true
 	}
-	// Also include any container whose existing chain is non-empty
+	// Also include any non-exit container whose existing chain is non-empty.
+	// Exit objects use Exits to store their source room, NOT a chain head,
+	// so they must never be treated as containers here.
 	for _, obj := range g.DB.Objects {
+		if obj.ObjType() == gamedb.TypeExit {
+			continue
+		}
 		if obj.Contents != gamedb.Nothing || obj.Exits != gamedb.Nothing {
 			containers[obj.DBRef] = true
 		}
@@ -175,7 +180,7 @@ func (g *Game) RepairAllChains() (int, int) {
 
 	for cRef := range containers {
 		cObj, ok := g.DB.Objects[cRef]
-		if !ok {
+		if !ok || cObj.ObjType() == gamedb.TypeExit {
 			continue
 		}
 		changed := false
