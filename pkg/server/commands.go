@@ -429,14 +429,16 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// 4. Exit matching — exits take priority over abbreviation aliases
-	if tryMoveByExit(g, d, input) {
+	// 4. Abbreviation aliases from goTinyAlias.conf (e.g., "i" → "inventory")
+	// These must come before exit matching so built-in abbreviations like
+	// "i", "l", "n", "s" are not intercepted by exits with matching names.
+	if cmd, ok := g.Commands[lower]; ok && cmd.IsAlias {
+		execCmd(cmd)
 		return
 	}
 
-	// 5. Abbreviation aliases from goTinyAlias.conf (e.g., "sa" → "say")
-	if cmd, ok := g.Commands[lower]; ok && cmd.IsAlias {
-		execCmd(cmd)
+	// 5. Exit matching
+	if tryMoveByExit(g, d, input) {
 		return
 	}
 
@@ -671,7 +673,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	args = evalExpr(g, d.Player, args)
-	loc := g.PlayerLocation(d.Player)
+	loc := g.RoomOf(d.Player)
 	g.EmitEventToRoom(loc, "EMIT", events.Event{
 		Type:   events.EvEmit,
 		Source: d.Player,
@@ -1434,6 +1436,31 @@ func (g *Game) PlayerLocation(player gamedb.DBRef) gamedb.DBRef {
 		return obj.Location
 	}
 	return gamedb.Nothing
+}
+
+// RoomOf walks the location chain from an object up to the enclosing room.
+// This matches C TinyMUSH's where_room() / Location() behavior for @emit
+// from carried objects: a cutter in a player's inventory emits to the room
+// the player is in, not to the player's contents list.
+func (g *Game) RoomOf(ref gamedb.DBRef) gamedb.DBRef {
+	seen := make(map[gamedb.DBRef]bool)
+	for {
+		obj, ok := g.DB.Objects[ref]
+		if !ok {
+			return gamedb.Nothing
+		}
+		if obj.ObjType() == gamedb.TypeRoom {
+			return ref
+		}
+		if seen[ref] {
+			return gamedb.Nothing // cycle protection
+		}
+		seen[ref] = true
+		ref = obj.Location
+		if ref == gamedb.Nothing {
+			return gamedb.Nothing
+		}
+	}
 }
 
 // MovePlayer moves a player to a new location.

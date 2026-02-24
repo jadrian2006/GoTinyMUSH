@@ -882,7 +882,7 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 			}
 		}
 	case "@emit":
-		loc := g.PlayerLocation(player)
+		loc := g.RoomOf(player)
 		if loc != gamedb.Nothing {
 			g.SendMarkedToRoom(loc, "EMIT", stripAllBraces(args))
 		}
@@ -892,8 +892,9 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 			message := stripAllBraces(stripEqSep(args[eqIdx+1:]))
 			target := g.ResolveRef(player, targetStr)
 			if target != gamedb.Nothing {
-				if tObj, ok := g.DB.Objects[target]; ok {
-					g.SendMarkedToRoomExcept(tObj.Location, target, "EMIT", message)
+				room := g.RoomOf(target)
+				if room != gamedb.Nothing {
+					g.SendMarkedToRoomExcept(room, target, "EMIT", message)
 				}
 			}
 		}
