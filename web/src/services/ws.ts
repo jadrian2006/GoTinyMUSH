@@ -11,6 +11,7 @@ export class WebSocketManager {
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
   private closed = false;
+  private _onReconnecting: ((delaySec: number) => void) | null = null;
 
   constructor(url: string, token: string | null = null) {
     this.url = url;
@@ -22,6 +23,10 @@ export class WebSocketManager {
     return () => {
       this.handlers = this.handlers.filter((h) => h !== handler);
     };
+  }
+
+  onReconnecting(cb: (delaySec: number) => void) {
+    this._onReconnecting = cb;
   }
 
   connect() {
@@ -90,9 +95,11 @@ export class WebSocketManager {
   }
 
   private scheduleReconnect() {
+    const delay = this.reconnectDelay;
+    this._onReconnecting?.(Math.round(delay / 1000));
     this.reconnectTimer = setTimeout(() => {
       this.connect();
-    }, this.reconnectDelay);
+    }, delay);
     this.reconnectDelay = Math.min(
       this.reconnectDelay * 2,
       this.maxReconnectDelay,

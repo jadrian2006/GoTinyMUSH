@@ -12,6 +12,7 @@ import {
   connected,
   token,
   playerName,
+  reconnectingIn,
 } from "./stores/gameStore";
 import { sidebarOpen } from "./stores/prefsStore";
 
@@ -62,7 +63,11 @@ export function App() {
             class={`w-2 h-2 rounded-full ${connected.value ? "bg-green-400" : "bg-red-400"}`}
           />
           <span class="text-mush-dim">
-            {connected.value ? "Connected" : "Disconnected"}
+            {connected.value
+              ? "Connected"
+              : reconnectingIn.value != null
+                ? `Reconnecting in ${reconnectingIn.value}s...`
+                : "Disconnected"}
           </span>
         </div>
         <div class="flex items-center gap-3">

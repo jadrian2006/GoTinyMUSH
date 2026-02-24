@@ -7,6 +7,8 @@ import {
   setAuth,
   token,
   whoList,
+  loginScrollTrigger,
+  reconnectingIn,
 } from "../stores/gameStore";
 
 export function useWebSocket() {
@@ -21,10 +23,16 @@ export function useWebSocket() {
     const wsUrl = `${protocol}//${location.host}/ws`;
     const ws = new WebSocketManager(wsUrl, authToken);
 
+    ws.onReconnecting((delaySec) => {
+      reconnectingIn.value = delaySec;
+    });
+
     ws.onMessage((msg: WSMessage) => {
       switch (msg.type) {
         case "connected":
           connected.value = true;
+          reconnectingIn.value = null;
+          loginScrollTrigger.value++;
           addOutput("--- Connected ---", "system");
           break;
         case "disconnected":
@@ -40,6 +48,7 @@ export function useWebSocket() {
             const ref = msg.data.player_ref as number;
             const t = token.value;
             if (t) setAuth(t, name, ref);
+            loginScrollTrigger.value++;
             addOutput(`Logged in as ${name}`, "system");
           }
           break;
@@ -77,6 +86,7 @@ export function useWebSocket() {
     wsRef.current?.disconnect();
     wsRef.current = null;
     connected.value = false;
+    reconnectingIn.value = null;
   }, []);
 
   useEffect(() => {

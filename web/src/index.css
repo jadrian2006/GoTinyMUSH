@@ -315,3 +315,64 @@
   font-family: 'Courier New', monospace;
   line-height: 1.5;
 }
+
+/* Pause button active state */
+.pane-btn-pause-active {
+  color: theme("colors.mush.accent");
+  background: rgba(232, 65, 65, 0.15);
+}
+
+.pane-pause-badge {
+  font-size: 9px;
+  color: theme("colors.mush.accent");
+  margin-left: 2px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Split scroll */
+.pane-split-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane-split-divider {
+  height: 6px;
+  flex-shrink: 0;
+  background: theme("colors.mush.panel");
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.pane-split-divider:hover {
+  background: rgba(232, 65, 65, 0.3);
+}
+
+.pane-split-divider-btn {
+  position: absolute;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: theme("colors.mush.dim");
+  background: theme("colors.mush.surface");
+  border: 1px solid theme("colors.mush.panel");
+  cursor: pointer;
+  padding: 0;
+}
+
+.pane-split-divider-btn:hover {
+  color: #f87171;
+  border-color: #f87171;
+}

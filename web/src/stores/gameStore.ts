@@ -22,6 +22,9 @@ export const historyIndex = signal(-1);
 export const whoList = signal<WhoEntry[]>([]);
 export const channels = signal<ChannelInfo[]>([]);
 
+export const loginScrollTrigger = signal(0);
+export const reconnectingIn = signal<number | null>(null);
+
 export const isLoggedIn = computed(() => token.value !== null);
 
 export function addOutput(text: string, type = "text", channel?: string) {
