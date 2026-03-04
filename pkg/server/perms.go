@@ -244,7 +244,21 @@ func Controls(g *Game, player, target gamedb.DBRef) bool {
 	}
 
 	// Zone-based control
-	return CheckZone(g, player, target, 0)
+	if CheckZone(g, player, target, 0) {
+		return true
+	}
+
+	// Recursive owner check: In C TinyMUSH, when an object (not a player)
+	// doesn't directly control the target, check if the object's owner would.
+	// This allows objects owned by wizards/God to set attributes on other
+	// players' objects (e.g., Money Manager owned by God setting credit_balance
+	// on players via $-commands).
+	ownerOfPlayer := ResolveOwner(g, player)
+	if ownerOfPlayer != player {
+		return Controls(g, ownerOfPlayer, target)
+	}
+
+	return false
 }
 
 // SeesHiddenAttrs returns true if player can see AF_MDARK attributes.
@@ -303,8 +317,11 @@ func CanReadAttr(g *Game, player, target gamedb.DBRef, attrDef *gamedb.AttrDef, 
 		return true
 	}
 
-	// Must be examinable OR player owns the attr
-	if !Examinable(g, player, target) && attrOwner != player {
+	// Must be examinable OR player's owner matches attr owner.
+	// C TinyMUSH's See_attr: (Examinable(p,x) || (Owner(p) == o))
+	// Uses Owner(player) — the resolved player-owner — not the raw dbref,
+	// so objects (THINGs) can read attrs set by their owner's other objects.
+	if !Examinable(g, player, target) && ResolveOwner(g, player) != attrOwner {
 		return false
 	}
 
@@ -424,12 +441,13 @@ func StripPrivFlags(g *Game, obj gamedb.DBRef) {
 	g.PersistObject(o)
 }
 
-// PassLocks returns true if player has the POW_PASS_LOCKS power or is a wizard.
-// Matches C TinyMUSH: #define Pass_Locks(x) (Wizard(x) || has_power(Pass_Locks))
+// PassLocks returns true if player has the POW_PASS_LOCKS power.
+// Unlike C TinyMUSH (which includes Wizard(x)), we require the explicit
+// pass_locks power so wizards don't silently bypass all locks.
 func PassLocks(g *Game, player gamedb.DBRef) bool {
 	o, ok := g.DB.Objects[player]
 	if !ok {
 		return false
 	}
-	return o.HasFlag(gamedb.FlagWizard) || o.HasPower(0, gamedb.PowPassLocks)
+	return o.HasPower(0, gamedb.PowPassLocks)
 }

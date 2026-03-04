@@ -136,7 +136,7 @@ func fnSet(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 		if !ctx.GameState.Controls(ctx.Player, ref) {
 			return
 		}
-		ctx.GameState.SetAttrByName(ref, attrName, second)
+		ctx.GameState.SetAttrByName(ref, attrName, second, ctx.Player)
 		return
 	}
 

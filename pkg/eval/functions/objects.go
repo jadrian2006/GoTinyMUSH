@@ -162,6 +162,13 @@ func isAlnum(c byte) bool {
 // searchContentChain searches a linked list of objects for name/alias/prefix matches.
 // Returns the best match (exact wins over prefix, first prefix wins).
 func searchContentChain(db *gamedb.Database, first gamedb.DBRef, name string) gamedb.DBRef {
+	ref, _ := searchContentChainQuality(db, first, name)
+	return ref
+}
+
+// searchContentChainQuality searches a linked list and returns (match, quality).
+// quality: 2 = exact alias match, 1 = prefix/word match, 0 = no match.
+func searchContentChainQuality(db *gamedb.Database, first gamedb.DBRef, name string) (gamedb.DBRef, int) {
 	var prefixMatch gamedb.DBRef = gamedb.Nothing
 	seen := make(map[gamedb.DBRef]bool)
 	next := first
@@ -173,7 +180,7 @@ func searchContentChain(db *gamedb.Database, first gamedb.DBRef, name string) ga
 		}
 		switch matchNameAlias(obj.Name, name) {
 		case 2:
-			return next // exact match wins immediately
+			return next, 2 // exact match wins immediately
 		case 1:
 			if prefixMatch == gamedb.Nothing {
 				prefixMatch = next
@@ -181,7 +188,10 @@ func searchContentChain(db *gamedb.Database, first gamedb.DBRef, name string) ga
 		}
 		next = obj.Next
 	}
-	return prefixMatch
+	if prefixMatch != gamedb.Nothing {
+		return prefixMatch, 1
+	}
+	return gamedb.Nothing, 0
 }
 
 func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
@@ -200,12 +210,11 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 		n, err := strconv.Atoi(s[1:])
 		if err == nil { return gamedb.DBRef(n) }
 	}
-	// Try matching by player name (for *name syntax or bare name fallback).
-	// Player names may have semicolon-separated aliases: "Name;alias1;alias2"
+	// C TinyMUSH: player lookup only when name starts with * (LOOKUP_TOKEN).
+	// Bare names resolve via contents/exits/inventory, not global player scan.
 	if strings.HasPrefix(s, "*") {
 		s = s[1:]
 		// After stripping *, re-check for dbref (e.g. *#11587 → #11587).
-		// The * prefix means "player lookup", so only return if it's a player.
 		if strings.HasPrefix(s, "#") {
 			n, err := strconv.Atoi(s[1:])
 			if err == nil {
@@ -216,39 +225,61 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 				return gamedb.Nothing
 			}
 		}
-	}
-	for _, obj := range ctx.DB.Objects {
-		if obj.ObjType() != gamedb.TypePlayer {
-			continue
-		}
-		// Check each alias in the semicolon-separated name
-		for _, alias := range strings.Split(obj.Name, ";") {
-			if strings.EqualFold(strings.TrimSpace(alias), s) {
-				return obj.DBRef
+		for _, obj := range ctx.DB.Objects {
+			if obj.ObjType() != gamedb.TypePlayer {
+				continue
+			}
+			// Check each alias in the semicolon-separated name
+			for _, alias := range strings.Split(obj.Name, ";") {
+				if strings.EqualFold(strings.TrimSpace(alias), s) {
+					return obj.DBRef
+				}
+			}
+			// Check A_ALIAS attribute (58)
+			for _, attr := range obj.Attrs {
+				if attr.Number == 58 {
+					aliasStr := eval.StripAttrPrefix(attr.Value)
+					if aliasStr != "" {
+						for _, a := range strings.Split(aliasStr, ";") {
+							if strings.EqualFold(strings.TrimSpace(a), s) {
+								return obj.DBRef
+							}
+						}
+					}
+					break
+				}
 			}
 		}
+		return gamedb.Nothing
 	}
-	// Try matching in current location (room contents, inventory, exits)
+	// Try matching in current location (room contents, inventory, exits).
+	// C TinyMUSH match_result: exact alias matches win over prefix/word
+	// matches regardless of which scope they came from. Search all scopes,
+	// track the best (highest quality) match, return exact over prefix.
 	if ctx.Player != gamedb.Nothing {
 		if pObj, ok := ctx.DB.Objects[ctx.Player]; ok {
-			// Search room contents
+			bestRef := gamedb.Nothing
+			bestQuality := 0
+
+			// Helper to update best match
+			consider := func(first gamedb.DBRef) {
+				ref, q := searchContentChainQuality(ctx.DB, first, s)
+				if q > bestQuality {
+					bestRef = ref
+					bestQuality = q
+				}
+			}
+
 			loc := pObj.Location
 			if locObj, ok := ctx.DB.Objects[loc]; ok {
-				if found := searchContentChain(ctx.DB, locObj.Contents, s); found != gamedb.Nothing {
-					return found
-				}
-				// Search exits
-				if found := searchContentChain(ctx.DB, locObj.Exits, s); found != gamedb.Nothing {
-					return found
-				}
+				consider(locObj.Contents) // room contents
+				consider(locObj.Exits)    // room exits
 			}
-			// Search inventory
-			if found := searchContentChain(ctx.DB, pObj.Contents, s); found != gamedb.Nothing {
-				return found
-			}
-			// Search own exits (for when ctx.Player is a room executing a $-command)
-			if found := searchContentChain(ctx.DB, pObj.Exits, s); found != gamedb.Nothing {
-				return found
+			consider(pObj.Contents) // inventory
+			consider(pObj.Exits)    // own exits (for rooms executing $-commands)
+
+			if bestRef != gamedb.Nothing {
+				return bestRef
 			}
 		}
 	}
@@ -352,9 +383,9 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if f1&gamedb.FlagDestroyOK != 0 { buf.WriteByte('d') }
 	if f1&gamedb.FlagEnterOK != 0 { buf.WriteByte('e') }
 	if f2&gamedb.Flag2Fixed != 0 { buf.WriteByte('f') }
+	if f2&gamedb.Flag2Uninspected != 0 { buf.WriteByte('g') }
 	if f1&gamedb.FlagHalt != 0 { buf.WriteByte('h') }
 	if f1&gamedb.FlagImmortal != 0 { buf.WriteByte('i') }
-	if f2&gamedb.Flag2OOB != 0 { buf.WriteByte('g') }
 	if f2&gamedb.Flag2Gagged != 0 { buf.WriteByte('j') }
 	if f2&gamedb.Flag2Light != 0 { buf.WriteByte('l') }
 	if f1&gamedb.FlagMyopic != 0 { buf.WriteByte('m') }
@@ -364,6 +395,7 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if f1&gamedb.FlagRobot != 0 { buf.WriteByte('r') }
 	if f1&gamedb.FlagSafe != 0 { buf.WriteByte('s') }
 	if f1&gamedb.FlagSeeThru != 0 { buf.WriteByte('t') }
+	if f2&gamedb.Flag2Suspect != 0 { buf.WriteByte('u') }
 	if f1&gamedb.FlagVerbose != 0 { buf.WriteByte('v') }
 	if f2&gamedb.Flag2Staff != 0 { buf.WriteByte('w') }
 	if f2&gamedb.Flag2Slave != 0 { buf.WriteByte('x') }
@@ -373,11 +405,10 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if f2&gamedb.Flag2HasCommands != 0 { buf.WriteByte('$') }
 	if f2&gamedb.Flag2NoBLeed != 0 { buf.WriteByte('-') }
 	if f2&gamedb.Flag2Watcher != 0 { buf.WriteByte('+') }
-	if f2&gamedb.Flag2HasDaily != 0 { buf.WriteByte('*') }
-	if f1&gamedb.FlagHasStartup != 0 { buf.WriteByte('=') }
-	if f2&gamedb.Flag2HasFwd != 0 { buf.WriteByte('&') }
-	if f2&gamedb.Flag2HasListen != 0 { buf.WriteByte('@') }
+	// Internal flags (=, *, &, @) are suppressed by C's flags() — skip them
 	if f2&gamedb.Flag2HTML != 0 { buf.WriteByte('~') }
+	if f2&gamedb.Flag2HeadFlag != 0 { buf.WriteByte('?') }
+	if f2&gamedb.Flag2Vacation != 0 { buf.WriteByte('|') }
 }
 
 // knownFlags maps flag names to [word, bitmask]. Word -1 means type check.
@@ -400,8 +431,14 @@ var knownFlags = map[string][2]int{
 	"PARENT_OK": {1, gamedb.Flag2ParentOK}, "LIGHT": {1, gamedb.Flag2Light},
 	"CONTROL_OK": {1, gamedb.Flag2ControlOK}, "SLAVE": {1, gamedb.Flag2Slave},
 	"BOUNCE": {1, gamedb.Flag2Bounce}, "STOP": {1, gamedb.Flag2StopMatch},
-	"NO_BLEED": {1, gamedb.Flag2NoBLeed}, "GAGGED": {1, gamedb.Flag2Gagged},
-	"FIXED": {1, gamedb.Flag2Fixed}, "OOB": {1, gamedb.Flag2OOB},
+	"NO_BLEED": {1, gamedb.Flag2NoBLeed}, "NOBLEED": {1, gamedb.Flag2NoBLeed},
+	"GAGGED": {1, gamedb.Flag2Gagged}, "FIXED": {1, gamedb.Flag2Fixed},
+	"OOB": {1, gamedb.Flag2OOB}, "AUDITORIUM": {1, gamedb.Flag2Auditorium},
+	"BLIND": {1, gamedb.Flag2Blind}, "HTML": {1, gamedb.Flag2HTML},
+	"STAFF": {1, gamedb.Flag2Staff}, "WATCHER": {1, gamedb.Flag2Watcher},
+	"SUSPECT": {1, gamedb.Flag2Suspect}, "HEAD": {1, gamedb.Flag2HeadFlag},
+	"UNINSPECTED": {1, gamedb.Flag2Uninspected},
+	"VACATION": {1, gamedb.Flag2Vacation}, "ZONE_PARENT": {1, gamedb.Flag2ZoneParent},
 	"HEAR_THROUGH": {0, gamedb.FlagHearThru}, "AUDIBLE": {0, gamedb.FlagHearThru},
 	"SEE_THROUGH": {0, gamedb.FlagSeeThru}, "TRANSPARENT": {0, gamedb.FlagSeeThru},
 	"HAS_STARTUP": {0, gamedb.FlagHasStartup},
@@ -493,18 +530,16 @@ func fnV(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	if len(args) < 1 { return }
 	s := strings.TrimSpace(args[0])
 	if len(s) == 1 {
-		ch := strings.ToUpper(s)[0]
-		if ch >= 'A' && ch <= 'Z' {
-			// v(a) → VA, v(b) → VB, etc. — walk parents
-			attrName := "V" + string(ch)
-			text := getAttrByName(ctx, ctx.Player, attrName)
-			buf.WriteString(text)
-			return
-		}
+		// Single-char arg: v(x) is equivalent to %x.
+		// Production C TinyMUSH: v(a) → %a (pronoun), v(#) → %# (enactor dbref),
+		// v(0) → %0 (stack arg). Confirmed on crystalmush.kydance.net.
+		result := ctx.Exec("%" + s, eval.EvEval, nil)
+		buf.WriteString(result)
+		return
 	}
-	// Generic attribute get with parent walk
+	// Multi-char: v(foo) → get(%!/FOO), attribute lookup with parent walk.
 	attrName := strings.ToUpper(s)
-	text := getAttrByName(ctx, ctx.Player, attrName)
+	text := ctx.GetAttrRaw(ctx.Player, attrName)
 	buf.WriteString(text)
 }
 

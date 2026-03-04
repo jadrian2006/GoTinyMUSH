@@ -1484,3 +1484,643 @@ func TestToTelnetCRLF_LeadingNewline(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Regression: *player lookup checks A_ALIAS (attr 58), semicolon-separated
+// Bug: *Dre would fail to find player "Dreu" who had A_ALIAS="Dre;DreAlt"
+// C TinyMUSH: load_player_names() in player.c loads semicolon-separated aliases
+// ============================================================================
+
+func TestPlayerAliasLookup_MatchObject(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set A_ALIAS (58) on Bob (#3) with semicolon-separated aliases
+	env.game.SetAttr(3, 58, "Bobby;Robert;Rob")
+
+	// *Bob should still match by name
+	ref := env.game.MatchObject(1, "*Bob")
+	if ref != 3 {
+		t.Errorf("*Bob: expected #3, got #%d", ref)
+	}
+
+	// *Bobby should match via A_ALIAS
+	ref = env.game.MatchObject(1, "*Bobby")
+	if ref != 3 {
+		t.Errorf("*Bobby: expected #3 via A_ALIAS, got #%d", ref)
+	}
+
+	// *Robert should match second alias
+	ref = env.game.MatchObject(1, "*Robert")
+	if ref != 3 {
+		t.Errorf("*Robert: expected #3 via A_ALIAS, got #%d", ref)
+	}
+
+	// *Rob should match third alias
+	ref = env.game.MatchObject(1, "*Rob")
+	if ref != 3 {
+		t.Errorf("*Rob: expected #3 via A_ALIAS, got #%d", ref)
+	}
+
+	// *Nobody should NOT match
+	ref = env.game.MatchObject(1, "*Nobody")
+	if ref != gamedb.Nothing {
+		t.Errorf("*Nobody: expected Nothing, got #%d", ref)
+	}
+}
+
+func TestPlayerAliasLookup_Pmatch(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set A_ALIAS (58) on Bob (#3) with semicolon-separated aliases
+	env.game.SetAttr(3, 58, "Bobby;Robert")
+
+	clearOutput(env.player)
+
+	// pmatch(*Bobby) should find #3 via GameState.LookupPlayer
+	DispatchCommand(env.game, env.player, "think [pmatch(*Bobby)]")
+	out := getOutput(env.player)
+	if !strings.Contains(out, "#3") {
+		t.Errorf("pmatch(*Bobby): expected #3, got: %s", out)
+	}
+
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "think [pmatch(*Robert)]")
+	out = getOutput(env.player)
+	if !strings.Contains(out, "#3") {
+		t.Errorf("pmatch(*Robert): expected #3, got: %s", out)
+	}
+
+	// Bare name (no *) should also work
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "think [pmatch(Bobby)]")
+	out = getOutput(env.player)
+	if !strings.Contains(out, "#3") {
+		t.Errorf("pmatch(Bobby): expected #3, got: %s", out)
+	}
+}
+
+// ============================================================================
+// Regression: @tel triggers OTPORT/OXTPORT/ATPORT/OMOVE/AMOVE attributes
+// Bug: @tel only sent "has left"/"has arrived" text, not teleport attributes
+// C TinyMUSH: move_via_teleport() fires OXTPORT→LEAVE→move→TPORT/OTPORT/ATPORT→MOVE/OMOVE/AMOVE
+// ============================================================================
+
+func TestTeleport_TriggersAttributes(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set OTPORT (80) on Wizard - seen by others in destination room
+	env.game.SetAttr(1, 80, "arrives with a whoosh.")
+
+	// Set TPORT (79) on Wizard - seen by teleported player
+	env.game.SetAttr(1, 79, "You feel a rush of wind.")
+
+	// Set OXTPORT (81) on Wizard - seen by others in source room
+	env.game.SetAttr(1, 81, "vanishes in a puff of smoke.")
+
+	// Create a second player in OtherRoom (#4) to see messages there
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+
+	// Move Bob to OtherRoom
+	env.game.DB.Objects[3].Location = 4
+	env.game.RemoveFromContents(0, 3)
+	env.game.AddToContents(4, 3)
+	env.game.DB.Objects[4].Contents = 3
+
+	clearOutput(env.player)
+	clearOutput(bobDesc)
+
+	// Teleport Wizard to OtherRoom
+	DispatchCommand(env.game, env.player, "@tel me=#4")
+
+	wizOut := getOutput(env.player)
+	bobOut := getOutput(bobDesc)
+
+	// Wizard should see TPORT message
+	if !strings.Contains(wizOut, "You feel a rush of wind.") {
+		t.Errorf("@tel TPORT: wizard should see 'You feel a rush of wind.', got:\n%s", wizOut)
+	}
+
+	// Bob (in destination room) should see OTPORT prefixed with name
+	if !strings.Contains(bobOut, "Wizard arrives with a whoosh.") {
+		t.Errorf("@tel OTPORT: Bob should see 'Wizard arrives with a whoosh.', got:\n%s", bobOut)
+	}
+}
+
+// ============================================================================
+// Regression: DidIt O-messages prefixed with cause's name
+// Bug: O-messages were sent without the cause's name, e.g. "arrives." instead
+//      of "Wizard arrives."
+// C TinyMUSH: did_it() prefixes O-messages with Name(player)
+// ============================================================================
+
+func TestDidIt_OMessageNamePrefix(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a second player to observe
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+
+	// Set OSUCC (attr 1) on TestObject #2
+	env.game.SetAttr(2, 1, "picks up the shiny object.")
+
+	// Fire DidIt with cause=Wizard(#1), thing=TestObject(#2)
+	env.game.DidIt(1, 2, 0, 1, 0) // only O-message
+
+	bobOut := getOutput(bobDesc)
+	if !strings.Contains(bobOut, "Wizard picks up the shiny object.") {
+		t.Errorf("DidIt O-message: expected 'Wizard picks up the shiny object.', got:\n%s", bobOut)
+	}
+}
+
+// ============================================================================
+// Regression: BoolEval lock falls back from 'from' to 'thing'
+// Bug: BoolEval only checked 'from' object for the attribute. If the eval lock
+//      was on the exit itself (thing), it wouldn't find the attribute.
+// C TinyMUSH: boolexp.c eval_boolexp() BOOLEXP_EVAL case tries 'from' first,
+//             falls back to 'thing' (lines 302-310)
+// ============================================================================
+
+func TestBoolEval_FallbackToThing(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create an exit #6 with an eval lock that checks attr WEATHER on itself
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Gateway;gate",
+		Location: 4, // destination = OtherRoom
+		Contents: gamedb.Nothing,
+		Exits:    0, // source = Room Zero
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeExit), 0, 0},
+	}
+	env.game.NextRef = 7
+
+	// Add exit to Room Zero's exits chain
+	env.game.DB.Objects[0].Exits = 6
+
+	// Define custom attr WEATHER (attr 400) on the exit itself
+	env.game.DB.AddAttrDef(400, "WEATHER", 0)
+	env.game.SetAttr(6, 400, "1")
+
+	// Create a BoolEval lock: evaluate attr 400 on thing, match against "1"
+	lock := &gamedb.BoolExp{
+		Type:   gamedb.BoolEval,
+		Thing:  400, // attr number to evaluate
+		StrVal: "1", // expected result
+	}
+
+	// Test with from=Nothing (so it must fall back to thing=exit #6)
+	result := EvalBoolExp(env.game, 1, 6, gamedb.Nothing, lock, 0)
+	if !result {
+		t.Errorf("BoolEval fallback: expected true when attr is on thing (#6), got false")
+	}
+
+	// Change the attr value so it doesn't match
+	env.game.SetAttr(6, 400, "0")
+	result = EvalBoolExp(env.game, 1, 6, gamedb.Nothing, lock, 0)
+	if result {
+		t.Errorf("BoolEval fallback: expected false when attr value is '0', got true")
+	}
+}
+
+func TestBoolEval_PrefersFrom(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Attr 400 = "WEATHER"
+	env.game.DB.AddAttrDef(400, "WEATHER", 0)
+
+	// Set attr on both from (#2) and thing (#5)
+	env.game.SetAttr(2, 400, "good") // from
+	env.game.SetAttr(5, 400, "bad")  // thing
+
+	lock := &gamedb.BoolExp{
+		Type:   gamedb.BoolEval,
+		Thing:  400,
+		StrVal: "good",
+	}
+
+	// Should match 'from' (#2) first, not fall back to thing (#5)
+	result := EvalBoolExp(env.game, 1, 5, 2, lock, 0)
+	if !result {
+		t.Errorf("BoolEval prefers from: expected true (from has 'good'), got false")
+	}
+
+	// Now check that thing's "bad" doesn't interfere
+	lock.StrVal = "bad"
+	result = EvalBoolExp(env.game, 1, 5, 2, lock, 0)
+	if result {
+		t.Errorf("BoolEval prefers from: expected false (from has 'good', not 'bad'), got true")
+	}
+}
+
+// ============================================================================
+// Regression: Alias.conf commands have priority over exits
+// Bug: typing "l" matched exit "Lifts;lift;lif;li" prefix instead of the
+//      "l" -> "look" alias from goTinyAlias.conf
+// C TinyMUSH: cf_alias adds aliases to the same command hash table as built-in
+//             commands, so they are checked before exits
+// ============================================================================
+
+func TestAliasConf_PriorityOverExits(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set room description for look output verification
+	env.game.SetAttr(0, 6, "A plain test room.")
+
+	// Create an exit named "Lifts;lift;lif;li" in Room Zero
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Lifts;lift;lif;li",
+		Location: 4, // destination = OtherRoom
+		Contents: gamedb.Nothing,
+		Exits:    0, // source = Room Zero
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeExit), 0, 0},
+	}
+	env.game.DB.Objects[0].Exits = 6
+	env.game.NextRef = 7
+
+	// Register "l" as alias for look (simulating goTinyAlias.conf)
+	lookCmd := env.game.Commands["look"]
+	if lookCmd == nil {
+		t.Fatal("look command not found in Commands map")
+	}
+	env.game.Commands["l"] = &Command{
+		Name:    lookCmd.Name,
+		Handler: lookCmd.Handler,
+		IsAlias: true,
+	}
+
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "l")
+	out := getOutput(env.player)
+
+	// "l" should trigger look (show room name), NOT take exit
+	if !strings.Contains(out, "Room Zero") {
+		t.Errorf("'l' alias: expected look (Room Zero), but got:\n%s", out)
+	}
+
+	// Player should still be in Room Zero, not teleported to OtherRoom
+	playerObj := env.game.DB.Objects[1]
+	if playerObj.Location != 0 {
+		t.Errorf("'l' alias: player moved to #%d, should still be in Room Zero (#0)", playerObj.Location)
+	}
+}
+
+// ============================================================================
+// Regression: @emit triggers AUDIBLE inward relay
+// Bug: @emit in a room didn't relay messages into AUDIBLE containers in that
+//      room, so players inside repair bays (AUDIBLE things) couldn't see
+//      @emit messages from the room's $commands.
+// C TinyMUSH: speech.c do_say SAY_EMIT uses notify_all_from_inside_speech
+//             with MSG_F_CONTENTS flag to relay into AUDIBLE containers
+// ============================================================================
+
+func TestEmit_AudibleInwardRelay(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Make Container (#5) AUDIBLE (FlagHearThru)
+	env.game.DB.Objects[5].Flags[0] |= gamedb.FlagHearThru
+
+	// Set LISTEN (attr 26) on Container to match everything
+	env.game.SetAttr(5, 26, "*")
+
+	// Move Bob (#3) inside Container (#5)
+	env.game.RemoveFromContents(0, 3)
+	env.game.DB.Objects[3].Location = 5
+	env.game.AddToContents(5, 3)
+
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+	clearOutput(env.player)
+
+	// @emit from Wizard (in Room Zero) — should relay into AUDIBLE Container
+	DispatchCommand(env.game, env.player, "@emit Test broadcast to containers")
+
+	bobOut := getOutput(bobDesc)
+	if !strings.Contains(bobOut, "Test broadcast to containers") {
+		t.Errorf("@emit AUDIBLE relay: Bob inside Container should see message, got:\n%s", bobOut)
+	}
+}
+
+func TestEmit_AudibleInwardRelay_WithPrefix(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Make Container (#5) AUDIBLE
+	env.game.DB.Objects[5].Flags[0] |= gamedb.FlagHearThru
+
+	// Set LISTEN on Container to match everything
+	env.game.SetAttr(5, 26, "*")
+
+	// Set INPREFIX (attr 89) on Container — use literal text (no brackets)
+	env.game.SetAttr(5, 89, "From outside>")
+
+	// Move Bob inside Container
+	env.game.RemoveFromContents(0, 3)
+	env.game.DB.Objects[3].Location = 5
+	env.game.AddToContents(5, 3)
+
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+	clearOutput(env.player)
+
+	DispatchCommand(env.game, env.player, "@emit Hello from outside")
+
+	bobOut := getOutput(bobDesc)
+	if !strings.Contains(bobOut, "From outside> Hello from outside") {
+		t.Errorf("@emit AUDIBLE INPREFIX: expected 'From outside> Hello from outside', got:\n%s", bobOut)
+	}
+}
+
+// ============================================================================
+// Regression: @desc obj (no =) clears the attribute (C TinyMUSH behavior)
+// Bug: @desc me (no =) returned usage error instead of clearing DESC.
+// This broke sled FIXUP which runs "@desc me;@idesc me;..." to reset desc
+// to inherited parent value after repairs.
+// Verified on crystalmush.kydance.net: @desc me clears DESC.
+// ============================================================================
+
+func TestDescribe_NoEquals_ClearsAttr(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set a DESC on the room
+	env.game.SetAttr(0, 6, "A custom description.")
+	clearOutput(env.player)
+
+	// Verify it's set
+	text := env.game.GetAttrText(0, 6)
+	if text != "A custom description." {
+		t.Fatalf("setup: expected DESC set, got %q", text)
+	}
+
+	// @desc here (no =) should clear it
+	DispatchCommand(env.game, env.player, "@describe here")
+	out := getOutput(env.player)
+	if !strings.Contains(out, "Set.") {
+		t.Errorf("@describe no-equals: expected 'Set.', got: %s", out)
+	}
+
+	// DESC should now be empty (cleared)
+	text = env.game.GetAttrText(0, 6)
+	if text != "" {
+		t.Errorf("@describe no-equals: expected empty DESC, got %q", text)
+	}
+}
+
+func TestAttrSetter_NoEquals_ClearsAttr(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set SUCC (attr 4) on Wizard
+	env.game.SetAttr(1, 4, "You succeed!")
+	clearOutput(env.player)
+
+	// @success me (no =) should clear it
+	DispatchCommand(env.game, env.player, "@success me")
+	out := getOutput(env.player)
+	if !strings.Contains(out, "Set.") {
+		t.Errorf("@success no-equals: expected 'Set.', got: %s", out)
+	}
+
+	text := env.game.GetAttrText(1, 4)
+	if text != "" {
+		t.Errorf("@success no-equals: expected empty attr, got %q", text)
+	}
+}
+
+func TestIdesc_NoEquals_ClearsAttr(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set IDESC (attr 32) on Container
+	env.game.SetAttr(5, 32, "Inside a container.")
+	clearOutput(env.player)
+
+	// @idesc #5 (no =) should clear it
+	DispatchCommand(env.game, env.player, "@idesc #5")
+	out := getOutput(env.player)
+	if !strings.Contains(out, "Set.") {
+		t.Errorf("@idesc no-equals: expected 'Set.', got: %s", out)
+	}
+
+	text := env.game.GetAttrText(5, 32)
+	if text != "" {
+		t.Errorf("@idesc no-equals: expected empty attr, got %q", text)
+	}
+}
+
+// ============================================================================
+// Controls: recursive owner check
+// Bug: Objects owned by God/wizard couldn't set attributes on other players
+// because Controls() didn't check if the object's OWNER would control the
+// target. In C TinyMUSH, Controls() recursively checks Owner(player).
+// This broke the economy system where Money Manager (#800, owned by God)
+// executes "&credit_balance player = value" via $-commands.
+// ============================================================================
+
+func TestControls_OwnerInheritsGodControl(t *testing.T) {
+	env := newTestEnv(t)
+
+	// TestObject #2 is already a THING owned by God (#1)
+	godThing := gamedb.DBRef(2)
+
+	// Bob #3 is already a player owned by self (#3)
+	bob := gamedb.DBRef(3)
+
+	// God's THING should control Bob (via owner inheritance)
+	if !Controls(env.game, godThing, bob) {
+		t.Errorf("Controls(godThing=#%d, bob=#%d) = false, want true (God-owned thing should control players)", godThing, bob)
+	}
+
+	// Verify objSetVAttr works: God's THING can set attrs on Bob
+	env.game.objSetVAttr(godThing, fmt.Sprintf("CREDIT_BALANCE #%d = 500", bob))
+	attrNum := env.game.ResolveAttrNum("CREDIT_BALANCE")
+	if attrNum < 0 {
+		t.Fatalf("CREDIT_BALANCE not found in attr table")
+	}
+	got := env.game.GetAttrText(bob, attrNum)
+	if got != "500" {
+		t.Errorf("objSetVAttr by God-owned thing: got %q, want '500'", got)
+	}
+}
+
+func TestControls_NonWizOwnedThingCannotControlOther(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a THING #6 owned by Bob (#3, a regular player)
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Bob Thing",
+		Location: 0,
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    3, // owned by Bob
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+
+	// Wizard #1 is a different player from Bob #3
+	wizard := gamedb.DBRef(1)
+
+	// A thing owned by Bob should NOT control the Wizard
+	if Controls(env.game, 6, wizard) {
+		t.Errorf("Controls(bobThing=#6, wizard=#%d) = true, want false (Bob's thing should not control wizard)", wizard)
+	}
+}
+
+// ============================================================================
+// @desc prefix matching with self-aliases
+// Bug: "alias @describe @describe" in alias.conf overwrites the built-in
+// @describe command with IsAlias=true, which causes prefix matching for
+// "@desc" to skip it (prefix matching excludes aliases). Fixed by skipping
+// self-aliases that would overwrite built-in commands.
+// ============================================================================
+
+func TestDescAbbreviation_PrefixMatch(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Load alias config to reproduce the bug: "alias @describe @describe"
+	// overwrites the built-in with IsAlias=true, breaking prefix matching.
+	ac := &AliasConfig{
+		CommandAliases: map[string]string{
+			"@descr":    "@describe",
+			"@descri":   "@describe",
+			"@describ":  "@describe",
+			"@describe": "@describe", // self-alias that caused the bug
+		},
+	}
+	env.game.ApplyAliasConfig(ac)
+
+	// "@desc" should prefix-match to "@describe" and set description
+	d := makeTestDescriptor(t, env.game.Conns, 1) // Wizard
+	DispatchCommand(env.game, d, "@desc #0=A test room description")
+
+	got := env.game.GetAttrText(0, 6) // A_DESC = 6
+	if got != "A test room description" {
+		t.Errorf("@desc prefix match: got desc %q, want %q", got, "A test room description")
+	}
+}
+
+// ============================================================================
+// MatchObject: exact exit alias wins over word-prefix match in contents
+// ============================================================================
+// Bug: When room contents had an object with "2" as a word in its name (e.g.
+// "Storage Carton Label: 2 L DRos"), it would word-prefix-match before an exit
+// with "2" as an exact alias (e.g. "Table 2 Conveyor;Table 2;t2;2"). This
+// broke softcode like nearby(me,2) which resolved to the carton instead of
+// the exit. Fix: compare match quality across all scopes — exact alias match
+// wins over word-prefix match regardless of scope order.
+func TestMatchObject_ExitExactOverContentWordPrefix(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a THING in Room Zero whose name contains "2" as a word.
+	// This will get a word-prefix match (quality 1) for search term "2".
+	env.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Storage Carton Label: 2 Large",
+		Location: 0, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	// Add to room contents linked list
+	env.game.DB.Objects[8].Next = env.game.DB.Objects[0].Contents
+	env.game.DB.Objects[0].Contents = 8
+
+	// Create an EXIT with "2" as an exact alias.
+	// This should get an exact match (quality 2) for search term "2".
+	env.game.DB.Objects[9] = &gamedb.Object{
+		DBRef: 9, Name: "Table 2 Conveyor;t2;2",
+		Location: 4, Contents: gamedb.Nothing, Exits: 0, // dest=#4, source=#0
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeExit), 0, 0},
+	}
+	// Add to room exits linked list
+	oldExits := env.game.DB.Objects[0].Exits
+	env.game.DB.Objects[0].Exits = 9
+	env.game.DB.Objects[9].Next = oldExits
+
+	// MatchObject("2") should return the exit (#9), not the carton (#8)
+	result := env.game.MatchObject(1, "2")
+	if result != 9 {
+		t.Errorf("MatchObject('2'): got #%d, want #9 (exit with exact alias)", result)
+	}
+}
+
+// ============================================================================
+// Look command: MYOPIC flag hides dbrefs, non-MYOPIC shows dbrefs
+// ============================================================================
+func TestLook_MyopicHidesDbref(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a thing the wizard owns
+	env.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Test Widget",
+		Location: 0, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	env.game.DB.Objects[8].Next = env.game.DB.Objects[0].Contents
+	env.game.DB.Objects[0].Contents = 8
+
+	d := makeTestDescriptor(t, env.game.Conns, 1) // Wizard
+
+	// Non-MYOPIC wizard: look should show dbref
+	clearOutput(d)
+	env.game.ShowObject(d, 8)
+	out := getOutput(d)
+	if !strings.Contains(out, "(#8") {
+		t.Errorf("non-MYOPIC look: expected dbref in output, got: %s", out)
+	}
+
+	// Set MYOPIC on wizard
+	env.game.DB.Objects[1].Flags[0] |= gamedb.FlagMyopic
+	clearOutput(d)
+	env.game.ShowObject(d, 8)
+	out = getOutput(d)
+	if strings.Contains(out, "(#8") {
+		t.Errorf("MYOPIC look: expected NO dbref in output, got: %s", out)
+	}
+	if !strings.Contains(out, "Test Widget") {
+		t.Errorf("MYOPIC look: expected name in output, got: %s", out)
+	}
+
+	// Clean up
+	env.game.DB.Objects[1].Flags[0] &^= gamedb.FlagMyopic
+}
+
+// ============================================================================
+// resolveDBRef: bare name does NOT global-scan players (only *name does)
+// ============================================================================
+// In C TinyMUSH, match_player only fires for *name syntax. Bare names
+// resolve via contents/exits/inventory, not global player scan.
+func TestResolveDBRef_BareNameNoPlayerScan(t *testing.T) {
+	env := newEvalTestEnv(t)
+
+	// Give Bob (player #3) an alias "n" which collides with exit "North;n" (#7)
+	env.game.DB.Objects[3].Attrs = append(env.game.DB.Objects[3].Attrs,
+		gamedb.Attribute{Number: 58, Value: "\x013:0:n"}, // A_ALIAS = 58
+	)
+
+	// Bare "n" should match the exit, not the player
+	result := env.eval("[num(n)]")
+	if result != "#7" {
+		t.Errorf("num(n): got %s, want #7 (exit North;n)", result)
+	}
+
+	// *Bob should still find the player
+	result = env.eval("[num(*Bob)]")
+	if result != "#3" {
+		t.Errorf("num(*Bob): got %s, want #3 (player Bob)", result)
+	}
+}
+

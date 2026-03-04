@@ -81,40 +81,56 @@ const (
 	FlagTerse     = 0x80000000
 )
 
-// Flag constants - second word
+// Flag constants - second word (matches C TinyMUSH flags.h lines 55-86)
 const (
-	Flag2Key        = 0x00000001
-	Flag2Abode      = 0x00000002
-	Flag2Floating   = 0x00000004
-	Flag2Unfindable = 0x00000008
-	Flag2ParentOK   = 0x00000010
-	Flag2Light      = 0x00000020
-	Flag2HasListen  = 0x00000040
-	Flag2HasFwd     = 0x00000080
-	Flag2OOB        = 0x00000100 // Player opts in to receiving softcode OOB pushes
-	Flag2Connected  = 0x00000200
-	Flag2Slave      = 0x00000800
-	Flag2HTML       = 0x00001000
-	Flag2Ansi       = 0x00002000
-	Flag2HadStartup = 0x00004000
-	Flag2Blind      = 0x00008000
-	Flag2ControlOK  = 0x00010000
-	Flag2Watcher    = 0x00080000
-	Flag2HasCommands = 0x00200000
-	Flag2StopMatch  = 0x00400000
-	Flag2Bounce     = 0x00800000
-	Flag2ZoneParent = 0x01000000
-	Flag2NoBLeed    = 0x02000000
-	Flag2HasDaily   = 0x04000000
-	Flag2Gagged     = 0x08000000
-	Flag2Staff      = 0x10000000
-	Flag2HasDarkLock = 0x20000000
-	Flag2Fixed      = 0x40000000
+	Flag2Key         = 0x00000001 // KEY
+	Flag2Abode       = 0x00000002 // ABODE
+	Flag2Floating    = 0x00000004 // FLOATING (legacy)
+	Flag2Unfindable  = 0x00000008 // UNFINDABLE
+	Flag2ParentOK    = 0x00000010 // PARENT_OK
+	Flag2Light       = 0x00000020 // LIGHT
+	Flag2HasListen   = 0x00000040 // HAS_LISTEN (internal)
+	Flag2HasFwd      = 0x00000080 // HAS_FWDLIST (internal)
+	Flag2Auditorium  = 0x00000100 // AUDITORIUM
+	Flag2Ansi        = 0x00000200 // ANSI
+	Flag2HeadFlag    = 0x00000400 // HEAD_FLAG
+	Flag2Fixed       = 0x00000800 // FIXED
+	Flag2Uninspected = 0x00001000 // UNINSPECTED
+	Flag2ZoneParent  = 0x00002000 // ZONE_PARENT
+	Flag2Dynamic     = 0x00004000 // DYNAMIC
+	Flag2NoBLeed     = 0x00008000 // NOBLEED
+	Flag2Staff       = 0x00010000 // STAFF
+	Flag2HasDaily    = 0x00020000 // HAS_DAILY (internal)
+	Flag2Gagged      = 0x00040000 // GAGGED
+	Flag2HasCommands = 0x00080000 // HAS_COMMANDS (internal)
+	Flag2StopMatch   = 0x00100000 // STOP_MATCH
+	Flag2Bounce      = 0x00200000 // BOUNCE
+	Flag2ControlOK   = 0x00400000 // CONTROL_OK
+	Flag2ConstAttrs  = 0x00800000 // CONSTANT_ATTRS
+	Flag2Vacation    = 0x01000000 // VACATION
+	Flag2PlayerMails = 0x02000000 // PLAYER_MAILS
+	Flag2HTML        = 0x04000000 // HTML
+	Flag2Blind       = 0x08000000 // BLIND
+	Flag2Suspect     = 0x10000000 // SUSPECT
+	Flag2Watcher     = 0x20000000 // WATCHER
+	Flag2Connected   = 0x40000000 // CONNECTED
+	Flag2Slave       = 0x80000000 // SLAVE (Go int is 64-bit, safe)
+
+	// Go-only alias: OOB reuses AUDITORIUM bit (0x100)
+	Flag2OOB = Flag2Auditorium
 )
 
-// Flag constants - third word (Flags[2])
+// Flag constants - third word (Flags[2], matches C TinyMUSH flags.h)
 const (
-	Flag3Instance = 0x00000001 // Object is a vehicle/container instance
+	Flag3RedirOK       = 0x00000001 // REDIR_OK
+	Flag3HasRedirect   = 0x00000002 // HAS_REDIRECT
+	Flag3Orphan        = 0x00000004 // ORPHAN
+	Flag3HasDarkLock   = 0x00000008 // HAS_DARKLOCK
+	Flag3Dirty         = 0x00000010 // DIRTY (internal)
+	Flag3NoDefault     = 0x00000020 // NODEFAULT
+	Flag3Presence      = 0x00000040 // PRESENCE
+	Flag3HasSpeechMod  = 0x00000080 // HAS_SPEECHMOD
+	Flag3Instance      = 0x00000200 // INSTANCE (Go extension, above C word 3 range)
 )
 
 // Power constants - first word (Powers[0])

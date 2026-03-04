@@ -502,6 +502,23 @@ func (p *Parser) readAttrList() ([]gamedb.Attribute, error) {
 			if err != nil {
 				return attrs, fmt.Errorf("reading attr value: %w", err)
 			}
+			// If an unquoted value has the "owner:flags:value" prefix
+			// but lost its \x01 marker (e.g. from a buggy flatfile
+			// dump), re-add the marker so StripAttrPrefix and
+			// parseInstanceFlags work correctly at access time.
+			if len(val) > 0 && val[0] != '\x01' && val[0] >= '0' && val[0] <= '9' {
+				if idx := strings.IndexByte(val, ':'); idx > 0 && idx <= 10 {
+					rest := val[idx+1:]
+					if idx2 := strings.IndexByte(rest, ':'); idx2 >= 0 && idx2 <= 10 {
+						// Validate: both fields should be numeric
+						owner := val[:idx]
+						flags := rest[:idx2]
+						if isAllDigits(owner) && isAllDigits(flags) {
+							val = "\x01" + val
+						}
+					}
+				}
+			}
 			if num > 0 {
 				attrs = append(attrs, gamedb.Attribute{
 					Number: num,
@@ -971,8 +988,11 @@ func (p *Parser) readLong() (int64, error) {
 }
 
 // readString reads a potentially quoted string.
-// If quoted (starts with "), reads the content between quotes.
-// Otherwise reads a plain line.
+// If quoted (starts with "), reads the content between quotes with full
+// escape decoding.  Otherwise reads a plain line and applies escape
+// decoding so that \r, \n, \t, \\, etc. are converted to their byte
+// equivalents.  This handles flatfile dumps that were written without
+// quoting but still contain C-style escape sequences in attribute values.
 func (p *Parser) readString(newStrings bool) (string, error) {
 	ch, err := p.peekByte()
 	if err != nil {
@@ -982,7 +1002,61 @@ func (p *Parser) readString(newStrings bool) (string, error) {
 	if ch == '"' {
 		return p.readQuotedString()
 	}
-	return p.readLine()
+	line, err := p.readLine()
+	if err != nil {
+		return line, err
+	}
+	// Decode C-style escape sequences in unquoted strings.
+	if strings.ContainsRune(line, '\\') {
+		line = decodeEscapes(line)
+	}
+	return line, nil
+}
+
+// isAllDigits returns true if s is non-empty and every byte is an ASCII digit.
+func isAllDigits(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// decodeEscapes converts C-style escape sequences (\r, \n, \t, \\, \", \e)
+// in a plain string to their byte equivalents.  Matches the behaviour of
+// readQuotedString so that quoted and unquoted values produce identical
+// results for the same logical content.
+func decodeEscapes(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			buf.WriteByte(s[i])
+			continue
+		}
+		i++ // consume the backslash
+		switch s[i] {
+		case 'n':
+			buf.WriteByte('\n')
+		case 'r':
+			buf.WriteByte('\r')
+		case 't':
+			buf.WriteByte('\t')
+		case 'e':
+			buf.WriteByte('\x1b')
+		case '\\':
+			buf.WriteByte('\\')
+		case '"':
+			buf.WriteByte('"')
+		default:
+			buf.WriteByte(s[i])
+		}
+	}
+	return buf.String()
 }
 
 // readQuotedString reads a "..." delimited string, handling escapes.

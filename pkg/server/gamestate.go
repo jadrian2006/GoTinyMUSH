@@ -297,9 +297,13 @@ func (g *Game) LookupPlayer(name string) gamedb.DBRef {
 		}
 		for _, attr := range obj.Attrs {
 			if attr.Number == 58 { // A_ALIAS
-				alias := eval.StripAttrPrefix(attr.Value)
-				if alias != "" && strings.EqualFold(alias, name) {
-					return obj.DBRef
+				aliasStr := eval.StripAttrPrefix(attr.Value)
+				if aliasStr != "" {
+					for _, a := range strings.Split(aliasStr, ";") {
+						if strings.EqualFold(strings.TrimSpace(a), name) {
+							return obj.DBRef
+						}
+					}
 				}
 				break
 			}

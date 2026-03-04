@@ -33,7 +33,9 @@ func (ctx *EvalContext) CallIterFun(objAttr string, callArgs []string) string {
 		return "#-1 NO SUCH ATTRIBUTE"
 	}
 
-	text := ctx.GetAttrByNameHelper(ref, attrName)
+	// Internal fetch without permission checks — matches C TinyMUSH behavior
+	// for iteration functions (filter, map, fold, etc.)
+	text := ctx.GetAttrRaw(ref, attrName)
 	if text == "" {
 		return ""
 	}
@@ -70,8 +72,9 @@ func (ctx *EvalContext) CallUFun(objAttr string, callArgs []string) string {
 		return "#-1 NO SUCH ATTRIBUTE"
 	}
 
-	// Look up the attribute
-	text := ctx.GetAttrByNameHelper(ref, attrName)
+	// Look up the attribute without permission checks — matches C TinyMUSH's
+	// u()/ulocal() which use atr_pget (raw fetch), not See_attr.
+	text := ctx.GetAttrRaw(ref, attrName)
 	if text == "" {
 		return ""
 	}
@@ -132,8 +135,25 @@ func (ctx *EvalContext) resolveDBRefSimple(s string) gamedb.DBRef {
 
 	// Search by name - players first
 	for _, obj := range ctx.DB.Objects {
-		if obj.ObjType() == gamedb.TypePlayer && strings.EqualFold(obj.Name, s) {
+		if obj.ObjType() != gamedb.TypePlayer {
+			continue
+		}
+		if strings.EqualFold(obj.Name, s) {
 			return obj.DBRef
+		}
+		// Check A_ALIAS attribute (58) — semicolon-separated like C TinyMUSH
+		for _, attr := range obj.Attrs {
+			if attr.Number == 58 {
+				aliasStr := StripAttrPrefix(attr.Value)
+				if aliasStr != "" {
+					for _, a := range strings.Split(aliasStr, ";") {
+						if strings.EqualFold(strings.TrimSpace(a), s) {
+							return obj.DBRef
+						}
+					}
+				}
+				break
+			}
 		}
 	}
 
@@ -141,8 +161,20 @@ func (ctx *EvalContext) resolveDBRefSimple(s string) gamedb.DBRef {
 }
 
 // GetAttrByNameHelper fetches an attribute's text value by name from an object.
-// Walks the parent chain like TinyMUSH's atr_pget.
+// Walks the parent chain like TinyMUSH's atr_pget. Checks read permissions
+// using ctx.Player. Use GetAttrRaw for internal reads (u(), v()) that should
+// not be subject to permission checks.
 func (ctx *EvalContext) GetAttrByNameHelper(ref gamedb.DBRef, attrName string) string {
+	return ctx.getAttrByNameInternal(ref, attrName, true)
+}
+
+// GetAttrRaw fetches an attribute's text value by name without permission checks.
+// Matches C TinyMUSH's atr_pget behavior used by u()/v()/ulocal()/udefault().
+func (ctx *EvalContext) GetAttrRaw(ref gamedb.DBRef, attrName string) string {
+	return ctx.getAttrByNameInternal(ref, attrName, false)
+}
+
+func (ctx *EvalContext) getAttrByNameInternal(ref gamedb.DBRef, attrName string, checkPerms bool) string {
 	// Resolve the attribute number first
 	attrName = strings.ToUpper(strings.TrimSpace(attrName))
 	attrNum := -1
@@ -160,6 +192,16 @@ func (ctx *EvalContext) GetAttrByNameHelper(ref gamedb.DBRef, attrName string) s
 		return ""
 	}
 
+	// Look up master attribute flags for AF_PRIVATE check.
+	// Matches C TinyMUSH's atr_pget_str: if master def has AF_PRIVATE, don't
+	// walk to parents. If instance on parent has AF_PRIVATE, skip that copy.
+	masterFlags := 0
+	if def, ok := ctx.DB.AttrByName[attrName]; ok {
+		masterFlags = def.Flags
+	} else if flags, ok := gamedb.WellKnownAttrFlags[attrNum]; ok {
+		masterFlags = flags
+	}
+
 	// Walk the parent chain (up to 10 levels, like TinyMUSH's ITER_PARENTS)
 	current := ref
 	for depth := 0; depth <= 10; depth++ {
@@ -169,13 +211,26 @@ func (ctx *EvalContext) GetAttrByNameHelper(ref gamedb.DBRef, attrName string) s
 		}
 		for _, attr := range obj.Attrs {
 			if attr.Number == attrNum {
+				// At depth > 0 (on a parent), check instance AF_PRIVATE
+				if depth > 0 {
+					instFlags := parseInstanceFlags(attr.Value)
+					if instFlags&gamedb.AFPrivate != 0 {
+						break // skip this parent's copy, try grandparent
+					}
+				}
 				// Check read permission if GameState is available
-				if ctx.GameState != nil {
+				if checkPerms && ctx.GameState != nil {
 					if !ctx.GameState.CanReadAttrGS(ctx.Player, ref, attrNum, attr.Value) {
 						return ""
 					}
 				}
 				return StripAttrPrefix(attr.Value)
+			}
+		}
+		// Before walking to parent, check master definition for AF_PRIVATE
+		if depth == 0 && obj.Parent != gamedb.Nothing && obj.Parent != current {
+			if masterFlags&gamedb.AFPrivate != 0 {
+				return "" // master says don't inherit
 			}
 		}
 		if obj.Parent == gamedb.Nothing || obj.Parent == current {

@@ -305,16 +305,22 @@ func EvalBoolExp(g *Game, player, thing, from gamedb.DBRef, b *gamedb.BoolExp, d
 		return false
 
 	case gamedb.BoolEval:
-		// Evaluate attribute on 'from' as softcode, then compare result to pattern
+		// Evaluate attribute on 'from' as softcode, then compare result to pattern.
+		// C TinyMUSH falls back to 'thing' if attr not found on 'from'.
 		if b.Thing < 0 {
 			return false
 		}
+		source := from
 		attrText := g.GetAttrText(from, b.Thing)
+		if attrText == "" {
+			attrText = g.GetAttrText(thing, b.Thing)
+			source = thing
+		}
 		if attrText == "" {
 			return false
 		}
 		// Evaluate the attribute as softcode with player as enactor
-		ctx := MakeEvalContextForObj(g, from, player, func(c *eval.EvalContext) {
+		ctx := MakeEvalContextForObj(g, source, player, func(c *eval.EvalContext) {
 			functions.RegisterAll(c)
 		})
 		result := ctx.Exec(attrText, eval.EvFCheck|eval.EvEval, nil)
@@ -482,11 +488,10 @@ func CouldDoItStrict(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
 }
 
 // CouldDoIt checks if player passes the lock on thing for the given lock attribute.
-// Matches C TinyMUSH's could_doit(): Pass_Locks power bypasses all locks.
-// Unlike controls(), general wizard privilege does NOT bypass — only Pass_Locks.
+// Only the explicit pass_locks power bypasses all locks.
 // Empty lock = unlocked (pass).
 func CouldDoIt(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
-	// Pass_Locks power bypasses all lock evaluation (matches C TinyMUSH)
+	// Explicit pass_locks power bypasses all lock evaluation
 	if PassLocks(g, player) {
 		return true
 	}

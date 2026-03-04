@@ -272,7 +272,8 @@ func fnUdefault(ctx *eval.EvalContext, args []string, buf *strings.Builder, call
 	uParts := strings.SplitN(attrSpec, "/", 2)
 	if len(uParts) == 2 {
 		uRef := resolveDBRef(ctx, uParts[0])
-		text := getAttrByName(ctx, uRef, strings.ToUpper(strings.TrimSpace(uParts[1])))
+		// No permission checks — matches C TinyMUSH's udefault using atr_pget
+		text := ctx.GetAttrRaw(uRef, strings.ToUpper(strings.TrimSpace(uParts[1])))
 		if text != "" {
 			var uargs []string
 			for _, a := range args[2:] {

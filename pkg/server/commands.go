@@ -59,6 +59,7 @@ func InitCommands() map[string]*Command {
 	register(":", cmdPose)
 	register(";", cmdPoseNoSpc)
 	register("page", cmdPage)
+	register("r", cmdReply)
 	register("@emit", cmdEmit)
 	register("think", cmdThink)
 	register("@pemit", cmdPemit)
@@ -386,8 +387,10 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// 1. Exact match on non-alias (built-in) commands
-	if cmd, ok := g.Commands[lower]; ok && !cmd.IsAlias {
+	// 1. Exact match on commands (including aliases from alias.conf).
+	// C TinyMUSH adds aliases to the same command hash table, so they have
+	// the same priority as built-in commands — checked before exits.
+	if cmd, ok := g.Commands[lower]; ok {
 		execCmd(cmd)
 		return
 	}
@@ -395,14 +398,21 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 	// 2. Prefix matching for @-commands (skip aliases — they are exact-match only)
 	if len(lower) > 1 && lower[0] == '@' {
 		var matchedCmd *Command
+		matchedName := ""
 		matchCount := 0
 		for name, cmd := range g.Commands {
 			if !cmd.IsAlias && strings.HasPrefix(name, lower) {
-				matchedCmd = cmd
 				matchCount++
+				// Prefer the shortest matching command name, so that
+				// "@fo" → "@force" (6) rather than "@forwardlist" (13).
+				// This matches C TinyMUSH's prefix resolution order.
+				if matchedCmd == nil || len(name) < len(matchedName) {
+					matchedCmd = cmd
+					matchedName = name
+				}
 			}
 		}
-		if matchCount == 1 && matchedCmd != nil {
+		if matchCount >= 1 && matchedCmd != nil {
 			execCmd(matchedCmd)
 			return
 		}
@@ -436,13 +446,7 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	}
 
-	// 5. Abbreviation aliases from goTinyAlias.conf (e.g., "i" → "inventory")
-	if cmd, ok := g.Commands[lower]; ok && cmd.IsAlias {
-		execCmd(cmd)
-		return
-	}
-
-	// 6. Enter/leave aliases (A_LALIAS/A_EALIAS on objects)
+	// 5. Enter/leave aliases (A_LALIAS/A_EALIAS on objects)
 	if tryEnterLeaveAlias(g, d, input) {
 		return
 	}
@@ -576,6 +580,10 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 		"message": message,
 	}
 
+	// Store last page target for reply — A_LASTPAGE = 200
+	g.SetAttr(d.Player, 200, fmt.Sprintf("%d", target))
+	g.SetAttr(target, 200, fmt.Sprintf("%d", d.Player))
+
 	if message == "" {
 		g.EmitEvent(d.Player, "PAGE", events.Event{
 			Type: events.EvPage, Source: d.Player,
@@ -629,6 +637,36 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 	}
 }
 
+func cmdReply(g *Game, d *Descriptor, args string, _ []string) {
+	if args == "" {
+		d.Send("No one to page.")
+		return
+	}
+
+	// Read A_LASTPAGE (200) to find who we last paged / who last paged us
+	lastStr := g.GetAttrTextDirect(d.Player, 200)
+	if lastStr == "" {
+		d.Send("No one to page.")
+		return
+	}
+
+	targetRef, err := strconv.Atoi(lastStr)
+	if err != nil {
+		d.Send("No one to page.")
+		return
+	}
+	target := gamedb.DBRef(targetRef)
+
+	targetObj, ok := g.DB.Objects[target]
+	if !ok {
+		d.Send("No one to page.")
+		return
+	}
+
+	// Reuse cmdPage logic by constructing "targetname=message"
+	cmdPage(g, d, fmt.Sprintf("%s=%s", DisplayName(targetObj.Name), args), nil)
+}
+
 func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		return
@@ -668,6 +706,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 				Text:   message,
 			})
 			g.MatchListenPatterns(loc, d.Player, message)
+			g.AudibleRelay(loc, d.Player, message)
 		}
 		return
 	}
@@ -681,6 +720,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 		Text:   args,
 	})
 	g.MatchListenPatterns(loc, d.Player, args)
+	g.AudibleRelay(loc, d.Player, args)
 }
 
 func cmdThink(g *Game, d *Descriptor, args string, _ []string) {
@@ -973,6 +1013,9 @@ func cmdHome(g *Game, d *Descriptor, _ string, _ []string) {
 // --- Information Commands ---
 
 func cmdLook(g *Game, d *Descriptor, args string, _ []string) {
+	// C TinyMUSH: look has CS_INTERP — evaluate the argument.
+	args = evalExpr(g, d.Player, args)
+
 	if args == "" || strings.EqualFold(args, "here") {
 		// Look at current room
 		loc := g.PlayerLocation(d.Player)
@@ -993,6 +1036,10 @@ func cmdLook(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
+	// C TinyMUSH: examine has CS_INTERP — evaluate the argument so that
+	// function calls like loc(*player) resolve before object matching.
+	args = evalExpr(g, d.Player, args)
+
 	if args == "" {
 		// C TinyMUSH: bare "examine" examines the player's location
 		args = "here"
@@ -1168,14 +1215,21 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdDescribe(g *Game, d *Descriptor, args string, _ []string) {
-	// @desc obj=text
+	// @desc obj=text — sets desc. @desc obj — clears desc (C TinyMUSH behavior).
 	eqIdx := strings.IndexByte(args, '=')
+	var targetStr, desc string
 	if eqIdx < 0 {
+		// No '=' — clear the attribute (C TinyMUSH: @desc me clears DESC)
+		targetStr = strings.TrimSpace(args)
+		desc = ""
+	} else {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		desc = strings.TrimSpace(args[eqIdx+1:])
+	}
+	if targetStr == "" {
 		d.Send("@describe: Usage: @desc thing = description")
 		return
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	desc := strings.TrimSpace(args[eqIdx+1:])
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
@@ -1947,12 +2001,13 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 // ShowObject displays an object to a player.
 // Implements the C TinyMUSH did_it pattern: DESC to player, ODESC to room, ADESC action.
 func (g *Game) ShowObject(d *Descriptor, target gamedb.DBRef) {
-	obj, ok := g.DB.Objects[target]
-	if !ok {
+	if _, ok := g.DB.Objects[target]; !ok {
 		d.Send("I don't see that here.")
 		return
 	}
-	d.Send(DisplayName(obj.Name))
+	// C TinyMUSH look_simple: show Name(#dbref flags) via unparse_object
+	// when the looker can examine the target; otherwise just the name.
+	d.Send(g.unparseObject(d.Player, target))
 
 	// DESC (6) — description shown to the looker
 	desc := g.GetAttrText(target, 6) // A_DESC
@@ -2350,6 +2405,7 @@ var flagLetters = []flagEntry{
 	{0, gamedb.FlagDestroyOK, 'd', "DESTROY_OK", flagPermPublic},
 	{0, gamedb.FlagEnterOK, 'e', "ENTER_OK", flagPermPublic},
 	{1, gamedb.Flag2Fixed, 'f', "FIXED", flagPermPublic},
+	{1, gamedb.Flag2Uninspected, 'g', "UNINSPECTED", flagPermWizard},
 	{0, gamedb.FlagHalt, 'h', "HALTED", flagPermPublic},
 	{0, gamedb.FlagImmortal, 'i', "IMMORTAL", flagPermPublic},
 	{1, gamedb.Flag2Gagged, 'j', "GAGGED", flagPermPublic},
@@ -2361,6 +2417,7 @@ var flagLetters = []flagEntry{
 	{0, gamedb.FlagRobot, 'r', "ROBOT", flagPermPublic},
 	{0, gamedb.FlagSafe, 's', "SAFE", flagPermPublic},
 	{0, gamedb.FlagSeeThru, 't', "TRANSPARENT", flagPermPublic},
+	{1, gamedb.Flag2Suspect, 'u', "SUSPECT", flagPermWizard},
 	{0, gamedb.FlagVerbose, 'v', "VERBOSE", flagPermPublic},
 	{1, gamedb.Flag2Staff, 'w', "STAFF", flagPermPublic},
 	{1, gamedb.Flag2Slave, 'x', "SLAVE", flagPermWizard},
@@ -2374,6 +2431,8 @@ var flagLetters = []flagEntry{
 	{1, gamedb.Flag2HasFwd, '&', "HAS_FORWARDLIST", flagPermGod},
 	{1, gamedb.Flag2HasListen, '@', "HAS_LISTEN", flagPermGod},
 	{1, gamedb.Flag2HTML, '~', "HTML", flagPermPublic},
+	{1, gamedb.Flag2HeadFlag, '?', "HEAD", flagPermPublic},
+	{1, gamedb.Flag2Vacation, '|', "VACATION", flagPermPublic},
 	// Flag word 2
 	{2, gamedb.Flag3Instance, '^', "INSTANCE", flagPermPublic},
 }
@@ -2438,6 +2497,10 @@ func flagString(obj *gamedb.Object) string {
 		buf.WriteByte('P')
 	}
 	for _, fl := range flagLetters {
+		// C's decode_flags skips FLAG_INTERNAL flags in flags() output
+		if fl.ListPerm == flagPermGod {
+			continue
+		}
 		if fl.Word == 0 && obj.HasFlag(fl.Bit) {
 			buf.WriteByte(fl.Letter)
 		} else if fl.Word == 1 && obj.HasFlag2(fl.Bit) {
@@ -2522,6 +2585,10 @@ func (g *Game) unparseObject(player, target gamedb.DBRef) string {
 	}
 	if obj.ObjType() == gamedb.TypeGarbage {
 		return fmt.Sprintf("*GARBAGE*(#%d%s)", target, flagString(obj))
+	}
+	// C TinyMUSH: MYOPIC players never see dbrefs/flags in unparse_object
+	if pObj, ok2 := g.DB.Objects[player]; ok2 && pObj.HasFlag(gamedb.FlagMyopic) {
+		return obj.Name
 	}
 	// C: show dbref+flags if examinable or has any of CHOWN_OK/JUMP_OK/LINK_OK/DESTROY_OK/ABODE
 	showFlags := Examinable(g, player, target) ||
@@ -2734,10 +2801,24 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 			if obj.ObjType() != gamedb.TypePlayer {
 				continue
 			}
-			// Check name and aliases
+			// Check name and semicolon-separated aliases
 			for _, alias := range strings.Split(obj.Name, ";") {
 				if strings.EqualFold(strings.TrimSpace(alias), pName) {
 					return ref
+				}
+			}
+			// Check A_ALIAS attribute (58) — semicolon-separated like C TinyMUSH
+			for _, attr := range obj.Attrs {
+				if attr.Number == 58 {
+					aliasStr := eval.StripAttrPrefix(attr.Value)
+					if aliasStr != "" {
+						for _, a := range strings.Split(aliasStr, ";") {
+							if strings.EqualFold(strings.TrimSpace(a), pName) {
+								return ref
+							}
+						}
+					}
+					break
 				}
 			}
 		}
@@ -2774,8 +2855,9 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 	}
 
 	// searchContents searches a contents list for exact then prefix matches.
-	// Returns Ambiguous if 2+ objects match at the same confidence level (C TinyMUSH behavior).
-	searchContents := func(contents []gamedb.DBRef) gamedb.DBRef {
+	// Returns (match, quality): quality 2=exact, 1=prefix, 0=none.
+	// Returns Ambiguous if 2+ objects match at the same confidence level.
+	searchContents := func(contents []gamedb.DBRef) (gamedb.DBRef, int) {
 		var exactMatch gamedb.DBRef = gamedb.Nothing
 		exactCount := 0
 		var prefixMatch gamedb.DBRef = gamedb.Nothing
@@ -2798,49 +2880,51 @@ func (g *Game) MatchObject(player gamedb.DBRef, name string) gamedb.DBRef {
 				}
 			}
 		}
-		// Exact matches take priority
 		if exactCount == 1 {
-			return exactMatch
+			return exactMatch, 2
 		}
 		if exactCount > 1 {
-			return gamedb.Ambiguous
+			return gamedb.Ambiguous, 2
 		}
-		// Prefix matches
 		if prefixCount == 1 {
-			return prefixMatch
+			return prefixMatch, 1
 		}
 		if prefixCount > 1 {
-			return gamedb.Ambiguous
+			return gamedb.Ambiguous, 1
 		}
-		return gamedb.Nothing
+		return gamedb.Nothing, 0
 	}
 
-	// Search player inventory first (inventory takes priority over room)
-	if found := searchContents(g.DB.SafeContents(player)); found != gamedb.Nothing {
-		return found
+	// C TinyMUSH match_result: exact alias matches win over prefix/word
+	// matches regardless of which scope they came from. Search all scopes,
+	// track the best match, prefer exact over prefix across scopes.
+	bestRef := gamedb.Nothing
+	bestQuality := 0
+
+	consider := func(contents []gamedb.DBRef) {
+		ref, q := searchContents(contents)
+		if q > bestQuality {
+			bestRef = ref
+			bestQuality = q
+		}
 	}
+
+	// Search player inventory
+	consider(g.DB.SafeContents(player))
 
 	// Search room contents and exits
 	loc := playerObj.Location
 	if loc != gamedb.Nothing {
-		if found := searchContents(g.DB.SafeContents(loc)); found != gamedb.Nothing {
-			return found
-		}
-		// Search room exits (C TinyMUSH match_exit searches exits by name/alias)
-		if found := searchContents(g.DB.SafeExits(loc)); found != gamedb.Nothing {
-			return found
-		}
+		consider(g.DB.SafeContents(loc))
+		consider(g.DB.SafeExits(loc))
 	}
 
-	// If the player IS a room (or has no location), search its own exits.
-	// In C TinyMUSH, rooms can match their own exits for $-commands like @tel.
+	// If the player IS a room, search its own exits.
 	if playerObj.ObjType() == gamedb.TypeRoom {
-		if found := searchContents(g.DB.SafeExits(player)); found != gamedb.Nothing {
-			return found
-		}
+		consider(g.DB.SafeExits(player))
 	}
 
-	return gamedb.Nothing
+	return bestRef
 }
 
 // MatchInRoom matches an object name only in the room contents (for get).
@@ -2992,6 +3076,9 @@ func (g *Game) GetAttrText(obj gamedb.DBRef, attrNum int) string {
 }
 
 // getAttrTextWithParents walks the parent chain up to maxDepth levels.
+// Matches C TinyMUSH's atr_pget_str behavior for AF_PRIVATE:
+//   - At depth 0: if master attr definition has AF_PRIVATE, don't walk to parents
+//   - At depth > 0: if instance flags have AF_PRIVATE, skip that parent's copy
 func (g *Game) getAttrTextWithParents(obj gamedb.DBRef, attrNum int, maxDepth int) string {
 	current := obj
 	for depth := 0; depth <= maxDepth; depth++ {
@@ -3001,7 +3088,20 @@ func (g *Game) getAttrTextWithParents(obj gamedb.DBRef, attrNum int, maxDepth in
 		}
 		for _, attr := range o.Attrs {
 			if attr.Number == attrNum {
+				// At depth > 0 (on a parent), check instance AF_PRIVATE
+				if depth > 0 {
+					instFlags := parseAttrFlags(attr.Value)
+					if instFlags&gamedb.AFPrivate != 0 {
+						break // skip this parent's copy, try grandparent
+					}
+				}
 				return eval.StripAttrPrefix(attr.Value)
+			}
+		}
+		// Before walking to parent, check master definition for AF_PRIVATE
+		if depth == 0 && o.Parent != gamedb.Nothing && o.Parent != current {
+			if masterFlags := g.getMasterAttrFlags(attrNum); masterFlags&gamedb.AFPrivate != 0 {
+				return "" // master says don't inherit
 			}
 		}
 		// Walk to parent
@@ -3011,6 +3111,20 @@ func (g *Game) getAttrTextWithParents(obj gamedb.DBRef, attrNum int, maxDepth in
 		current = o.Parent
 	}
 	return ""
+}
+
+// getMasterAttrFlags returns the master definition flags for an attribute number.
+// Checks both well-known attributes and user-defined attributes.
+func (g *Game) getMasterAttrFlags(attrNum int) int {
+	// Check well-known built-in attrs
+	if flags, ok := gamedb.WellKnownAttrFlags[attrNum]; ok {
+		return flags
+	}
+	// Check user-defined attrs
+	if def, ok := g.DB.AttrNames[attrNum]; ok {
+		return def.Flags
+	}
+	return 0
 }
 
 // GetAttrTextDirect returns the text of an attribute on an object only (no parent chain).
@@ -3031,12 +3145,19 @@ func (g *Game) GetAttrTextDirect(obj gamedb.DBRef, attrNum int) string {
 // If the attribute doesn't exist on the object and the attribute definition has
 // AF_PROPAGATE, the attribute metadata (owner, per-instance flags) is copied
 // from the parent chain before applying the new value (lazy propagation).
-func (g *Game) SetAttr(obj gamedb.DBRef, attrNum int, value string) {
+func (g *Game) SetAttr(obj gamedb.DBRef, attrNum int, value string, executor ...gamedb.DBRef) {
 	o, ok := g.DB.Objects[obj]
 	if !ok {
 		return
 	}
-	owner := fmt.Sprintf("%d", o.Owner)
+	// C TinyMUSH's atr_add stores Owner(player) — the resolved player-owner
+	// of the executor — as the attribute owner. When an executor is provided,
+	// use its resolved owner; otherwise fall back to the target's owner.
+	attrOwner := o.Owner
+	if len(executor) > 0 && executor[0] != gamedb.Nothing {
+		attrOwner = ResolveOwner(g, executor[0])
+	}
+	owner := fmt.Sprintf("%d", attrOwner)
 
 	for i, attr := range o.Attrs {
 		if attr.Number == attrNum {
@@ -3143,22 +3264,24 @@ func (g *Game) SetAttrChecked(player, obj gamedb.DBRef, attrNum int, value strin
 	if !CanSetAttr(g, player, obj, def, instFlags) {
 		return false, "Permission denied."
 	}
-	g.SetAttr(obj, attrNum, value)
+	g.SetAttr(obj, attrNum, value, player)
 	return true, ""
 }
 
 // SetAttrByName sets an attribute by name.
-func (g *Game) SetAttrByName(obj gamedb.DBRef, attrName string, value string) {
+// Optional executor parameter is passed through to SetAttr to set the attr owner
+// to the executor's resolved player-owner (matching C TinyMUSH's atr_add behavior).
+func (g *Game) SetAttrByName(obj gamedb.DBRef, attrName string, value string, executor ...gamedb.DBRef) {
 	// Look up in well-known first
 	for num, name := range gamedb.WellKnownAttrs {
 		if strings.EqualFold(name, attrName) {
-			g.SetAttr(obj, num, value)
+			g.SetAttr(obj, num, value, executor...)
 			return
 		}
 	}
 	// Look up in user-defined
 	if def, ok := g.DB.AttrByName[attrName]; ok {
-		g.SetAttr(obj, def.Number, value)
+		g.SetAttr(obj, def.Number, value, executor...)
 		return
 	}
 	// Create new attr def
@@ -3171,7 +3294,7 @@ func (g *Game) SetAttrByName(obj gamedb.DBRef, attrName string, value string) {
 		}
 		g.Store.PutMeta()
 	}
-	g.SetAttr(obj, newNum, value)
+	g.SetAttr(obj, newNum, value, executor...)
 }
 
 // CreateObject creates a new object in the database.
@@ -3263,13 +3386,17 @@ func makeSensoryCommand(attr, oAttr, aAttr int, defaultMsg string) CommandHandle
 
 func makeAttrSetter(attrNum int) CommandHandler {
 	return func(g *Game, d *Descriptor, args string, _ []string) {
+		// C TinyMUSH: @attr obj clears the attribute; @attr obj=val sets it.
 		eqIdx := strings.IndexByte(args, '=')
+		var targetStr, value string
 		if eqIdx < 0 {
-			d.Send("I need an object and a value separated by =.")
-			return
+			// No '=' — clear the attribute
+			targetStr = strings.TrimSpace(args)
+			value = ""
+		} else {
+			targetStr = strings.TrimSpace(args[:eqIdx])
+			value = strings.TrimSpace(args[eqIdx+1:])
 		}
-		targetStr := strings.TrimSpace(args[:eqIdx])
-		value := strings.TrimSpace(args[eqIdx+1:])
 		target := g.MatchObject(d.Player, targetStr)
 		if target == gamedb.Nothing {
 			d.Send("I don't see that here.")
@@ -3500,6 +3627,7 @@ func (g *Game) DidIt(cause, thing gamedb.DBRef, msgAttr, oMsgAttr, aMsgAttr int)
 	}
 
 	// Evaluate and show O-message to room (excluding cause)
+	// C TinyMUSH prefixes O-messages with the cause's name: "Name msg"
 	if oMsgText := g.GetAttrText(thing, oMsgAttr); oMsgText != "" {
 		loc := g.PlayerLocation(cause)
 		if loc != gamedb.Nothing {
@@ -3508,7 +3636,9 @@ func (g *Game) DidIt(cause, thing gamedb.DBRef, msgAttr, oMsgAttr, aMsgAttr int)
 			})
 			msg := ctx.Exec(oMsgText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 			if msg != "" {
-				g.Conns.SendToRoomExcept(g.DB, loc, cause, msg)
+				name := DisplayName(g.ObjName(cause))
+				g.Conns.SendToRoomExcept(g.DB, loc, cause,
+					fmt.Sprintf("%s %s", name, msg))
 			}
 		}
 	}
@@ -3805,7 +3935,7 @@ func cmdDictionary(g *Game, d *Descriptor, args string, _ []string) {
 		d.Send("Permission denied.")
 		return
 	}
-	g.SetAttrByName(target, "DICTIONARY", value)
+	g.SetAttrByName(target, "DICTIONARY", value, d.Player)
 	d.Send("Set.")
 }
 

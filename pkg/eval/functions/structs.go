@@ -500,7 +500,7 @@ func fnWriteStruct(ctx *eval.EvalContext, args []string, buf *strings.Builder, _
 	ref := resolveDBRef(ctx, parts[0])
 	if ref == gamedb.Nothing { return }
 	if !ctx.GameState.Controls(ctx.Player, ref) { return }
-	ctx.GameState.SetAttrByName(ref, parts[1], serialized)
+	ctx.GameState.SetAttrByName(ref, parts[1], serialized, ctx.Player)
 }
 
 // fnDelimit — convert structure-attribute delimiter to a new delimiter.

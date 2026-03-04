@@ -95,7 +95,9 @@ type GameState interface {
 	// Teleport moves victim to destination, updating contents chains.
 	Teleport(victim, dest gamedb.DBRef)
 	// SetAttrByName sets an attribute value on an object by attribute name.
-	SetAttrByName(obj gamedb.DBRef, attrName string, value string)
+	// Optional executor is the object performing the set — its resolved player-owner
+	// is stored as the attribute owner (matching C TinyMUSH's atr_add behavior).
+	SetAttrByName(obj gamedb.DBRef, attrName string, value string, executor ...gamedb.DBRef)
 	// SetFlag sets or clears a flag on an object. Returns false if unknown flag.
 	SetFlag(target gamedb.DBRef, flagStr string) bool
 	// PlayerLocation returns the location of a player.
@@ -416,6 +418,34 @@ func StripAttrPrefix(raw string) string {
 	}
 	// Malformed prefix — return everything after the marker
 	return raw[1:]
+}
+
+// parseInstanceFlags extracts per-instance attribute flags from the raw
+// "\x01owner:flags:text" format. Returns 0 if no prefix is present.
+func parseInstanceFlags(raw string) int {
+	if len(raw) == 0 || raw[0] != '\x01' {
+		return 0
+	}
+	colonCount := 0
+	start := 0
+	for i := 1; i < len(raw); i++ {
+		if raw[i] == ':' {
+			colonCount++
+			if colonCount == 1 {
+				start = i + 1
+			}
+			if colonCount == 2 {
+				n := 0
+				for _, ch := range raw[start:i] {
+					if ch >= '0' && ch <= '9' {
+						n = n*10 + int(ch-'0')
+					}
+				}
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // RegisterFunction adds a built-in function to the registry.

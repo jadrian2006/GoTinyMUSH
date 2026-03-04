@@ -900,7 +900,10 @@ func (g *Game) ExecuteAsObject(player, cause gamedb.DBRef, input string) {
 	case "@emit":
 		loc := g.PlayerLocation(player)
 		if loc != gamedb.Nothing {
-			g.SendMarkedToRoom(loc, "EMIT", stripAllBraces(args))
+			msg := stripAllBraces(args)
+			g.SendMarkedToRoom(loc, "EMIT", msg)
+			g.MatchListenPatterns(loc, player, msg)
+			g.AudibleRelay(loc, player, msg)
 		}
 	case "@oemit":
 		if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
@@ -1337,7 +1340,7 @@ func (g *Game) DoSet(player gamedb.DBRef, args string) {
 	if colonIdx := strings.IndexByte(value, ':'); colonIdx >= 0 {
 		attrName := strings.ToUpper(strings.TrimSpace(value[:colonIdx]))
 		attrValue := strings.TrimSpace(value[colonIdx+1:])
-		g.SetAttrByName(target, attrName, attrValue)
+		g.SetAttrByName(target, attrName, attrValue, player)
 		return
 	}
 
@@ -1708,9 +1711,6 @@ func (g *Game) AudibleRelay(loc, speaker gamedb.DBRef, message string) {
 // and relays the message to the object's contents with @inprefix prepended.
 func (g *Game) audibleInwardRelay(room, speaker gamedb.DBRef, message string) {
 	for _, next := range g.DB.SafeContents(room) {
-		if next == speaker {
-			continue
-		}
 		obj, ok := g.DB.Objects[next]
 		if !ok || !obj.HasFlag(gamedb.FlagHearThru) {
 			continue

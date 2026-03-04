@@ -640,13 +640,33 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	// Find descriptor for victim (if connected)
 	descs := g.Conns.GetByPlayer(victim)
 
-	// Remove from old location
+	// C TinyMUSH move_via_teleport sequence:
+	// 1. OXTPORT to old room (before move)
+	// 2. LEAVE/OLEAVE/ALEAVE on old location
+	// 3. Move object
+	// 4. TPORT to victim, OTPORT to new room, ATPORT action
+	// 5. MOVE to victim, OMOVE to new room, AMOVE action
+	// 6. ENTER/OENTER/AENTER on new location
+	// 7. "has left"/"has arrived" for players
+	const (
+		aOXTPort = 81 // A_OXTPORT
+		aTPort   = 79 // A_TPORT
+		aOTPort  = 80 // A_OTPORT
+		aATPort  = 82 // A_ATPORT
+		aMove    = 55 // A_MOVE
+		aOMove   = 56 // A_OMOVE
+		aAMove   = 57 // A_AMOVE
+	)
+
 	if obj, ok := g.DB.Objects[victim]; ok {
 		oldLoc := obj.Location
 		isDark := obj.HasFlag(gamedb.FlagDark)
-		// In C TinyMUSH, @tel only generates "has left"/"has arrived"
-		// notifications for players, not for objects/things.
 		isPlayer := obj.ObjType() == gamedb.TypePlayer
+
+		// Step 1: OXTPORT to old room (before move)
+		g.DidIt(victim, victim, 0, aOXTPort, 0)
+
+		// Step 2: LEAVE/OLEAVE on old room (simplified)
 		if oldLoc != gamedb.Nothing {
 			g.RemoveFromContents(oldLoc, victim)
 			if isPlayer && !isDark {
@@ -654,6 +674,8 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 					fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
 			}
 		}
+
+		// Step 3: Move object
 		obj.Location = dest
 		g.AddToContents(dest, victim)
 		persistList := []*gamedb.Object{obj}
@@ -666,6 +688,14 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 			}
 		}
 		g.PersistObjects(persistList...)
+
+		// Step 4: TPORT to victim, OTPORT to new room, ATPORT action
+		g.DidIt(victim, victim, aTPort, aOTPort, aATPort)
+
+		// Step 5: MOVE to victim, OMOVE to new room, AMOVE action
+		g.DidIt(victim, victim, aMove, aOMove, aAMove)
+
+		// Step 7: "has arrived" for players
 		if isPlayer && !isDark {
 			g.Conns.SendToRoomExcept(g.DB, dest, victim,
 				fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
@@ -1343,7 +1373,7 @@ func (g *Game) SetAttrByNameChecked(player, obj gamedb.DBRef, attrName string, v
 	if attrNum < 0 {
 		// New attr — create it; permission check is just Controls (already done by caller)
 		DebugLog("SETATTR_NEW player=#%d obj=#%d attr=%s value=%q (new attr)", player, obj, attrName, truncDebug(value, 100))
-		g.SetAttrByName(obj, attrName, value)
+		g.SetAttrByName(obj, attrName, value, player)
 		return true, ""
 	}
 	ok, msg := g.SetAttrChecked(player, obj, attrNum, value)

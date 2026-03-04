@@ -128,6 +128,13 @@ func (g *Game) ApplyAliasConfig(ac *AliasConfig) {
 			continue
 		}
 
+		// Skip self-aliases with no switch prepend (e.g., "alias @describe @describe").
+		// These would overwrite the built-in with IsAlias=true, breaking prefix matching:
+		// "@desc" would fail to match "@describe" because prefix matching skips aliases.
+		if alias == strings.ToLower(targetCmd) && len(prependSwitches) == 0 {
+			continue
+		}
+
 		if len(prependSwitches) > 0 {
 			// Create a wrapper handler that prepends the switches
 			origHandler := cmd.Handler

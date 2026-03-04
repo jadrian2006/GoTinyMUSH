@@ -331,8 +331,9 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		return false
 	}
 
-	// searchChainTyped searches a content/exit chain with alias+prefix matching and type filtering.
-	searchChainTyped := func(first gamedb.DBRef) gamedb.DBRef {
+	// searchChainTyped searches a content/exit chain with alias+prefix matching
+	// and type filtering. Returns (match, quality): 2=exact, 1=prefix, 0=none.
+	searchChainTyped := func(first gamedb.DBRef) (gamedb.DBRef, int) {
 		var prefixMatch gamedb.DBRef = gamedb.Nothing
 		seen := make(map[gamedb.DBRef]bool)
 		next := first
@@ -345,7 +346,7 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 			if matchType(obj) {
 				switch matchNameAlias(obj.Name, name) {
 				case 2:
-					return next // exact match wins
+					return next, 2 // exact match wins
 				case 1:
 					if prefixMatch == gamedb.Nothing {
 						prefixMatch = next
@@ -354,27 +355,37 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 			}
 			next = obj.Next
 		}
-		return prefixMatch
+		if prefixMatch != gamedb.Nothing {
+			return prefixMatch, 1
+		}
+		return gamedb.Nothing, 0
+	}
+
+	// C TinyMUSH match_everything: exact matches win over prefix matches
+	// regardless of scope. Search all scopes and prefer best quality.
+	bestRef := gamedb.Nothing
+	bestQuality := 0
+	consider := func(first gamedb.DBRef) {
+		ref, q := searchChainTyped(first)
+		if q > bestQuality {
+			bestRef = ref
+			bestQuality = q
+		}
 	}
 
 	// Search inventory
-	if found := searchChainTyped(lookerObj.Contents); found != gamedb.Nothing {
-		buf.WriteString(fmt.Sprintf("#%d", found))
-		return
-	}
+	consider(lookerObj.Contents)
 
-	// Search room contents
+	// Search room contents and exits
 	loc := lookerObj.Location
 	if locObj, ok := ctx.DB.Objects[loc]; ok {
-		if found := searchChainTyped(locObj.Contents); found != gamedb.Nothing {
-			buf.WriteString(fmt.Sprintf("#%d", found))
-			return
-		}
-		// Search exits
-		if found := searchChainTyped(locObj.Exits); found != gamedb.Nothing {
-			buf.WriteString(fmt.Sprintf("#%d", found))
-			return
-		}
+		consider(locObj.Contents) // room contents
+		consider(locObj.Exits)    // room exits
+	}
+
+	if bestRef != gamedb.Nothing {
+		buf.WriteString(fmt.Sprintf("#%d", bestRef))
+		return
 	}
 
 	buf.WriteString("#-1 NOT FOUND")

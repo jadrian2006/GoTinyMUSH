@@ -303,10 +303,17 @@ func TestFnGetXget(t *testing.T) {
 
 func TestFnV(t *testing.T) {
 	e := newEvalTestEnv(t)
-	// v(a) should return VA (attr 95) on the executor (#1)
+	// C TinyMUSH: v(a) with single char → exec("%a") = absolute possessive pronoun.
+	// Verified on crystalmush.kydance.net:6886.
+	// Wizard (#1) has no @sex set → neuter → "its"
 	got := e.eval("[v(a)]")
+	if got != "its" {
+		t.Errorf("v(a) = %q, want 'its' (absolute possessive pronoun)", got)
+	}
+	// v(va) with multi-char → attribute lookup for VA
+	got = e.eval("[v(va)]")
 	if got != "hello from VA" {
-		t.Errorf("v(a) = %q, want 'hello from VA'", got)
+		t.Errorf("v(va) = %q, want 'hello from VA'", got)
 	}
 	// v(desc) should return DESC
 	got = e.eval("[v(desc)]")

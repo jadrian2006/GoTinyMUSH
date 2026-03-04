@@ -60,12 +60,16 @@ func LookupPlayer(db *gamedb.Database, name string) gamedb.DBRef {
 		if strings.EqualFold(obj.Name, name) {
 			return obj.DBRef
 		}
-		// Match on ALIAS attribute (A_ALIAS = 58)
+		// Match on ALIAS attribute (A_ALIAS = 58) — semicolon-separated like C TinyMUSH
 		for _, attr := range obj.Attrs {
 			if attr.Number == 58 {
-				alias := eval.StripAttrPrefix(attr.Value)
-				if alias != "" && strings.EqualFold(alias, name) {
-					return obj.DBRef
+				aliasStr := eval.StripAttrPrefix(attr.Value)
+				if aliasStr != "" {
+					for _, a := range strings.Split(aliasStr, ";") {
+						if strings.EqualFold(strings.TrimSpace(a), name) {
+							return obj.DBRef
+						}
+					}
 				}
 				break
 			}
