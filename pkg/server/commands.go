@@ -1753,7 +1753,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		ctx := makeCtx()
 		d.Send(ctx.Exec(nameFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
 	} else {
-		d.Send(DisplayName(roomObj.Name))
+		d.Send(g.unparseObject(d.Player, room))
 	}
 
 	// Description — executor is the room (so v() resolves room attrs), enactor is the player
@@ -2545,12 +2545,16 @@ func (g *Game) unparseObject(player, target gamedb.DBRef) string {
 	if obj.ObjType() == gamedb.TypeGarbage {
 		return fmt.Sprintf("*GARBAGE*(#%d%s)", target, flagString(obj))
 	}
-	// C TinyMUSH: MYOPIC players never see dbrefs/flags in unparse_object
-	if pObj, ok2 := g.DB.Objects[player]; ok2 && pObj.HasFlag(gamedb.FlagMyopic) {
-		return obj.Name
+	// C TinyMUSH: MyopicExam(p,x) — VISUAL || (!Myopic(p) && (See_All(p) || same_owner || control_lock))
+	// When obey_myopic (look/contents), MYOPIC suppresses dbrefs. When !obey_myopic (examine), use Examinable.
+	pObj, pOK := g.DB.Objects[player]
+	myopicExam := false
+	if obj.HasFlag(gamedb.FlagVisual) {
+		myopicExam = true
+	} else if pOK && !pObj.HasFlag(gamedb.FlagMyopic) {
+		myopicExam = Examinable(g, player, target)
 	}
-	// C: show dbref+flags if examinable or has any of CHOWN_OK/JUMP_OK/LINK_OK/DESTROY_OK/ABODE
-	showFlags := Examinable(g, player, target) ||
+	showFlags := myopicExam ||
 		obj.HasFlag(gamedb.FlagChownOK) || obj.HasFlag(gamedb.FlagJumpOK) ||
 		obj.HasFlag(gamedb.FlagLinkOK) || obj.HasFlag(gamedb.FlagDestroyOK) ||
 		obj.HasFlag2(gamedb.Flag2Abode)
