@@ -1135,18 +1135,9 @@ func cmdInventory(g *Game, d *Descriptor, _ string, _ []string) {
 		return
 	}
 	d.Send("You are carrying:")
-	// Check for duplicate names across both inventory AND room contents
-	loc := g.PlayerLocation(d.Player)
-	roomContents := g.DB.SafeContents(loc)
-	dupeNames := findDuplicateNames(g, contents, roomContents)
 	for _, next := range contents {
-		if obj, ok := g.DB.Objects[next]; ok {
-			dname := DisplayName(obj.Name)
-			if dupeNames[strings.ToLower(dname)] {
-				d.Send(fmt.Sprintf("  %s(#%d)", dname, next))
-			} else {
-				d.Send(fmt.Sprintf("  %s", dname))
-			}
+		if _, ok := g.DB.Objects[next]; ok {
+			d.Send(g.unparseObject(d.Player, next))
 		}
 	}
 }
@@ -1455,29 +1446,6 @@ func DisplayName(name string) string {
 		return name[:idx]
 	}
 	return name
-}
-
-// findDuplicateNames returns a set of lowercased display names that appear more
-// than once across all given ref lists. Used to unmask dbrefs when 2+ objects
-// share the same display name so players can distinguish them.
-// Checks across both inventory and room contents so duplicates are detected
-// even when one copy is carried and one is on the ground.
-func findDuplicateNames(g *Game, refLists ...[]gamedb.DBRef) map[string]bool {
-	counts := make(map[string]int)
-	for _, refs := range refLists {
-		for _, ref := range refs {
-			if obj, ok := g.DB.Objects[ref]; ok {
-				counts[strings.ToLower(DisplayName(obj.Name))]++
-			}
-		}
-	}
-	dupes := make(map[string]bool)
-	for name, count := range counts {
-		if count > 1 {
-			dupes[name] = true
-		}
-	}
-	return dupes
 }
 
 // PlayerName returns the name of a player.
@@ -1882,18 +1850,9 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	}
 	if !succShown && !conFmtHandled && len(contentRefs) > 0 {
 		d.Send("Contents:")
-		// Check for duplicate names across both room contents AND player inventory
-		// so players can distinguish same-named objects even across locations.
-		playerInv := g.DB.SafeContents(d.Player)
-		dupeNames := findDuplicateNames(g, contentRefs, playerInv)
 		for _, ref := range contentRefs {
-			if obj, ok := g.DB.Objects[ref]; ok {
-				dname := DisplayName(obj.Name)
-				if dupeNames[strings.ToLower(dname)] {
-					d.Send(fmt.Sprintf("  %s(#%d)", dname, ref))
-				} else {
-					d.Send("  " + dname)
-				}
+			if _, ok := g.DB.Objects[ref]; ok {
+				d.Send(g.unparseObject(d.Player, ref))
 			}
 		}
 	}
