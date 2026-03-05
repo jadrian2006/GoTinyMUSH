@@ -242,7 +242,9 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	name := strings.TrimSpace(args[1])
 	typeFilter := ""
 	if len(args) > 2 {
-		typeFilter = strings.ToUpper(strings.TrimSpace(args[2]))
+		// Do NOT uppercase — C TinyMUSH uses case-sensitive flags:
+		// uppercase (R,E,P,T) = type filters, lowercase (i,n,e,a) = scope flags
+		typeFilter = strings.TrimSpace(args[2])
 	}
 
 	// Handle empty name
@@ -287,21 +289,51 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		return
 	}
 
-	// C TinyMUSH locate() flags: type filters (R,E,P,T,*) and scope flags (i,n,N,X,a,F,L,V etc.)
-	// Separate type filter chars from scope/modifier chars.
+	// C TinyMUSH locate() flags:
+	// Type filters: R (room), E (exit), P (player), T (thing), * (all types)
+	// Scope flags: i (inventory), n (neighbors/room contents), e (exits),
+	//              a/* (all scopes), L (location itself)
+	// Modifiers: N (no ambiguity), X (exact match), F (first match), V (visible)
 	hasTypeFilter := false
 	allTypes := false
 	typeChars := ""
+	scopeInv := false    // i — search looker's inventory
+	scopeNeigh := false  // n — search room contents (neighbors)
+	scopeExits := false  // e — search room exits
+	hasScope := false
 	for _, ch := range typeFilter {
 		switch ch {
 		case '*':
 			hasTypeFilter = true
 			allTypes = true
+			scopeInv = true
+			scopeNeigh = true
+			scopeExits = true
+			hasScope = true
 		case 'R', 'E', 'P', 'T':
 			hasTypeFilter = true
 			typeChars += string(ch)
+		case 'i':
+			scopeInv = true
+			hasScope = true
+		case 'n':
+			scopeNeigh = true
+			hasScope = true
+		case 'e':
+			scopeExits = true
+			hasScope = true
+		case 'a':
+			scopeInv = true
+			scopeNeigh = true
+			scopeExits = true
+			hasScope = true
 		}
-		// Scope/modifier flags (i,n,N,X,a,F,L,V etc.) are ignored for type matching
+	}
+	// Default: if no scope flags specified, search everything
+	if !hasScope {
+		scopeInv = true
+		scopeNeigh = true
+		scopeExits = true
 	}
 
 	matchType := func(obj *gamedb.Object) bool {
@@ -373,14 +405,19 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		}
 	}
 
-	// Search inventory
-	consider(lookerObj.Contents)
+	// Search scopes based on flags
+	if scopeInv {
+		consider(lookerObj.Contents)
+	}
 
-	// Search room contents and exits
 	loc := lookerObj.Location
 	if locObj, ok := ctx.DB.Objects[loc]; ok {
-		consider(locObj.Contents) // room contents
-		consider(locObj.Exits)    // room exits
+		if scopeNeigh {
+			consider(locObj.Contents) // room contents (neighbors)
+		}
+		if scopeExits {
+			consider(locObj.Exits) // room exits
+		}
 	}
 
 	if bestRef != gamedb.Nothing {

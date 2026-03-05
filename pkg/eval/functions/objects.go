@@ -442,6 +442,7 @@ var knownFlags = map[string][2]int{
 	"HEAR_THROUGH": {0, gamedb.FlagHearThru}, "AUDIBLE": {0, gamedb.FlagHearThru},
 	"SEE_THROUGH": {0, gamedb.FlagSeeThru}, "TRANSPARENT": {0, gamedb.FlagSeeThru},
 	"HAS_STARTUP": {0, gamedb.FlagHasStartup},
+	"HAS_COMMANDS": {1, gamedb.Flag2HasCommands}, "COMMANDS": {1, gamedb.Flag2HasCommands},
 	"PLAYER": {-1, int(gamedb.TypePlayer)}, "ROOM": {-1, int(gamedb.TypeRoom)},
 	"EXIT": {-1, int(gamedb.TypeExit)}, "THING": {-1, int(gamedb.TypeThing)},
 }

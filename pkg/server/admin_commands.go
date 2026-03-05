@@ -69,8 +69,12 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 	}
 	// Mark as GOING
 	obj.Flags[0] |= gamedb.FlagGoing
-	// Remove from location
+	// Remove from location — announce departure to room
 	if obj.Location != gamedb.Nothing {
+		if !obj.HasFlag(gamedb.FlagDark) {
+			g.Conns.SendToRoomExcept(g.DB, obj.Location, target,
+				fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+		}
 		g.RemoveFromContents(obj.Location, target)
 	}
 	// Clear location on the destroyed object
@@ -647,7 +651,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	// 4. TPORT to victim, OTPORT to new room, ATPORT action
 	// 5. MOVE to victim, OMOVE to new room, AMOVE action
 	// 6. ENTER/OENTER/AENTER on new location
-	// 7. "has left"/"has arrived" for players
+	// 7. "has left"/"has arrived" default messages
 	const (
 		aOXTPort = 81 // A_OXTPORT
 		aTPort   = 79 // A_TPORT
@@ -656,23 +660,38 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 		aMove    = 55 // A_MOVE
 		aOMove   = 56 // A_OMOVE
 		aAMove   = 57 // A_AMOVE
+		aOLeave  = 51 // A_OLEAVE
+		aALeave  = 52 // A_ALEAVE
+		aOEnter  = 53 // A_OENTER
+		aAEnter  = 35 // A_AENTER
 	)
 
 	if obj, ok := g.DB.Objects[victim]; ok {
 		oldLoc := obj.Location
 		isDark := obj.HasFlag(gamedb.FlagDark)
-		isPlayer := obj.ObjType() == gamedb.TypePlayer
 
 		// Step 1: OXTPORT to old room (before move)
 		g.DidIt(victim, victim, 0, aOXTPort, 0)
 
-		// Step 2: LEAVE/OLEAVE on old room (simplified)
+		// Step 2: LEAVE/OLEAVE/ALEAVE on old location
 		if oldLoc != gamedb.Nothing {
-			g.RemoveFromContents(oldLoc, victim)
-			if isPlayer && !isDark {
-				g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
-					fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+			if !isDark {
+				g.QueueAttrAction(oldLoc, victim, aALeave, nil)
+				if oleave := g.GetAttrText(oldLoc, aOLeave); oleave != "" {
+					ctx := MakeEvalContextForObj(g, oldLoc, victim, func(c *eval.EvalContext) {
+						functions.RegisterAll(c)
+					})
+					msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+					if msg != "" {
+						g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
+							DisplayName(obj.Name)+" "+msg)
+					}
+				} else {
+					g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
+						fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+				}
 			}
+			g.RemoveFromContents(oldLoc, victim)
 		}
 
 		// Step 3: Move object
@@ -695,10 +714,21 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 		// Step 5: MOVE to victim, OMOVE to new room, AMOVE action
 		g.DidIt(victim, victim, aMove, aOMove, aAMove)
 
-		// Step 7: "has arrived" for players
-		if isPlayer && !isDark {
+		// Step 6+7: "has arrived" + OENTER/AENTER on destination
+		if !isDark {
 			g.Conns.SendToRoomExcept(g.DB, dest, victim,
 				fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
+			g.QueueAttrAction(dest, victim, aAEnter, nil)
+			if oenter := g.GetAttrText(dest, aOEnter); oenter != "" {
+				ctx := MakeEvalContextForObj(g, dest, victim, func(c *eval.EvalContext) {
+					functions.RegisterAll(c)
+				})
+				msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+				if msg != "" {
+					g.Conns.SendToRoomExcept(g.DB, dest, victim,
+						DisplayName(obj.Name)+" "+msg)
+				}
+			}
 		}
 	}
 

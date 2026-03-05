@@ -29,14 +29,30 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 	// room → room contents → player → player inventory → master room → zones
 	var searchObjs []gamedb.DBRef
 
-	// Room and room contents first (C checks location before player/inventory)
+	// Room and room contents first (C checks location before player/inventory).
+	// C TinyMUSH (command_core.c): room contents require Ccommand(thing) which
+	// checks the HAS_COMMANDS ($) flag. Players are inherently excluded since
+	// Ccommand checks Typeof(x) != TYPE_PLAYER. This prevents personal shortcuts
+	// (e.g. "$o1") on other players from firing when you type a matching command.
 	loc := g.PlayerLocation(player)
 	if loc != gamedb.Nothing {
 		searchObjs = append(searchObjs, loc)
 		for _, next := range g.DB.SafeContents(loc) {
-			if next != player { // Skip player (searched separately below)
-				searchObjs = append(searchObjs, next)
+			if next == player {
+				continue // Skip self (searched separately below)
 			}
+			nObj, ok := g.DB.Objects[next]
+			if !ok {
+				continue
+			}
+			// C TinyMUSH: Ccommand(x) = (Typeof(x) != TYPE_PLAYER) && has_flag(x, HAS_COMMANDS)
+			if nObj.ObjType() == gamedb.TypePlayer {
+				continue
+			}
+			if !nObj.HasFlag2(gamedb.Flag2HasCommands) {
+				continue
+			}
+			searchObjs = append(searchObjs, next)
 		}
 	}
 
@@ -117,6 +133,20 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 	if obj.HasFlag(gamedb.FlagHalt) {
 		DebugLog("DOLLAR #%d(%s) HALTED, skipping", objRef, obj.Name)
 		return false
+	}
+
+	// UseLock check: if the object has A_LUSE set, the triggering player
+	// must pass it for $-commands to fire. C TinyMUSH checks this in
+	// atr_match — prevents other players' personal $-commands from firing.
+	if objRef != player {
+		useLockText := g.GetAttrTextDirect(objRef, aLUse)
+		if useLockText != "" {
+			parsed := ParseBoolExp(g, player, useLockText)
+			if !EvalBoolExp(g, player, objRef, objRef, parsed, 0) {
+				DebugLog("DOLLAR #%d(%s) USELOCK failed for player #%d, skipping", objRef, obj.Name, player)
+				return false
+			}
+		}
 	}
 
 	// Collect the child's own attribute numbers so parent attrs with the
@@ -310,6 +340,40 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 			continue
 		}
 
+		// Brace-wrapped group: strip outer braces, split on semicolons, and
+		// dispatch each piece through the full pipeline (handleDeferredBodyCmd
+		// + eval + dispatch). This handles @force bodies like "{cmd1;cmd2}"
+		// and deferred command bodies from @dolist/@wait that arrive brace-wrapped.
+		// Must happen BEFORE eval to avoid double-evaluation: EvStrip would
+		// evaluate the inner content and strip braces, then the old code
+		// tried to strip again from the already-stripped result.
+		if len(cmd) >= 2 && cmd[0] == '{' && cmd[len(cmd)-1] == '}' {
+			inner := cmd[1 : len(cmd)-1] // Strip braces from RAW cmd
+			innerCmds := splitSemicolonRespectingBraces(inner)
+			for _, ic := range innerCmds {
+				ic = strings.TrimSpace(ic)
+				if ic == "" {
+					continue
+				}
+				// Try deferred-body commands first (@wait, @dolist, @switch, etc.)
+				if g.handleDeferredBodyCmd(ic, ctx, entry, descs) {
+					continue
+				}
+				// Evaluate and dispatch each piece individually
+				ic = ctx.Exec(ic, eval.EvFCheck|eval.EvEval|eval.EvStrip|eval.EvFCheckPersist, entry.Args)
+				ic = strings.TrimSpace(ic)
+				if ic == "" {
+					continue
+				}
+				if len(descs) > 0 {
+					DispatchCommand(g, descs[0], ic)
+				} else {
+					g.ExecuteAsObject(entry.Player, entry.Cause, ic)
+				}
+			}
+			continue
+		}
+
 		// C TinyMUSH splits command args BEFORE evaluation (process_cmdent).
 		// For commands whose RHS body is stored for deferred execution
 		// (@wait, @dolist, @switch, @trigger), we split on '=' first,
@@ -336,38 +400,6 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 		evaluated = strings.TrimSpace(evaluated)
 		DebugLog("EVAL player=#%d cmd=%q evaluated=%q args=%v", entry.Player, truncDebug(cmd, 200), truncDebug(evaluated, 200), entry.Args)
 		if evaluated == "" {
-			continue
-		}
-
-		// If the original command was a brace-wrapped group (from @dolist, @wait,
-		// etc.), strip the outer braces and dispatch each semicolon-separated
-		// piece individually. Each piece gets its own eval+dispatch cycle,
-		// matching C TinyMUSH's process_cmdline which splits on ';' then
-		// evaluates each command separately.
-		// NOTE: We check the RAW cmd for leading '{', not 'evaluated', because
-		// the evaluator strips outer braces during eval.
-		if len(cmd) >= 2 && cmd[0] == '{' && cmd[len(cmd)-1] == '}' {
-			inner := evaluated[1 : len(evaluated)-1]
-			innerCmds := splitSemicolonRespectingBraces(inner)
-			for _, ic := range innerCmds {
-				ic = strings.TrimSpace(ic)
-				if ic == "" {
-					continue
-				}
-				// Re-evaluate each piece with EvFCheck so bare function
-				// calls (like add(), parse()) that were protected by the
-				// outer braces now get evaluated.
-				ic = ctx.Exec(ic, eval.EvFCheck|eval.EvEval|eval.EvFCheckPersist, entry.Args)
-				ic = strings.TrimSpace(ic)
-				if ic == "" {
-					continue
-				}
-				if len(descs) > 0 {
-					DispatchCommand(g, descs[0], ic)
-				} else {
-					g.ExecuteAsObject(entry.Player, entry.Cause, ic)
-				}
-			}
 			continue
 		}
 
@@ -1321,6 +1353,7 @@ func (g *Game) DoForce(forcer, victim gamedb.DBRef, command string) {
 		Command: command,
 	}
 	g.Queue.Add(entry)
+	g.WakeQueue()
 }
 
 // DoSet handles @set obj = attr:value or @set obj = [!]flag

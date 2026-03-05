@@ -383,6 +383,113 @@ async function runTests() {
         await sendAndCapture(`@destroy/override #${ft}`);
     }
 
+    // ===== locate() scope flags =====
+    log('\n--- locate() scope flags ---');
+    {
+        // Create test room, exit with alias "1", and thing named "Carton 1"
+        out = await sendAndCapture('@dig LocateTestRoom');
+        const roomMatch = out.match(/#(\d+)/);
+        if (roomMatch) {
+            const room = roomMatch[1];
+            // Create a "table" thing inside the room
+            out = await sendAndCapture(`@create LocateTable`);
+            const tableMatch = out.match(/#(\d+)/);
+            // Create a "carton" thing
+            out = await sendAndCapture(`@create Carton 1`);
+            const cartonMatch = out.match(/#(\d+)/);
+
+            // Teleport to test room so @open creates exit FROM the test room
+            await sendAndCapture(`@tel me=#${room}`);
+            out = await sendAndCapture(`@open 1st Exit;1st;1`);
+            const exitMatch = out.match(/#(\d+)/);
+            // Return to starting room
+            await sendAndCapture('home');
+
+            if (tableMatch && cartonMatch && exitMatch) {
+                const table = tableMatch[1];
+                const carton = cartonMatch[1];
+                const exit = exitMatch[1];
+
+                // Move table and carton into the room
+                await sendAndCapture(`@tel #${table}=#${room}`);
+                await sendAndCapture(`@tel #${carton}=#${room}`);
+
+                // locate(table, 1, n) — neighbors only — should find Carton 1, NOT the exit
+                out = await sendAndCapture(`think [locate(#${table}, 1, n)]`);
+                if (out.includes(`#${carton}`)) {
+                    pass('locate(table, 1, n) finds Carton 1 not exit');
+                } else {
+                    fail('locate(table, 1, n)', `expected #${carton} (Carton 1), got: ${out.trim()}`);
+                }
+
+                // locate(table, 1, e) — exits only — should find the exit
+                out = await sendAndCapture(`think [locate(#${table}, 1, e)]`);
+                if (out.includes(`#${exit}`)) {
+                    pass('locate(table, 1, e) finds exit');
+                } else {
+                    fail('locate(table, 1, e)', `expected #${exit} (exit), got: ${out.trim()}`);
+                }
+
+                // locate(table, 1, ne) — neighbors + exits — exit wins (exact alias)
+                out = await sendAndCapture(`think [locate(#${table}, 1, ne)]`);
+                if (out.includes(`#${exit}`)) {
+                    pass('locate(table, 1, ne) exact exit wins over prefix carton');
+                } else {
+                    fail('locate(table, 1, ne)', `expected #${exit} (exit), got: ${out.trim()}`);
+                }
+
+                // locate(table, Carton, n) — should find carton by prefix
+                out = await sendAndCapture(`think [locate(#${table}, Carton, n)]`);
+                if (out.includes(`#${carton}`)) {
+                    pass('locate(table, Carton, n) finds carton');
+                } else {
+                    fail('locate(table, Carton, n)', `expected #${carton}, got: ${out.trim()}`);
+                }
+
+                // Cleanup
+                await sendAndCapture(`@destroy/override #${exit}`);
+                await sendAndCapture(`@destroy/override #${carton}`);
+                await sendAndCapture(`@destroy/override #${table}`);
+            }
+            await sendAndCapture(`@destroy/override #${room}`);
+        }
+    }
+
+    // ===== @tel departure messages for non-player objects =====
+    log('\n--- @tel/@dest departure messages ---');
+    {
+        out = await sendAndCapture('@dig Test Departure Room');
+        let dRoom = out.match(/#(\d+)/)?.[1];
+        if (dRoom) {
+            out = await sendAndCapture(`@create DepartObj`);
+            let dThing = out.match(/#(\d+)/)?.[1];
+            if (dThing) {
+                // Place thing in test room, teleport there
+                await sendAndCapture(`@tel #${dThing}=#${dRoom}`);
+                await sendAndCapture(`@tel me=#${dRoom}`);
+
+                // @tel thing away — should see "has left."
+                out = await sendAndCapture(`@tel #${dThing}=#0`);
+                if (out.includes('has left')) {
+                    pass('@tel non-player: departure message');
+                } else {
+                    fail('@tel non-player: departure message', `expected "has left", got: ${out.trim()}`);
+                }
+
+                // Bring it back and @dest it
+                await sendAndCapture(`@tel #${dThing}=#${dRoom}`);
+                out = await sendAndCapture(`@dest #${dThing}`);
+                if (out.includes('has left')) {
+                    pass('@dest non-player: departure message');
+                } else {
+                    fail('@dest non-player: departure message', `expected "has left", got: ${out.trim()}`);
+                }
+            }
+            await sendAndCapture(`@tel me=home`);
+            await sendAndCapture(`@destroy/override #${dRoom}`);
+        }
+    }
+
     // ===== Help entries =====
     log('\n--- Help entries ---');
     const helpTopics = [
@@ -432,6 +539,6 @@ ws.on('error', (err) => {
 });
 
 setTimeout(() => {
-    log('\n=== TIMEOUT after 120s ===');
+    log('\n=== TIMEOUT after 180s ===');
     finish();
-}, 120000);
+}, 180000);

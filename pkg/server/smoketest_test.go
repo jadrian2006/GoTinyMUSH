@@ -1606,6 +1606,138 @@ func TestTeleport_TriggersAttributes(t *testing.T) {
 }
 
 // ============================================================================
+// Regression: @tel sends departure/arrival messages for non-player objects
+// Bug: cmdTeleport gated "has left"/"has arrived" behind isPlayer check,
+//      so TYPE_THING objects (cartons, etc.) disappeared silently.
+// Fix: removed isPlayer check — all non-dark objects get departure messages.
+// ============================================================================
+
+func TestTeleport_ThingDepartureMessage(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Bob #3 observes in Room Zero
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+	clearOutput(env.player)
+
+	// Teleport TestObject #2 (TYPE_THING) to OtherRoom #4
+	DispatchCommand(env.game, env.player, "@tel #2=#4")
+
+	bobOut := getOutput(bobDesc)
+
+	// Bob should see "TestObject has left."
+	if !strings.Contains(bobOut, "TestObject has left.") {
+		t.Errorf("@tel THING: Bob should see 'TestObject has left.', got:\n%s", bobOut)
+	}
+
+	// Create an observer in OtherRoom to check arrival
+	// Move Bob to OtherRoom first
+	env.game.RemoveFromContents(0, 3)
+	env.game.DB.Objects[3].Location = 4
+	env.game.AddToContents(4, 3)
+	clearOutput(bobDesc)
+
+	// Teleport TestObject back to Room Zero
+	DispatchCommand(env.game, env.player, "@tel #2=#0")
+
+	bobOut = getOutput(bobDesc)
+	// Bob (in OtherRoom) should see "TestObject has left."
+	if !strings.Contains(bobOut, "TestObject has left.") {
+		t.Errorf("@tel THING back: Bob should see 'TestObject has left.', got:\n%s", bobOut)
+	}
+}
+
+func TestTeleport_ThingOLEAVE(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set OLEAVE (51) on Room Zero — custom departure message
+	env.game.SetAttr(0, 51, "disappears in a flash.")
+
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+	clearOutput(env.player)
+
+	// Teleport TestObject #2 to OtherRoom #4
+	DispatchCommand(env.game, env.player, "@tel #2=#4")
+
+	bobOut := getOutput(bobDesc)
+
+	// Bob should see OLEAVE with object name prefix, not default "has left."
+	if !strings.Contains(bobOut, "TestObject disappears in a flash.") {
+		t.Errorf("@tel THING OLEAVE: expected 'TestObject disappears in a flash.', got:\n%s", bobOut)
+	}
+	if strings.Contains(bobOut, "has left") {
+		t.Errorf("@tel THING OLEAVE: should NOT show default 'has left' when OLEAVE set, got:\n%s", bobOut)
+	}
+}
+
+func TestTeleport_DarkThingSilent(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set TestObject #2 to DARK
+	env.game.DB.Objects[2].Flags[0] |= gamedb.FlagDark
+
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+	clearOutput(env.player)
+
+	// Teleport dark TestObject #2 to OtherRoom #4
+	DispatchCommand(env.game, env.player, "@tel #2=#4")
+
+	bobOut := getOutput(bobDesc)
+
+	// Bob should NOT see any departure message for DARK objects
+	if strings.Contains(bobOut, "has left") || strings.Contains(bobOut, "TestObject") {
+		t.Errorf("@tel DARK THING: Bob should see nothing, got:\n%s", bobOut)
+	}
+}
+
+// ============================================================================
+// Regression: @destroy sends departure message for non-player objects
+// Bug: cmdDestroy silently removed objects with no room announcement.
+// Fix: added "has left." message to room when non-dark object is destroyed.
+// ============================================================================
+
+func TestDestroy_DepartureMessage(t *testing.T) {
+	env := newTestEnv(t)
+
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+	clearOutput(env.player)
+
+	// Destroy TestObject #2
+	DispatchCommand(env.game, env.player, "@dest #2")
+
+	bobOut := getOutput(bobDesc)
+
+	// Bob should see "TestObject has left."
+	if !strings.Contains(bobOut, "TestObject has left.") {
+		t.Errorf("@dest THING: Bob should see 'TestObject has left.', got:\n%s", bobOut)
+	}
+}
+
+func TestDestroy_DarkThingSilent(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set TestObject #2 to DARK
+	env.game.DB.Objects[2].Flags[0] |= gamedb.FlagDark
+
+	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
+	clearOutput(bobDesc)
+	clearOutput(env.player)
+
+	// Destroy dark TestObject #2
+	DispatchCommand(env.game, env.player, "@dest #2")
+
+	bobOut := getOutput(bobDesc)
+
+	// Bob should NOT see any departure message
+	if strings.Contains(bobOut, "has left") || strings.Contains(bobOut, "TestObject") {
+		t.Errorf("@dest DARK THING: Bob should see nothing, got:\n%s", bobOut)
+	}
+}
+
+// ============================================================================
 // Regression: DidIt O-messages prefixed with cause's name
 // Bug: O-messages were sent without the cause's name, e.g. "arrives." instead
 //      of "Wizard arrives."
@@ -2170,6 +2302,31 @@ func TestExitAlias_BeatsCommandAlias(t *testing.T) {
 	if playerObj.Location != 4 {
 		t.Errorf("'sa' should take exit to OtherRoom (#4), but player is at #%d; output: %s",
 			playerObj.Location, out)
+	}
+}
+
+// ============================================================================
+// Brace-wrapped @force body: {cmd1;cmd2} must dispatch both commands correctly.
+// Bug: EvStrip stripped braces from evaluated result, then the brace-wrapped
+// group handler did evaluated[1:len-1] which double-stripped, losing the first
+// and last characters of the actual content.
+// ============================================================================
+
+func TestForce_BraceWrappedBody(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Queue the forced command — @force puts {cmd1;cmd2} in the queue
+	env.game.DoForce(1, 1, "{think ALPHA;think BETA}")
+
+	// Process one tick to execute the forced entry
+	env.game.ProcessQueue()
+
+	out := getOutput(env.player)
+	if !strings.Contains(out, "ALPHA") {
+		t.Errorf("expected 'ALPHA' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "BETA") {
+		t.Errorf("expected 'BETA' in output, got: %s", out)
 	}
 }
 
