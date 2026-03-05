@@ -387,15 +387,30 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// 1. Exact match on commands (including aliases from alias.conf).
-	// C TinyMUSH adds aliases to the same command hash table, so they have
-	// the same priority as built-in commands — checked before exits.
+	// C TinyMUSH dispatch order:
+	// 1. Single-char prefix commands (", :, ;) — handled before DispatchCommand
+	// 2. HOME — handled before DispatchCommand
+	// 3. Exit matching — exits before command table, matching C process_command
+	// 4. Exact command match (built-ins + aliases from alias.conf)
+	// 5. @-command prefix matching
+	// 6. Channel aliases
+	// 7. Enter/leave aliases
+	// 8. $-command matching
+
+	// 3. Exit matching — C TinyMUSH checks exits BEFORE the command hash table.
+	// This ensures exit aliases like "sa" take priority over command aliases
+	// like "alias sa say".
+	if tryMoveByExit(g, d, input) {
+		return
+	}
+
+	// 4. Exact match on commands (including aliases from alias.conf).
 	if cmd, ok := g.Commands[lower]; ok {
 		execCmd(cmd)
 		return
 	}
 
-	// 2. Prefix matching for @-commands (skip aliases — they are exact-match only)
+	// 5. Prefix matching for @-commands (skip aliases — they are exact-match only)
 	if len(lower) > 1 && lower[0] == '@' {
 		var matchedCmd *Command
 		matchedName := ""
@@ -431,7 +446,7 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// 3. Channel alias matching
+	// 6. Channel alias matching
 	if g.Comsys != nil {
 		if ca := g.Comsys.LookupAlias(d.Player, strings.ToLower(cmdName)); ca != nil {
 			g.ComsysProcessAlias(d, ca, args)
@@ -439,19 +454,12 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		}
 	}
 
-	// 4. Exit matching — exits take priority over command abbreviations,
-	// matching C TinyMUSH dispatch order. Exit aliases require exact match
-	// (only the exit name allows prefix matching), so "i" won't match "inf".
-	if tryMoveByExit(g, d, input) {
-		return
-	}
-
-	// 5. Enter/leave aliases (A_LALIAS/A_EALIAS on objects)
+	// 7. Enter/leave aliases (A_LALIAS/A_EALIAS on objects)
 	if tryEnterLeaveAlias(g, d, input) {
 		return
 	}
 
-	// 7. $-command matching on objects in room/inventory
+	// 8. $-command matching on objects in room/inventory
 	if g.MatchDollarCommands(d.Player, d.Player, input) {
 		return
 	}
@@ -826,28 +834,12 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 		return false
 	}
 
-	// Walk exits chain — two-pass matching like C TinyMUSH.
-	// Pass 1: exact alias match (e.g., "s" exactly matches alias "s")
-	// Pass 2: prefix match (e.g., "s" matches prefix of "sled")
-	// This ensures "s" goes to an exit with alias "s" rather than one named "Sled".
+	// C TinyMUSH matches_exit_from_list: exact match only — user input must
+	// completely match one semicolon-separated alias segment. No prefix matching.
 	matchExit := func(exitObj *gamedb.Object) bool {
 		exitNames := strings.Split(exitObj.Name, ";")
 		for _, ename := range exitNames {
 			if strings.EqualFold(strings.TrimSpace(ename), name) {
-				return true
-			}
-		}
-		return false
-	}
-	prefixMatchExit := func(exitObj *gamedb.Object) bool {
-		// Only prefix-match on the exit NAME (first segment before ";").
-		// Aliases (segments after ";") require exact match in pass 1.
-		// This matches C TinyMUSH behavior: name is prefix-matchable,
-		// aliases are exact-only.
-		exitNames := strings.Split(exitObj.Name, ";")
-		if len(exitNames) > 0 {
-			ename := strings.TrimSpace(exitNames[0])
-			if len(name) > 0 && len(ename) >= len(name) && strings.EqualFold(ename[:len(name)], name) {
 				return true
 			}
 		}
@@ -896,7 +888,6 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 		return true
 	}
 
-	// Pass 1: exact alias match
 	seenExits := make(map[gamedb.DBRef]bool)
 	exitRef := locObj.Exits
 	for exitRef != gamedb.Nothing && !seenExits[exitRef] {
@@ -906,21 +897,6 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 			break
 		}
 		if matchExit(exitObj) {
-			return doExit(exitRef, exitObj)
-		}
-		exitRef = exitObj.Next
-	}
-
-	// Pass 2: prefix match
-	seenExits = make(map[gamedb.DBRef]bool)
-	exitRef = locObj.Exits
-	for exitRef != gamedb.Nothing && !seenExits[exitRef] {
-		seenExits[exitRef] = true
-		exitObj, ok := g.DB.Objects[exitRef]
-		if !ok {
-			break
-		}
-		if prefixMatchExit(exitObj) {
 			return doExit(exitRef, exitObj)
 		}
 		exitRef = exitObj.Next

@@ -2124,3 +2124,52 @@ func TestResolveDBRef_BareNameNoPlayerScan(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Regression: Exit alias must beat command alias in dispatch
+// Bug: "alias sa say" in goTinyAlias.conf made "sa" fire say instead of
+//      exit "Sorting Area;sa". C TinyMUSH checks exits BEFORE command table.
+// ============================================================================
+
+func TestExitAlias_BeatsCommandAlias(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create exit "Sorting;sa" from Room Zero (#0) to OtherRoom (#4)
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Sorting;sa",
+		Location: 4, // destination
+		Contents: gamedb.Nothing,
+		Exits:    0, // source
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeExit), 0, 0},
+	}
+	env.game.DB.Objects[0].Exits = 6
+	env.game.NextRef = 7
+
+	// Register "sa" as alias for say (simulating goTinyAlias.conf)
+	sayCmd := env.game.Commands["say"]
+	if sayCmd == nil {
+		t.Fatal("say command not found")
+	}
+	env.game.Commands["sa"] = &Command{
+		Name:    sayCmd.Name,
+		Handler: sayCmd.Handler,
+		IsAlias: true,
+	}
+
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "sa")
+	out := getOutput(env.player)
+
+	// Player should have moved to OtherRoom, not said anything
+	playerObj := env.game.DB.Objects[1]
+	if playerObj.Location != 4 {
+		t.Errorf("'sa' should take exit to OtherRoom (#4), but player is at #%d; output: %s",
+			playerObj.Location, out)
+	}
+}
+
