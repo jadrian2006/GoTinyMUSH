@@ -1650,7 +1650,9 @@ func (g *Game) MatchListenPatterns(loc gamedb.DBRef, speaker gamedb.DBRef, messa
 		excludeSet[e] = true
 	}
 
-	// Walk contents of the room
+	// Walk contents of the room, and also inventory of players/objects
+	// (C TinyMUSH's notify_check recursively checks contents for MONITOR objects,
+	// so a carried object with ^patterns hears room messages.)
 	for _, next := range g.DB.SafeContents(loc) {
 		if next == speaker || excludeSet[next] {
 			continue
@@ -1664,6 +1666,19 @@ func (g *Game) MatchListenPatterns(loc gamedb.DBRef, speaker gamedb.DBRef, messa
 		// have HAS_LISTEN set (C TinyMUSH auto-sets it; our import may not).
 		if obj.HasFlag(gamedb.FlagMonitor) || obj.HasFlag2(gamedb.Flag2HasListen) || g.hasListenAttr(obj) {
 			g.checkListenAttrs(next, speaker, message)
+		}
+		// Check inventory of this object (e.g. carried objects with MONITOR)
+		for _, inner := range g.DB.SafeContents(next) {
+			if inner == speaker || excludeSet[inner] {
+				continue
+			}
+			innerObj, ok := g.DB.Objects[inner]
+			if !ok {
+				continue
+			}
+			if innerObj.HasFlag(gamedb.FlagMonitor) || innerObj.HasFlag2(gamedb.Flag2HasListen) || g.hasListenAttr(innerObj) {
+				g.checkListenAttrs(inner, speaker, message)
+			}
 		}
 	}
 
@@ -1952,6 +1967,8 @@ func matchWild(pattern, str string) (bool, []string) {
 
 // matchWildHelper matches lowered pattern against lowered str, but captures
 // from origStr at the corresponding offset to preserve original case.
+// Backslash escapes in the pattern are supported (e.g. \: matches a literal :),
+// matching C TinyMUSH's wild() behavior.
 func matchWildHelper(pattern, str, origStr string, origOff int, args *[]string) bool {
 	for len(pattern) > 0 {
 		switch pattern[0] {
@@ -1979,6 +1996,20 @@ func matchWildHelper(pattern, str, origStr string, origOff int, args *[]string) 
 			// C TinyMUSH captures ? as a single-char arg (like * but one char)
 			*args = append(*args, string(origStr[origOff]))
 			pattern = pattern[1:]
+			str = str[1:]
+			origOff++
+		case '\\':
+			// Backslash escape: next char in pattern is treated as literal.
+			// This matches C TinyMUSH's wild() which uses \: in ^patterns
+			// to include colons in the match portion.
+			if len(pattern) < 2 {
+				return false // trailing backslash, no match
+			}
+			literal := pattern[1]
+			if len(str) == 0 || str[0] != literal {
+				return false
+			}
+			pattern = pattern[2:]
 			str = str[1:]
 			origOff++
 		default:
