@@ -28,7 +28,7 @@ func Open(path string) (*Store, error) {
 
 	// Ensure all buckets exist.
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketArrays, bucketAPIKeys, bucketConnLog, bucketHooks} {
+		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketArrays, bucketAPIKeys, bucketConnLog, bucketHooks, bucketEventQueues} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
@@ -880,4 +880,41 @@ func (s *Store) GetHooks() map[string]*HookSet {
 		return nil
 	})
 	return hooks
+}
+
+// --- Event Queue persistence ---
+
+// PutEventQueue persists an event queue definition to bbolt.
+func (s *Store) PutEventQueue(q *StoredEventQueue) error {
+	data, err := encodeEventQueue(q)
+	if err != nil {
+		return fmt.Errorf("boltstore: encode event queue %q: %w", q.Name, err)
+	}
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketEventQueues).Put([]byte(strings.ToLower(q.Name)), data)
+	})
+}
+
+// DeleteEventQueue removes an event queue from bbolt.
+func (s *Store) DeleteEventQueue(name string) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketEventQueues).Delete([]byte(strings.ToLower(name)))
+	})
+}
+
+// LoadEventQueues reads all event queues from bbolt.
+func (s *Store) LoadEventQueues() ([]StoredEventQueue, error) {
+	var queues []StoredEventQueue
+	err := s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketEventQueues)
+		return b.ForEach(func(k, v []byte) error {
+			q, err := decodeEventQueue(v)
+			if err != nil {
+				return fmt.Errorf("decode event queue %q: %w", string(k), err)
+			}
+			queues = append(queues, *q)
+			return nil
+		})
+	})
+	return queues, err
 }

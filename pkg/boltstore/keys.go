@@ -21,6 +21,7 @@ var (
 	bucketAPIKeys     = []byte("apikeys")
 	bucketConnLog     = []byte("connlog")
 	bucketHooks       = []byte("hooks")
+	bucketEventQueues = []byte("eventqueues")
 )
 
 // Meta key constants.

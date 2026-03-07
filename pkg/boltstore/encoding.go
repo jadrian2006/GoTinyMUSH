@@ -3,9 +3,25 @@ package boltstore
 import (
 	"bytes"
 	"encoding/gob"
+	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
+
+// StoredEventQueue is the gob-serializable subset of eventbus.EventQueue.
+// Runtime state (subscribers, publishers, pending) is not persisted.
+type StoredEventQueue struct {
+	Name      string
+	Aliases   []string
+	Rate      int
+	Scope     int // ScopeType as int
+	MaxSubs   int
+	Enabled   bool
+	PubLock   string
+	SubLock   string
+	AdminLock string
+	CreatedAt time.Time
+}
 
 func init() {
 	gob.Register(gamedb.Object{})
@@ -144,4 +160,22 @@ func decodeArray(data []byte) (*gamedb.ArrayData, error) {
 		return nil, err
 	}
 	return &arr, nil
+}
+
+// encodeEventQueue serializes a StoredEventQueue to bytes using gob.
+func encodeEventQueue(q *StoredEventQueue) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(q); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decodeEventQueue deserializes bytes back into a StoredEventQueue.
+func decodeEventQueue(data []byte) (*StoredEventQueue, error) {
+	var q StoredEventQueue
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&q); err != nil {
+		return nil, err
+	}
+	return &q, nil
 }

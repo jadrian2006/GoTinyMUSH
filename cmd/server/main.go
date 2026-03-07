@@ -369,6 +369,9 @@ func main() {
 		log.Printf("Mail system disabled by config")
 	}
 
+	// Load event queues from bbolt
+	srv.Game.LoadEventQueues()
+
 	// Load structures from bbolt
 	loadStructures(store)
 

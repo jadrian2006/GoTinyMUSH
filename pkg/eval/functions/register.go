@@ -648,6 +648,12 @@ func RegisterAll(ctx *eval.EvalContext) {
 	// Multi-zone function
 	ctx.RegisterFunction("ZONES", fnZones, 1, 0)
 
+	// Event Bus
+	ctx.RegisterFunction("PUBLISH", fnPublish, 2, 0)
+	ctx.RegisterFunction("SUBSCRIBE", fnSubscribe, 2, eval.FnVarArgs)
+	ctx.RegisterFunction("UNSUBSCRIBE", fnUnsubscribe, 2, 0)
+	ctx.RegisterFunction("QUEUES", fnQueues, 0, eval.FnVarArgs)
+
 	// Array functions
 	ctx.RegisterFunction("ARRAY", fnArray, 1, eval.FnVarArgs)
 	ctx.RegisterFunction("ADESTROY", fnAdestroy, 1, 0)

@@ -11,6 +11,7 @@ import (
 	"github.com/crystal-mush/gotinymush/pkg/boltstore"
 	"github.com/crystal-mush/gotinymush/pkg/eval"
 	"github.com/crystal-mush/gotinymush/pkg/eval/functions"
+	"github.com/crystal-mush/gotinymush/pkg/eventbus"
 	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
@@ -308,6 +309,9 @@ func InitCommands() map[string]*Command {
 	registerNG("@cemit", cmdCemit)
 	registerNG("@cset", cmdCset)
 	registerNG("@cinfo", cmdCinfo)
+
+	// Event Bus (no guest)
+	registerNG("@queue", cmdQueue)
 
 	// Mail system (no guest)
 	registerNG("@mail", cmdMail)
@@ -1313,6 +1317,7 @@ type Game struct {
 	AliasConfs  []string // Paths to alias config files (for archive)
 	ArchiveDir  string   // Path to archive output directory
 	EventBus    *events.Bus // Structured event bus for multi-transport output
+	EventQueues *eventbus.QueueManager // Pub/sub event queue system
 	Guests      *GuestManager // Guest player tracking and cleanup
 	objExecDepth int // Recursion depth counter for ExecuteAsObject
 	objExecCount map[gamedb.DBRef]int // Per-object execution counter for rate limiting
@@ -1382,9 +1387,10 @@ func NewGame(db *gamedb.Database) *Game {
 		Queue:     NewCommandQueue(),
 		NextRef:   maxRef + 1,
 		GameFuncs: make(map[string]*eval.UFunction),
-		EventBus:  bus,
-		Guests:    NewGuestManager(),
-		queueWake: make(chan struct{}, 1),
+		EventBus:    bus,
+		EventQueues: eventbus.NewQueueManager(),
+		Guests:      NewGuestManager(),
+		queueWake:   make(chan struct{}, 1),
 	}
 }
 

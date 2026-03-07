@@ -212,6 +212,13 @@ type GameState interface {
 	// NextDBRef returns the next available dbref that would be assigned.
 	NextDBRef() gamedb.DBRef
 
+	// Event Bus functions
+	EventBusPublish(caller gamedb.DBRef, queueName, data string) string
+	EventBusSubscribe(obj gamedb.DBRef, attr, queueName string, bind gamedb.DBRef) string
+	EventBusUnsubscribe(obj gamedb.DBRef, attr, queueName string) string
+	EventBusQueueList() string
+	EventBusQueueInfo(queueName, mode string) string
+
 	// IsInstance returns true if obj has the Flag3Instance flag.
 	IsInstance(obj gamedb.DBRef) bool
 

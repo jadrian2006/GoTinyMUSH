@@ -1478,6 +1478,11 @@ func (g *Game) StartQueueProcessor() {
 						}
 					}()
 					hadWork := g.ProcessQueue()
+					// Event bus phase — runs after master queue, independent budget
+					if g.EventQueues != nil {
+						busWork := g.EventQueues.ProcessEventBus(g.GameAdapter())
+						hadWork = hadWork || busWork
+					}
 					if hadWork && idle {
 						idle = false
 						ticker.Reset(queueTick)
@@ -1495,6 +1500,10 @@ func (g *Game) StartQueueProcessor() {
 						}
 					}()
 					g.ProcessQueue()
+					// Event bus phase on wake too
+					if g.EventQueues != nil {
+						g.EventQueues.ProcessEventBus(g.GameAdapter())
+					}
 					if idle {
 						idle = false
 						ticker.Reset(queueTick)
