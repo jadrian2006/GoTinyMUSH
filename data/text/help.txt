@@ -17085,3 +17085,131 @@ TRUNC_LENGTH - Per-player examine output truncation
   5. Set DESC, IDESC, and other attributes on template/rooms
 
   See also: @instance, INSTANCE flag
+
+& EVENT BUS
+& EVENT BUS FUNCTIONS
+  Topic: Event Bus Functions
+
+  The event bus provides pub/sub messaging between game objects. Objects
+  can publish events to named queues, and other objects can subscribe to
+  receive those events. Access is controlled by locks set by wizards.
+
+  Functions:
+    publish()      - Send an event to a queue
+    subscribe()    - Register to receive events from a queue
+    unsubscribe()  - Remove a subscription
+    queues()       - List queues or query queue information
+
+  The event bus processes events in its own phase after the master queue,
+  with a budget cap of 50 handler evaluations per tick. Events published
+  during bus processing are deferred to the next tick.
+
+  See also: PUBLISH(), SUBSCRIBE(), UNSUBSCRIBE(), QUEUES(), OOB FUNCTIONS.
+
+& PUBLISH()
+& PUBLISH
+  Function: publish(<queue_name>, <json_data>)
+
+  Publishes an event to the named queue. The caller must pass the queue's
+  pub lock. The data should be a valid JSON string.
+
+  For scope:object queues, the publisher's dbref is automatically recorded
+  so that subscribers bound to that specific publisher receive the event.
+
+  Returns:
+    1               - Event published successfully.
+    #-1 <error>     - Queue not found, lock failed, or other error.
+
+  Examples:
+    > think publish(sled.tick, {"speed": 26, "heading": 0})
+    1
+    > think publish(weather.change, {"planet": "Pern", "type": "storm"})
+    1
+
+  See also: subscribe(), unsubscribe(), queues(), EVENT BUS FUNCTIONS.
+
+& SUBSCRIBE()
+& SUBSCRIBE
+  Function: subscribe(<object>/<attr>, <queue_name>[, <bind>])
+
+  Subscribes an object's attribute to a queue. When the queue fires, the
+  attribute is triggered with the event data passed as %1.
+
+  The subscribing object must pass the queue's sub lock.
+
+  Arguments:
+    <object>/<attr> - The object and attribute to trigger on events.
+                      Supports: me, #dbref, *player
+    <queue_name>    - Name of the event queue.
+    <bind>          - Optional. For scope:object queues, the dbref of the
+                      specific publisher to listen to. Only events from
+                      this publisher will be delivered.
+
+  Returns:
+    1               - Subscription created successfully.
+    #-1 <error>     - Queue not found, lock failed, already subscribed, etc.
+
+  Examples:
+    ; Subscribe to all events on a global queue
+    > think subscribe(me/ON_WEATHER, weather.change)
+    1
+
+    ; Subscribe to a specific sled's tick events (scope:object)
+    > think subscribe(me/ON_TICK, sled.tick, loc(me))
+    1
+
+  When the queue fires, your attribute is called like:
+    @trigger <object>/<attr>=<json_data>
+  Access the data with %1 in the attribute body.
+
+  See also: unsubscribe(), publish(), queues(), EVENT BUS FUNCTIONS.
+
+& UNSUBSCRIBE()
+& UNSUBSCRIBE
+  Function: unsubscribe(<object>/<attr>, <queue_name>)
+
+  Removes a subscription. The object will no longer receive events from
+  the named queue for that attribute.
+
+  Returns:
+    1               - Subscription removed.
+    #-1 <error>     - Not subscribed or queue not found.
+
+  Examples:
+    > think unsubscribe(me/ON_TICK, sled.tick)
+    1
+
+  See also: subscribe(), queues(), EVENT BUS FUNCTIONS.
+
+& QUEUES()
+& QUEUES
+  Function: queues()
+            queues(<name>)
+            queues(<name>, subs)
+            queues(<name>, stats)
+
+  Queries event bus information.
+
+  With no arguments, returns a space-separated list of all queue names.
+
+  With a queue name, returns queue configuration as JSON:
+    {"name":"...","rate":N,"scope":"...","max_subs":N,"enabled":true,
+     "subs":N,"pubs":N,"pending":N}
+
+  With mode "subs", returns space-separated dbrefs of subscribers.
+
+  With mode "stats", returns detailed statistics as JSON including
+  publish_count, deliver_count, dropped, rejected, avg_payload,
+  avg_eval_ns, budget_exhausted, gen1_count, gen2_rejected, and more.
+
+  Examples:
+    > think queues()
+    sled.tick weather.change
+    > think queues(sled.tick)
+    {"name":"sled.tick","rate":0,"scope":"object",...}
+    > think queues(sled.tick, subs)
+    #13042
+    > think queues(sled.tick, stats)
+    {"publish_count":42,"deliver_count":42,...}
+
+  See also: publish(), subscribe(), EVENT BUS FUNCTIONS.

@@ -3816,4 +3816,188 @@ TLS/SSL - Encrypted connections
 
   To test a TLS connection:
     openssl s_client -connect localhost:6887
- 
+
+& @queue
+& EVENT BUS
+  Command: @queue <subcommand> [<args>]
+
+  Manages the pub/sub event bus. Event queues allow objects to publish
+  and subscribe to named events, enabling decoupled communication between
+  game systems. Events are processed in an independent bus phase after the
+  master queue, in the same goroutine (thread-safe, no race conditions).
+
+  Subcommands:
+    @queue/create <name>[=<options>]  - Create a new event queue
+    @queue/set <name>=<options>       - Modify queue settings
+    @queue/destroy <name>             - Delete a queue and all subscriptions
+    @queue/lock/pub <name>=<lock>     - Set who can publish to the queue
+    @queue/lock/sub <name>=<lock>     - Set who can subscribe to the queue
+    @queue/lock/admin <name>=<lock>   - Set who can modify the queue
+    @queue/alias <alias>=<name>       - Add an alias for a queue name
+    @queue/list                       - List all event queues
+    @queue/info <name>                - Show queue configuration
+    @queue/subs <name>                - List subscribers
+    @queue/pubs <name>                - List publishers
+    @queue/stats <name>               - Show queue statistics
+    @queue/stats/reset <name>         - Reset queue statistics
+    @queue/drain <name>               - Clear pending events
+    @queue/bus                        - Show global bus statistics
+
+  See also: @queue/create, @queue/set, publish(), subscribe(), queues(),
+  EVENT BUS FUNCTIONS.
+
+& @queue/create
+  Command: @queue/create <name>[=<options>]
+
+  Creates a new event queue. Options are key:value pairs separated by
+  spaces.
+
+  Options:
+    rate:<N>        - Tick interval. 0 = event-driven (fires on publish),
+                      N = fires every N ticks. Default: 1.
+    scope:<type>    - Delivery scope. One of:
+                        global  - All subscribers receive all events (default)
+                        object  - Subscribers bind to a specific publisher
+                        parent  - Match by direct parent (Parent(sub)==Parent(pub))
+    max_subs:<N>    - Maximum subscribers allowed. Default: 50.
+    enabled:<bool>  - Whether the queue processes events. Default: true.
+
+  Examples:
+    @queue/create sled.tick=scope:object rate:0 max_subs:10
+    @queue/create weather.change=scope:parent rate:600
+    @queue/create game.announce
+
+  See also: @queue, @queue/set, @queue/destroy.
+
+& @queue/set
+  Command: @queue/set <name>=<options>
+
+  Modifies settings on an existing queue. Accepts the same options as
+  @queue/create: rate, scope, max_subs, enabled.
+
+  Examples:
+    @queue/set sled.tick=rate:0
+    @queue/set weather.change=enabled:false
+
+  See also: @queue, @queue/create.
+
+& @queue/destroy
+  Command: @queue/destroy <name>
+
+  Permanently deletes an event queue and all its subscriptions.
+  This cannot be undone.
+
+  See also: @queue, @queue/create.
+
+& @queue/lock
+& @queue/lock/pub
+& @queue/lock/sub
+& @queue/lock/admin
+  Command: @queue/lock/pub <name>=<lock>
+           @queue/lock/sub <name>=<lock>
+           @queue/lock/admin <name>=<lock>
+
+  Sets access locks on an event queue.
+
+    pub   - Who can publish events to this queue. Checked on each publish().
+    sub   - Who can subscribe to this queue. Checked on subscribe().
+    admin - Who can modify the queue with @queue/set (besides wizards).
+
+  Lock strings use standard MUSH lock syntax. Special values:
+    *     - Allow everyone (open lock).
+    (empty) - Wizard-only (default).
+
+  Examples:
+    @queue/lock/pub sled.tick=FLAG^SLED
+    @queue/lock/sub sled.tick=FLAG^FLIGHT_RECORDER|FLAG^WIZARD
+    @queue/lock/pub game.announce=*
+
+  See also: @queue, @lock, LOCK KEYS.
+
+& @queue/list
+  Command: @queue/list
+
+  Lists all event queue names, space-separated.
+
+  See also: @queue, @queue/info.
+
+& @queue/info
+  Command: @queue/info <name>
+
+  Shows configuration for a queue as JSON:
+    {"name":"...","rate":N,"scope":"...","max_subs":N,"enabled":bool,
+     "subs":N,"pubs":N,"pending":N}
+
+  See also: @queue, @queue/stats.
+
+& @queue/subs
+  Command: @queue/subs <name>
+
+  Lists the dbrefs of all active subscribers to the queue.
+
+  See also: @queue, @queue/pubs.
+
+& @queue/pubs
+  Command: @queue/pubs <name>
+
+  Lists the dbrefs of all known publishers to the queue.
+
+  See also: @queue, @queue/subs.
+
+& @queue/stats
+  Command: @queue/stats <name>
+
+  Shows detailed statistics for a queue as JSON:
+    publish_count   - Total publish() calls received
+    fire_count      - Total times the queue fired
+    deliver_count   - Total individual subscriber deliveries
+    dropped         - Events dropped (budget cap, destroyed subscriber)
+    rejected        - publish() calls rejected by pub lock
+    avg_payload     - Average event data size in bytes
+    max_payload     - Largest event data seen
+    avg_eval_ns     - Average handler execution time (nanoseconds)
+    max_eval_ns     - Slowest handler execution time
+    active_subs     - Current subscriber count
+    active_pubs     - Current publisher count
+    pending         - Events waiting for delivery
+    budget_exhausted - Times deferred due to per-tick budget cap
+    gen1_count      - Generation-1 events (bus-to-bus hops)
+    gen2_rejected   - Generation-2+ events rejected (loop protection)
+
+  See also: @queue, @queue/stats/reset, @queue/bus.
+
+& @queue/stats/reset
+  Command: @queue/stats/reset <name>
+
+  Resets all statistics counters for the named queue to zero.
+
+  See also: @queue/stats.
+
+& @queue/drain
+  Command: @queue/drain <name>
+
+  Clears all pending (undelivered) events from the queue. Subscribers
+  and configuration are not affected.
+
+  See also: @queue.
+
+& @queue/bus
+  Command: @queue/bus
+
+  Shows global event bus statistics: total handlers evaluated this tick,
+  budget remaining, and per-queue breakdown.
+
+  See also: @queue, @queue/stats.
+
+& @queue/alias
+  Command: @queue/alias <alias>=<name>
+
+  Adds a short alias for a queue name. The alias can be used in place of
+  the full queue name in publish(), subscribe(), and other commands.
+
+  Example:
+    @queue/alias sled=sled.tick
+    ; Now publish(sled, ...) works the same as publish(sled.tick, ...)
+
+  See also: @queue.
+
