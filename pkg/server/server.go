@@ -371,7 +371,7 @@ func (s *Server) handleLoginCommand(d *Descriptor, input string) {
 
 	// Pre-login commands
 	upper := strings.ToUpper(input)
-	if upper == "QUIT" {
+	if upper == "QUIT" || upper == "LOGOUT" {
 		if s.Game.Texts != nil {
 			if txt := s.Game.Texts.GetQuit(); txt != "" {
 				d.SendNoNewline(txt)

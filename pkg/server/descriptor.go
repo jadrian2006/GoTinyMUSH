@@ -280,6 +280,30 @@ func (cm *ConnManager) Remove(d *Descriptor) {
 	}
 }
 
+// Logout disassociates a descriptor from its player without removing it from the
+// connection manager. The descriptor remains in cm.descriptors so the read loop
+// continues, but the player association is cleared (C TinyMUSH R_LOGOUT behavior).
+func (cm *ConnManager) Logout(d *Descriptor) {
+	if cm.EventBus != nil && d.Player != gamedb.Nothing {
+		cm.EventBus.Unsubscribe(d.Player, d)
+	}
+
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if d.Player != gamedb.Nothing {
+		descs := cm.byPlayer[d.Player]
+		for i, dd := range descs {
+			if dd.ID == d.ID {
+				cm.byPlayer[d.Player] = append(descs[:i], descs[i+1:]...)
+				break
+			}
+		}
+		if len(cm.byPlayer[d.Player]) == 0 {
+			delete(cm.byPlayer, d.Player)
+		}
+	}
+}
+
 // Login associates a descriptor with a player and subscribes it to the event bus.
 func (cm *ConnManager) Login(d *Descriptor, player gamedb.DBRef) {
 	cm.mu.Lock()

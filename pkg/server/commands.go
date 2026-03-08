@@ -142,6 +142,7 @@ func InitCommands() map[string]*Command {
 
 	// Session
 	register("QUIT", cmdQuit)
+	register("LOGOUT", cmdLogout)
 	register("@doing", cmdSetDoing)
 
 	// Help system
@@ -1259,6 +1260,12 @@ func cmdQuit(g *Game, d *Descriptor, _ string, _ []string) {
 		d.Send("Going home.")
 	}
 	g.DisconnectPlayer(d)
+}
+
+// cmdLogout disconnects the character but keeps the socket open,
+// returning the player to the login screen (C TinyMUSH R_LOGOUT behavior).
+func cmdLogout(g *Game, d *Descriptor, _ string, _ []string) {
+	g.LogoutPlayer(d)
 }
 
 func cmdReadCache(g *Game, d *Descriptor, _ string, _ []string) {
@@ -3955,6 +3962,68 @@ func cmdDictionary(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 // DisconnectPlayer handles a player disconnecting.
+// LogoutPlayer disconnects the character but keeps the socket open,
+// resetting the descriptor to the login screen so the player can
+// connect as a different character (C TinyMUSH R_LOGOUT behavior).
+func (g *Game) LogoutPlayer(d *Descriptor) {
+	if d.State == ConnConnected {
+		playerName := g.PlayerName(d.Player)
+		loc := g.PlayerLocation(d.Player)
+
+		// Update connlog with disconnect timestamp
+		if g.Store != nil {
+			g.Store.UpdateConnLogDisconnect(d.Player, time.Now().Unix())
+		}
+
+		// Fire ADISCONNECT triggers
+		connCount := len(g.Conns.GetByPlayer(d.Player))
+		g.FireConnectAttr(d.Player, connCount, 40) // A_ADISCONNECT = 40
+
+		// Clear CONNECTED flag on last disconnect
+		if connCount <= 1 {
+			if obj, ok := g.DB.Objects[d.Player]; ok {
+				obj.Flags[1] &^= gamedb.Flag2Connected
+			}
+		}
+
+		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
+			fmt.Sprintf("%s has disconnected.", playerName))
+
+		// Guest cleanup
+		if g.Guests.IsGuest(d.Player) {
+			player := d.Player
+			go func() {
+				time.Sleep(60 * time.Second)
+				if len(g.Conns.GetByPlayer(player)) == 0 {
+					g.DestroyGuest(player)
+				}
+			}()
+		}
+	}
+
+	// Reset descriptor to login state (keep socket open)
+	g.Conns.Logout(d)
+	d.State = ConnLogin
+	d.Player = 0
+	d.ConnTime = time.Now()
+	d.LastCmd = time.Now()
+	d.CmdCount = 0
+	d.DoingStr = ""
+	d.ProgData = nil
+	d.LastRData = nil
+
+	// Show the login screen again
+	if g.Texts != nil {
+		if txt := g.Texts.GetConnect(); txt != "" {
+			d.SendNoNewline(txt)
+		} else {
+			d.Send("Welcome to GoTinyMUSH. Commands: connect, create, WHO, QUIT")
+		}
+	} else {
+		d.Send("Welcome to GoTinyMUSH. Commands: connect, create, WHO, QUIT")
+	}
+}
+
 func (g *Game) DisconnectPlayer(d *Descriptor) {
 	if d.State == ConnConnected {
 		playerName := g.PlayerName(d.Player)
