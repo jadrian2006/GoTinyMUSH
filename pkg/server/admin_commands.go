@@ -927,8 +927,14 @@ func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	newPass := strings.TrimSpace(args[eqIdx+1:])
-	target := LookupPlayer(g.DB, targetStr)
+	// Use MatchObject to handle #dbref, *player, and name syntax
+	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
+		d.Send("No such player.")
+		return
+	}
+	// Verify target is a player
+	if obj, ok := g.DB.Objects[target]; !ok || obj.ObjType() != gamedb.TypePlayer {
 		d.Send("No such player.")
 		return
 	}
@@ -941,6 +947,139 @@ func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {
 	hash := mushcrypt.Crypt(newPass, "XX")
 	g.SetAttr(target, aPass, hash)
 	d.Send(fmt.Sprintf("Password for %s changed.", g.ObjName(target)))
+}
+
+// cmdPcreate implements @pcreate name=password — wizard creates a player
+// without logging them in. Matches C TinyMUSH create.c:do_pcreate.
+func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
+	if !Wizard(g, d.Player) {
+		d.Send("Permission denied.")
+		return
+	}
+	eqIdx := strings.IndexByte(args, '=')
+	if eqIdx < 0 || args == "" {
+		d.Send("Usage: @pcreate name = password")
+		return
+	}
+	name := strings.TrimSpace(args[:eqIdx])
+	pass := strings.TrimSpace(args[eqIdx+1:])
+	if name == "" || pass == "" {
+		d.Send("Usage: @pcreate name = password")
+		return
+	}
+	// Check if name already exists
+	if LookupPlayer(g.DB, name) != gamedb.Nothing {
+		d.Send("That name is already taken.")
+		return
+	}
+	if len(name) < 2 {
+		d.Send("That name is too short.")
+		return
+	}
+	for _, ch := range name {
+		if ch == '"' || ch == ';' {
+			d.Send("That name contains illegal characters.")
+			return
+		}
+	}
+	if g.IsBadName(name) {
+		d.Send("That name is not allowed.")
+		return
+	}
+	// Create the player
+	ref := g.CreateObject(name, gamedb.TypePlayer, d.Player)
+	playerObj := g.DB.Objects[ref]
+	playerObj.Owner = ref
+	// Set password
+	hash := mushcrypt.Crypt(pass, "XX")
+	g.SetAttr(ref, aPass, hash)
+	// Place at start room
+	startRoom := g.StartingRoom()
+	startHome := g.StartingHome()
+	playerObj.Location = startRoom
+	playerObj.Link = startHome
+	g.AddToContents(startRoom, ref)
+	if roomObj, ok := g.DB.Objects[startRoom]; ok {
+		g.PersistObjects(playerObj, roomObj)
+	}
+	if g.Store != nil {
+		g.Store.PutMeta()
+		g.Store.UpdatePlayerIndex(playerObj, "")
+	}
+	log.Printf("PCREATE: %s(#%d) created player %s(#%d)", g.PlayerName(d.Player), d.Player, name, ref)
+	d.Send(fmt.Sprintf("Player %s created as #%d.", name, ref))
+}
+
+// cmdBotcreate implements @botcreate name — wizard creates a bot player.
+// Creates the player with ROBOT flag, generates an API key, and sets no password.
+// The bot authenticates only via API key, never interactively.
+func cmdBotcreate(g *Game, d *Descriptor, args string, _ []string) {
+	if !Wizard(g, d.Player) {
+		d.Send("Permission denied.")
+		return
+	}
+	name := strings.TrimSpace(args)
+	if name == "" {
+		d.Send("Usage: @botcreate name")
+		return
+	}
+	// Check if name already exists
+	if LookupPlayer(g.DB, name) != gamedb.Nothing {
+		d.Send("That name is already taken.")
+		return
+	}
+	if len(name) < 2 {
+		d.Send("That name is too short.")
+		return
+	}
+	for _, ch := range name {
+		if ch == '"' || ch == ';' {
+			d.Send("That name contains illegal characters.")
+			return
+		}
+	}
+	if g.IsBadName(name) {
+		d.Send("That name is not allowed.")
+		return
+	}
+	// Create the player
+	ref := g.CreateObject(name, gamedb.TypePlayer, d.Player)
+	playerObj := g.DB.Objects[ref]
+	playerObj.Owner = ref
+	// Set ROBOT flag
+	playerObj.Flags[0] |= gamedb.FlagRobot
+	// No password — bot uses API key only
+	// Place at creator's location (like C TinyMUSH PCRE_ROBOT)
+	creatorLoc := g.PlayerLocation(d.Player)
+	playerObj.Location = creatorLoc
+	playerObj.Link = creatorLoc // home = creator's location
+	g.AddToContents(creatorLoc, ref)
+	if roomObj, ok := g.DB.Objects[creatorLoc]; ok {
+		g.PersistObjects(playerObj, roomObj)
+	}
+	if g.Store != nil {
+		g.Store.PutMeta()
+		g.Store.UpdatePlayerIndex(playerObj, "")
+	}
+	// Generate API key
+	var rawKey string
+	if g.Store != nil {
+		keyBytes := make([]byte, 32)
+		rand.Read(keyBytes)
+		rawKey = hex.EncodeToString(keyBytes)
+		h := sha256.Sum256([]byte(rawKey))
+		keyHash := hex.EncodeToString(h[:])
+		if err := g.Store.PutAPIKey(ref, keyHash); err != nil {
+			d.Send(fmt.Sprintf("Warning: API key generation failed: %s", err))
+		}
+	}
+	log.Printf("BOTCREATE: %s(#%d) created bot %s(#%d)", g.PlayerName(d.Player), d.Player, name, ref)
+	d.Send(fmt.Sprintf("Bot player %s created as #%d with ROBOT flag.", name, ref))
+	if rawKey != "" {
+		d.Send(fmt.Sprintf("API Key: %s", rawKey))
+		d.Send("Store this key securely - it will not be shown again.")
+		d.Send(fmt.Sprintf("Authenticate via: POST /api/v1/auth/apikey with {\"key\":\"%s\",\"dbref\":\"#%d\"}", rawKey, ref))
+	}
 }
 
 func cmdFind(g *Game, d *Descriptor, args string, _ []string) {

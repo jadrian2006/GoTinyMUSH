@@ -104,6 +104,8 @@ func InitCommands() map[string]*Command {
 	registerNG("@boot", cmdBoot)
 	registerNG("@wall", cmdWall)
 	registerNG("@newpassword", cmdNewPassword)
+	registerNG("@pcreate", cmdPcreate)
+	registerNG("@botcreate", cmdBotcreate)
 	registerNG("@find", cmdFind)
 	registerNG("@stats", cmdStats)
 	registerNG("@ps", cmdPs)
