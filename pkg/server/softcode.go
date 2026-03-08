@@ -25,18 +25,27 @@ const (
 // MatchDollarCommands searches objects for $-pattern attributes that match the input.
 // Returns true if a match was found and queued/executed.
 func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) bool {
-	// Objects to search, matching C TinyMUSH order (command_core.c atr_match):
-	// room → room contents → player → player inventory → master room → zones
-	var searchObjs []gamedb.DBRef
+	// C TinyMUSH command.c process_command search order with tiered fallback:
+	// 1. Player self (match_mine)
+	// 2. Room contents + room itself
+	// 3. Player inventory
+	// 4. Zones (only if no match yet — C: "if (!succ)")
+	// 5. Master room (only if no match yet — C: "if (!got_stop && !succ)")
+	//
+	// Within each tier, ALL matching $-commands fire (are queued).
+	// But master room and zones only fire if nothing matched in earlier tiers.
+	// This prevents double-firing when the same object appears in both
+	// room contents and the master room.
 
-	// Room and room contents first (C checks location before player/inventory).
-	// C TinyMUSH (command_core.c): room contents require Ccommand(thing) which
-	// checks the HAS_COMMANDS ($) flag. Players are inherently excluded since
-	// Ccommand checks Typeof(x) != TYPE_PLAYER. This prevents personal shortcuts
-	// (e.g. "$o1") on other players from firing when you type a matching command.
 	loc := g.PlayerLocation(player)
+	found := false
+
+	// --- Tier 1-3: Local matches (all fire, no early termination) ---
+	var localObjs []gamedb.DBRef
+
+	// Room and room contents
 	if loc != gamedb.Nothing {
-		searchObjs = append(searchObjs, loc)
+		localObjs = append(localObjs, loc)
 		for _, next := range g.DB.SafeContents(loc) {
 			if next == player {
 				continue // Skip self (searched separately below)
@@ -52,61 +61,76 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 			if !nObj.HasFlag2(gamedb.Flag2HasCommands) {
 				continue
 			}
-			searchObjs = append(searchObjs, next)
+			localObjs = append(localObjs, next)
 		}
 	}
 
 	// Player's own attributes
-	searchObjs = append(searchObjs, player)
+	localObjs = append(localObjs, player)
 
 	// Player's inventory
-	searchObjs = append(searchObjs, g.DB.SafeContents(player)...)
-
-	// Master room contents — global commands live here in heavy softcode games
-	masterRoom := g.MasterRoomRef()
-	if loc != masterRoom {
-		// Search master room itself
-		searchObjs = append(searchObjs, masterRoom)
-		// Search its contents
-		searchObjs = append(searchObjs, g.DB.SafeContents(masterRoom)...)
-	}
-
-	// Zone-based commands: check player's zones and room's zones
-	if pObj, ok := g.DB.Objects[player]; ok {
-		for _, z := range pObj.AllZones() {
-			searchObjs = g.addZoneObjects(searchObjs, z)
-		}
-	}
-	if loc != gamedb.Nothing {
-		if locObj, ok := g.DB.Objects[loc]; ok {
-			for _, z := range locObj.AllZones() {
-				searchObjs = g.addZoneObjects(searchObjs, z)
-			}
-		}
-	}
+	localObjs = append(localObjs, g.DB.SafeContents(player)...)
 
 	if IsDebug() {
-		names := make([]string, len(searchObjs))
-		for i, ref := range searchObjs {
+		names := make([]string, len(localObjs))
+		for i, ref := range localObjs {
 			if o, ok := g.DB.Objects[ref]; ok {
 				names[i] = fmt.Sprintf("#%d(%s)", ref, o.Name)
 			} else {
 				names[i] = fmt.Sprintf("#%d(?)", ref)
 			}
 		}
-		DebugLog("DOLLAR search list (%d objs): %v", len(searchObjs), names)
+		DebugLog("DOLLAR local search (%d objs): %v", len(localObjs), names)
 	}
 
-	// Search each object's attributes.
-	// In C TinyMUSH, ALL matching $-commands across all objects fire
-	// (they are all queued), not just the first match found.
-	found := false
-	for _, objRef := range searchObjs {
+	for _, objRef := range localObjs {
 		if g.matchDollarOnObject(objRef, player, cause, input) {
-			DebugLog("DOLLAR MATCHED on #%d", objRef)
+			DebugLog("DOLLAR MATCHED on #%d (local)", objRef)
 			found = true
 		}
 	}
+
+	// --- Tier 4: Zones (only if no local match) ---
+	// C TinyMUSH: zones checked only when !succ (command.c:1148, 1167, 1246)
+	if !found {
+		var zoneObjs []gamedb.DBRef
+		if pObj, ok := g.DB.Objects[player]; ok {
+			for _, z := range pObj.AllZones() {
+				zoneObjs = g.addZoneObjects(zoneObjs, z)
+			}
+		}
+		if loc != gamedb.Nothing {
+			if locObj, ok := g.DB.Objects[loc]; ok {
+				for _, z := range locObj.AllZones() {
+					zoneObjs = g.addZoneObjects(zoneObjs, z)
+				}
+			}
+		}
+		for _, objRef := range zoneObjs {
+			if g.matchDollarOnObject(objRef, player, cause, input) {
+				DebugLog("DOLLAR MATCHED on #%d (zone)", objRef)
+				found = true
+			}
+		}
+	}
+
+	// --- Tier 5: Master room (only if no match yet) ---
+	// C TinyMUSH: "If we didn't find anything, try in the master room" (command.c:1254-1266)
+	if !found {
+		masterRoom := g.MasterRoomRef()
+		if loc != masterRoom {
+			var masterObjs []gamedb.DBRef
+			masterObjs = append(masterObjs, g.DB.SafeContents(masterRoom)...)
+			masterObjs = append(masterObjs, masterRoom)
+			for _, objRef := range masterObjs {
+				if g.matchDollarOnObject(objRef, player, cause, input) {
+					DebugLog("DOLLAR MATCHED on #%d (master)", objRef)
+					found = true
+				}
+			}
+		}
+	}
+
 	if !found {
 		DebugLog("DOLLAR NO MATCH for %q", input)
 	}
@@ -1136,13 +1160,16 @@ func (g *Game) objSetVAttr(player gamedb.DBRef, rest string) {
 	attrName := strings.ToUpper(strings.TrimSpace(rest[:spaceIdx]))
 	objVal := strings.TrimSpace(rest[spaceIdx+1:])
 
+	// C TinyMUSH: "&ATTR obj" (no =) clears the attribute, same as "&ATTR obj=".
+	var targetStr, value string
 	eqIdx := strings.IndexByte(objVal, '=')
 	if eqIdx < 0 {
-		DebugLog("OBJSETVATTR player=#%d attr=%s FAILED: no = in %q", player, attrName, truncDebug(objVal, 200))
-		return
+		targetStr = objVal
+		value = ""
+	} else {
+		targetStr = strings.TrimSpace(objVal[:eqIdx])
+		value = strings.TrimSpace(objVal[eqIdx+1:])
 	}
-	targetStr := strings.TrimSpace(objVal[:eqIdx])
-	value := strings.TrimSpace(objVal[eqIdx+1:])
 
 	if attrName == "" {
 		DebugLog("OBJSETVATTR player=#%d FAILED: empty attrName", player)

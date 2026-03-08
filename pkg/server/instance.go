@@ -74,6 +74,7 @@ func instanceCreate(g *Game, d *Descriptor, args string) {
 	instanceRef := g.CreateObject(newName, gamedb.TypeThing, d.Player)
 	instanceObj := g.DB.Objects[instanceRef]
 	instanceObj.Flags[2] |= gamedb.Flag3Instance
+	instanceObj.Flags[0] |= gamedb.FlagEnterOK // Instances are enterable by default
 	instanceObj.Parent = tmplObj.Parent
 	instanceObj.Link = tmplObj.Link
 
@@ -104,6 +105,7 @@ func instanceCreate(g *Game, d *Descriptor, args string) {
 		newRoom.Location = instanceRef // interior room belongs to instance
 		newRoom.Parent = oldObj.Parent
 		newRoom.Zone = oldObj.Zone
+		g.AddToContents(instanceRef, newRoomRef) // link into THING's contents chain for lcon()
 
 		// Copy attributes
 		for _, attr := range oldObj.Attrs {

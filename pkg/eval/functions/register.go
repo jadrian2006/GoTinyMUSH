@@ -299,6 +299,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("LOC", fnLoc, 1, 0)
 	ctx.RegisterFunction("OWNER", fnOwner, 1, 0)
 	ctx.RegisterFunction("TYPE", fnType, 1, 0)
+	ctx.RegisterFunction("OBJTYPE", fnType, 1, 0)
 	ctx.RegisterFunction("FLAGS", fnFlags, 1, 0)
 	ctx.RegisterFunction("HASFLAG", fnHasflag, 2, 0)
 	ctx.RegisterFunction("HASATTR", fnHasattr, 2, 0)

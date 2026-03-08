@@ -69,16 +69,30 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 	}
 	// Mark as GOING
 	obj.Flags[0] |= gamedb.FlagGoing
-	// Remove from location — announce departure to room
-	if obj.Location != gamedb.Nothing {
-		if !obj.HasFlag(gamedb.FlagDark) {
-			g.Conns.SendToRoomExcept(g.DB, obj.Location, target,
-				fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+
+	if obj.ObjType() == gamedb.TypeExit {
+		// Exits store source room in Exits field — remove from source room's exit chain
+		if obj.Exits != gamedb.Nothing {
+			srcRoom := obj.Exits
+			g.RemoveFromExits(srcRoom, target)
+			if srcObj, ok := g.DB.Objects[srcRoom]; ok {
+				g.PersistObject(srcObj)
+			}
 		}
-		g.RemoveFromContents(obj.Location, target)
+		obj.Exits = gamedb.Nothing
+		obj.Location = gamedb.Nothing
+		obj.Next = gamedb.Nothing
+	} else {
+		// Non-exits: remove from location's contents chain
+		if obj.Location != gamedb.Nothing {
+			if !obj.HasFlag(gamedb.FlagDark) {
+				g.Conns.SendToRoomExcept(g.DB, obj.Location, target,
+					fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+			}
+			g.RemoveFromContents(obj.Location, target)
+		}
+		obj.Location = gamedb.Nothing
 	}
-	// Clear location on the destroyed object
-	obj.Location = gamedb.Nothing
 	g.PersistObject(obj)
 	d.Send(fmt.Sprintf("Destroyed: %s(#%d)", obj.Name, target))
 }
@@ -1106,13 +1120,16 @@ func cmdSetVAttr(g *Game, d *Descriptor, args string, _ []string) {
 	attrName := strings.ToUpper(strings.TrimSpace(args[:spaceIdx]))
 	rest := strings.TrimSpace(args[spaceIdx+1:])
 
+	// C TinyMUSH: "&ATTR obj" (no =) clears the attribute, same as "&ATTR obj=".
+	var targetStr, value string
 	eqIdx := strings.IndexByte(rest, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: &ATTR object=value")
-		return
+		targetStr = rest
+		value = ""
+	} else {
+		targetStr = strings.TrimSpace(rest[:eqIdx])
+		value = strings.TrimSpace(rest[eqIdx+1:])
 	}
-	targetStr := strings.TrimSpace(rest[:eqIdx])
-	value := strings.TrimSpace(rest[eqIdx+1:])
 
 	if attrName == "" {
 		d.Send("Usage: &ATTR object=value")

@@ -162,6 +162,7 @@ func InitCommands() map[string]*Command {
 	registerNG("take", cmdGet)
 	registerNG("drop", cmdDrop)
 	registerNG("give", cmdGive)
+	registerNG("@poor", cmdPoor) // wizard: set building pennies
 	register("enter", cmdEnter)
 	register("leave", cmdLeave)
 	register("whisper", cmdWhisper)
@@ -1574,6 +1575,41 @@ func (g *Game) RemoveFromContents(loc gamedb.DBRef, obj gamedb.DBRef) {
 		}
 		if prevObj.Next == obj {
 			if o, ok := g.DB.Objects[obj]; ok {
+				prevObj.Next = o.Next
+				o.Next = gamedb.Nothing
+			}
+			return
+		}
+		prev = prevObj.Next
+	}
+}
+
+// RemoveFromExits removes an exit from a room's exit chain.
+// Mirrors RemoveFromContents but walks the Exits chain instead of Contents.
+func (g *Game) RemoveFromExits(room gamedb.DBRef, exitRef gamedb.DBRef) {
+	roomObj, ok := g.DB.Objects[room]
+	if !ok {
+		return
+	}
+	// Head of chain matches — relink head
+	if roomObj.Exits == exitRef {
+		if o, ok := g.DB.Objects[exitRef]; ok {
+			roomObj.Exits = o.Next
+			o.Next = gamedb.Nothing
+		}
+		return
+	}
+	// Walk the chain to find the exit
+	prev := roomObj.Exits
+	seen := make(map[gamedb.DBRef]bool)
+	for prev != gamedb.Nothing && !seen[prev] {
+		seen[prev] = true
+		prevObj, ok := g.DB.Objects[prev]
+		if !ok {
+			break
+		}
+		if prevObj.Next == exitRef {
+			if o, ok := g.DB.Objects[exitRef]; ok {
 				prevObj.Next = o.Next
 				o.Next = gamedb.Nothing
 			}
@@ -3592,6 +3628,40 @@ func (g *Game) DidIt(cause, thing gamedb.DBRef, msgAttr, oMsgAttr, aMsgAttr int)
 	if aMsgAttr > 0 {
 		g.QueueAttrAction(thing, cause, aMsgAttr, nil)
 	}
+}
+
+// cmdPoor sets an object's pennies directly (wizard only).
+// Usage: @poor <target>=<amount>
+func cmdPoor(g *Game, d *Descriptor, args string, _ []string) {
+	if !g.IsWizard(d.Player) {
+		d.Send("Permission denied.")
+		return
+	}
+	eqIdx := strings.IndexByte(args, '=')
+	if eqIdx < 0 {
+		d.Send("Usage: @poor <target>=<amount>")
+		return
+	}
+	targetStr := strings.TrimSpace(args[:eqIdx])
+	amountStr := strings.TrimSpace(args[eqIdx+1:])
+
+	target := g.MatchObject(d.Player, targetStr)
+	if target == gamedb.Nothing {
+		d.Send("I don't see that here.")
+		return
+	}
+	obj, ok := g.DB.Objects[target]
+	if !ok {
+		d.Send("No such object.")
+		return
+	}
+	amount := toIntSimple(amountStr)
+	if amount < 0 {
+		amount = 0
+	}
+	obj.Pennies = amount
+	g.PersistObject(obj)
+	d.Send(fmt.Sprintf("Set. %s now has %d %s.", DisplayName(obj.Name), amount, g.MoneyName(amount)))
 }
 
 func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {

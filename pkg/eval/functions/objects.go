@@ -409,6 +409,9 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if f2&gamedb.Flag2HTML != 0 { buf.WriteByte('~') }
 	if f2&gamedb.Flag2HeadFlag != 0 { buf.WriteByte('?') }
 	if f2&gamedb.Flag2Vacation != 0 { buf.WriteByte('|') }
+	// Flag word 3
+	f3 := obj.Flags[2]
+	if f3&gamedb.Flag3Instance != 0 { buf.WriteByte('^') }
 }
 
 // knownFlags maps flag names to [word, bitmask]. Word -1 means type check.
@@ -443,6 +446,7 @@ var knownFlags = map[string][2]int{
 	"SEE_THROUGH": {0, gamedb.FlagSeeThru}, "TRANSPARENT": {0, gamedb.FlagSeeThru},
 	"HAS_STARTUP": {0, gamedb.FlagHasStartup},
 	"HAS_COMMANDS": {1, gamedb.Flag2HasCommands}, "COMMANDS": {1, gamedb.Flag2HasCommands},
+	"INSTANCE": {2, gamedb.Flag3Instance},
 	"PLAYER": {-1, int(gamedb.TypePlayer)}, "ROOM": {-1, int(gamedb.TypeRoom)},
 	"EXIT": {-1, int(gamedb.TypeExit)}, "THING": {-1, int(gamedb.TypeThing)},
 }

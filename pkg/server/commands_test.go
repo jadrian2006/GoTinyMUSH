@@ -956,3 +956,87 @@ func TestWho(t *testing.T) {
 		t.Errorf("WHO: expected 'Wizard' in output, got: %s", out)
 	}
 }
+
+// TestMasterRoomDedup verifies that $ commands on objects reachable from both
+// room contents and master room only fire once (tiered search fix).
+func TestMasterRoomDedup(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Put a $command on the master room object (#2) which is also in room contents.
+	master := env.game.DB.Objects[2]
+	master.Flags[1] |= gamedb.Flag2HasCommands
+	env.game.SetAttr(2, 256, "$test_dedup *:@pemit %#=DEDUP:%0")
+	env.game.DB.AddAttrDef(256, "CMD_DEDUP", 1)
+
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "test_dedup hello")
+	env.game.ProcessQueue()
+	out := getOutput(env.player)
+
+	// Should appear exactly once, not twice.
+	count := strings.Count(out, "DEDUP:hello")
+	if count != 1 {
+		t.Errorf("expected exactly 1 match, got %d. Output: %q", count, out)
+	}
+}
+
+// TestSetVAttrClearNoEquals verifies that "&ATTR obj" (no =) clears the
+// attribute, matching C TinyMUSH behavior. This is the regression test for
+// the mail concatenation bug: BrandyMail's cleanup_send uses "&attr obj"
+// (no =) to clear mail-in-progress-body between sends.
+func TestSetVAttrClearNoEquals(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set an attribute via player command path (cmdSetVAttr)
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "&TEST_CLEAR #3=hello world")
+	env.game.ProcessQueue()
+
+	// Verify it was set
+	text := env.game.GetAttrText(3, env.game.ResolveAttrNum("TEST_CLEAR"))
+	if text != "hello world" {
+		t.Fatalf("expected attr set to 'hello world', got %q", text)
+	}
+
+	// Clear via "&ATTR obj" (no =) — this is what BrandyMail cleanup_send does
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "&TEST_CLEAR #3")
+	env.game.ProcessQueue()
+	out := getOutput(env.player)
+
+	// Should report "Cleared"
+	if !strings.Contains(out, "Cleared") {
+		t.Errorf("expected 'Cleared' in output, got: %q", out)
+	}
+
+	// Verify the attribute is actually gone
+	text = env.game.GetAttrText(3, env.game.ResolveAttrNum("TEST_CLEAR"))
+	if text != "" {
+		t.Errorf("expected attr to be cleared, got %q", text)
+	}
+}
+
+// TestObjSetVAttrClearNoEquals verifies that "&ATTR obj" (no =) clears
+// attributes when executed by objects (objSetVAttr path). This is the
+// exact code path used by BrandyMail cleanup_send via @trigger.
+func TestObjSetVAttrClearNoEquals(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set an attribute on object #3
+	env.game.SetAttrByNameChecked(1, 3, "MAIL_BODY", "accumulated text")
+
+	// Verify it was set
+	text := env.game.GetAttrText(3, env.game.ResolveAttrNum("MAIL_BODY"))
+	if text != "accumulated text" {
+		t.Fatalf("expected attr set, got %q", text)
+	}
+
+	// Execute "&MAIL_BODY #3" as object (no =) — simulates cleanup_send
+	env.game.ExecuteAsObject(1, 1, "&MAIL_BODY #3")
+
+	// Verify the attribute is cleared
+	text = env.game.GetAttrText(3, env.game.ResolveAttrNum("MAIL_BODY"))
+	if text != "" {
+		t.Errorf("expected attr cleared by objSetVAttr (no =), got %q", text)
+	}
+}
