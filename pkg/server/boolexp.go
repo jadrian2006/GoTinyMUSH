@@ -42,6 +42,10 @@ const (
 	aRFail   = 132 // A_RFAIL
 	aORFail  = 133 // A_ORFAIL
 	aARFail  = 134 // A_ARFAIL
+	aLDrop   = 86  // A_LDROP — drop lock
+	aDFail   = 135 // A_DFAIL — drop fail message
+	aODFail  = 136 // A_ODFAIL — others drop fail message
+	aADFail  = 137 // A_ADFAIL — drop fail action
 )
 
 // Maximum indirection depth for @-locks to prevent infinite loops.

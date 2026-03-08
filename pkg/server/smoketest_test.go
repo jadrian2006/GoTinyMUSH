@@ -2330,3 +2330,269 @@ func TestForce_BraceWrappedBody(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Bug: "enter" matches inventory before room contents
+// C TinyMUSH do_enter uses match_neighbor() (room contents only).
+// Go was using MatchObject which searched inventory AND room contents,
+// so "enter nyki's" would match "Nyki's Crystal Cutter" in inventory
+// before "Nyki's Sled" in the room.
+// ============================================================================
+
+func TestEnter_RoomOnlyNotInventory(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// Create an inventory item named "Nyki's Crystal Cutter" carried by wizard
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Nyki's Crystal Cutter",
+		Location: 1, // carried by Wizard #1
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	// Add to wizard's inventory
+	env.game.DB.Objects[1].Contents = 6
+
+	// Create a room object named "Nyki's Sled" in Room #0 with ENTER_OK
+	env.game.DB.Objects[7] = &gamedb.Object{
+		DBRef:    7,
+		Name:     "Nyki's Sled",
+		Location: 0, // in Room Zero
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing) | gamedb.FlagEnterOK, 0, 0},
+	}
+	// Add to room contents
+	roomContents := env.game.DB.SafeContents(0)
+	env.game.AddToContents(0, 7)
+	_ = roomContents
+
+	// "enter Nyki's" should match the room object (sled), NOT the inventory item
+	cmdEnter(env.game, env.player, "Nyki's", nil)
+	out := getOutput(env.player)
+
+	// Should enter the sled (room object), not complain about inventory item
+	if strings.Contains(out, "can't enter") {
+		t.Errorf("enter matched inventory instead of room: %s", out)
+	}
+	if !strings.Contains(out, "You enter Nyki's Sled") {
+		t.Errorf("expected to enter Nyki's Sled, got: %s", out)
+	}
+}
+
+func TestEnter_InventoryItemsIgnored(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// Create ONLY an inventory item, no matching room object
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Gadget",
+		Location: 1, // carried by Wizard #1
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing) | gamedb.FlagEnterOK, 0, 0},
+	}
+	env.game.DB.Objects[1].Contents = 6
+
+	// "enter Gadget" should NOT find inventory items
+	cmdEnter(env.game, env.player, "Gadget", nil)
+	out := getOutput(env.player)
+
+	if strings.Contains(out, "You enter") {
+		t.Errorf("enter should not match inventory items, got: %s", out)
+	}
+	if !strings.Contains(out, "don't see that") {
+		t.Errorf("expected 'don't see that here', got: %s", out)
+	}
+}
+
+// ============================================================================
+// Bug: drop does not check A_LDROP (drop lock)
+// C TinyMUSH checks could_doit(player, thing, A_LDROP) before allowing drop.
+// Go was skipping this check entirely, so locked cartons would show the wrong
+// failure message (secured_type instead of "carton is full").
+// ============================================================================
+
+func TestDrop_ChecksDropLock(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// Give the wizard an object with a drop lock that will FAIL
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Locked Carton",
+		Location: 1, // carried by Wizard #1
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing), 0, 0},
+		Attrs: []gamedb.Attribute{
+			// A_LDROP = 86 — lock to #-1 (nobody) so it always fails
+			{Number: 86, Value: "1:#-1"},
+			// A_DFAIL = 135 — custom fail message
+			{Number: 135, Value: "1:The carton is full!"},
+		},
+	}
+	env.game.DB.Objects[1].Contents = 6
+
+	cmdDrop(env.game, env.player, "Locked Carton", nil)
+	out := getOutput(env.player)
+
+	// Should show the drop fail message, NOT actually drop it
+	if strings.Contains(out, "You drop") {
+		t.Errorf("drop should have been blocked by drop lock, got: %s", out)
+	}
+	if !strings.Contains(out, "carton is full") {
+		t.Errorf("expected drop fail message 'The carton is full!', got: %s", out)
+	}
+
+	// Object should still be in inventory (location unchanged)
+	if env.game.DB.Objects[6].Location != 1 {
+		t.Errorf("object should still be in wizard's inventory, location=%d", env.game.DB.Objects[6].Location)
+	}
+}
+
+// ============================================================================
+// Bug: $commands on parent objects don't fire for child objects in room
+// C TinyMUSH sets HAS_COMMANDS on child objects during db load when a parent
+// has $-commands. Go was only checking the object's own HAS_COMMANDS flag,
+// so objects like cartons (parent has $commands, child doesn't have flag)
+// would not respond to commands like "show packed crystals".
+// ============================================================================
+
+func TestDollarCommand_InheritedFromParent(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// Create parent object #6 with HAS_COMMANDS and a $command
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Parent Carton",
+		Location: gamedb.Nothing,
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing), int(gamedb.Flag2HasCommands), 0},
+		Attrs: []gamedb.Attribute{
+			// $show packed crystals: @pemit %#=PACKED_OUTPUT
+			{Number: 200, Value: "\x011:0:$show packed crystals:@pemit %#=PACKED_OUTPUT"},
+		},
+	}
+
+	// Create child object #7 in room — has parent #6, but NO HAS_COMMANDS flag itself
+	env.game.DB.Objects[7] = &gamedb.Object{
+		DBRef:    7,
+		Name:     "Carton 1",
+		Location: 0, // in Room Zero
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   6, // parent is #6 which has HAS_COMMANDS
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing), 0, 0}, // NO HAS_COMMANDS
+	}
+	env.game.AddToContents(0, 7)
+
+	// Verify parent chain is correct
+	child := env.game.DB.Objects[7]
+	if child.Parent != 6 {
+		t.Fatalf("child parent=%d, want 6", child.Parent)
+	}
+	parent := env.game.DB.Objects[6]
+	if !parent.HasFlag2(gamedb.Flag2HasCommands) {
+		t.Fatal("parent should have HAS_COMMANDS flag")
+	}
+
+	// Verify child is in room contents
+	contents := env.game.DB.SafeContents(0)
+	found7 := false
+	for _, ref := range contents {
+		if ref == 7 {
+			found7 = true
+		}
+	}
+	if !found7 {
+		t.Fatalf("child #7 not in room contents: %v", contents)
+	}
+
+	// Verify hasCommandsFlag works for child
+	if !env.game.hasCommandsFlag(7) {
+		t.Fatal("hasCommandsFlag(7) should be true via parent inheritance")
+	}
+
+	// "show packed crystals" should match via parent's $command
+	matched := env.game.MatchDollarCommands(1, 1, "show packed crystals")
+	if !matched {
+		t.Error("$command on parent should match for child object without HAS_COMMANDS flag")
+	}
+
+	// Process queue to execute the matched command
+	env.game.ProcessQueue()
+	out := getOutput(env.player)
+
+	if !strings.Contains(out, "PACKED_OUTPUT") {
+		t.Errorf("expected PACKED_OUTPUT from parent $command, got: %s", out)
+	}
+}
+
+func TestDrop_NoDropLockAllowsDrop(t *testing.T) {
+	env := newTestEnv(t)
+	clearOutput(env.player)
+
+	// Give the wizard an object with NO drop lock
+	env.game.DB.Objects[6] = &gamedb.Object{
+		DBRef:    6,
+		Name:     "Normal Item",
+		Location: 1, // carried by Wizard #1
+		Contents: gamedb.Nothing,
+		Exits:    gamedb.Nothing,
+		Link:     gamedb.Nothing,
+		Next:     gamedb.Nothing,
+		Owner:    1,
+		Parent:   gamedb.Nothing,
+		Zone:     gamedb.Nothing,
+		Flags:    [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	env.game.DB.Objects[1].Contents = 6
+
+	cmdDrop(env.game, env.player, "Normal Item", nil)
+	out := getOutput(env.player)
+
+	// Should drop normally
+	if !strings.Contains(out, "You drop Normal Item") {
+		t.Errorf("expected normal drop, got: %s", out)
+	}
+
+	// Object should now be in room
+	if env.game.DB.Objects[6].Location != 0 {
+		t.Errorf("object should be in room #0 after drop, location=%d", env.game.DB.Objects[6].Location)
+	}
+}
+

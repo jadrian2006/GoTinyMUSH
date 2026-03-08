@@ -3474,6 +3474,12 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 
+	// Check drop lock (A_LDROP) — C TinyMUSH checks this before allowing drop
+	if !CouldDoIt(g, d.Player, target, aLDrop) {
+		HandleLockFailure(g, d, target, aDFail, aODFail, aADFail, "You can't drop that.")
+		return
+	}
+
 	// Remove from inventory, add to room contents
 	g.RemoveFromContents(d.Player, target)
 	loc := g.PlayerLocation(d.Player)
@@ -3676,7 +3682,10 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 		d.Send("Enter what?")
 		return
 	}
-	target := g.MatchObject(d.Player, args)
+	// C TinyMUSH do_enter uses match_neighbor() — room contents only, NOT inventory.
+	// This prevents inventory items (e.g. "Nyki's Crystal Cutter") from matching
+	// before room objects (e.g. "Nyki's Sled") when using "enter nyki's".
+	target := g.MatchInRoom(d.Player, args)
 	if target == gamedb.Nothing {
 		d.Send("I don't see that here.")
 		return

@@ -54,11 +54,13 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 			if !ok {
 				continue
 			}
-			// C TinyMUSH: Ccommand(x) = (Typeof(x) != TYPE_PLAYER) && has_flag(x, HAS_COMMANDS)
+			// C TinyMUSH skips players and objects without HAS_COMMANDS.
+			// HAS_COMMANDS may be on the object itself OR inherited from a parent
+			// (C sets this flag during db load based on parent $-commands).
 			if nObj.ObjType() == gamedb.TypePlayer {
 				continue
 			}
-			if !nObj.HasFlag2(gamedb.Flag2HasCommands) {
+			if !g.hasCommandsFlag(next) {
 				continue
 			}
 			localObjs = append(localObjs, next)
@@ -137,6 +139,25 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 	return found
 }
 
+// hasCommandsFlag checks if an object or any of its parents has HAS_COMMANDS.
+// C TinyMUSH sets HAS_COMMANDS on child objects during db load if a parent
+// has $-commands. We check the parent chain at runtime instead.
+func (g *Game) hasCommandsFlag(ref gamedb.DBRef) bool {
+	visited := make(map[gamedb.DBRef]bool)
+	for ref != gamedb.Nothing && !visited[ref] {
+		visited[ref] = true
+		obj, ok := g.DB.Objects[ref]
+		if !ok {
+			return false
+		}
+		if obj.HasFlag2(gamedb.Flag2HasCommands) {
+			return true
+		}
+		ref = obj.Parent
+	}
+	return false
+}
+
 // addZoneObjects appends a zone object and its contents to the search list.
 func (g *Game) addZoneObjects(searchObjs []gamedb.DBRef, zone gamedb.DBRef) []gamedb.DBRef {
 	searchObjs = append(searchObjs, zone)
@@ -159,19 +180,10 @@ func (g *Game) matchDollarOnObject(objRef, player, cause gamedb.DBRef, input str
 		return false
 	}
 
-	// UseLock check: if the object has A_LUSE set, the triggering player
-	// must pass it for $-commands to fire. C TinyMUSH checks this in
-	// atr_match — prevents other players' personal $-commands from firing.
-	if objRef != player {
-		useLockText := g.GetAttrTextDirect(objRef, aLUse)
-		if useLockText != "" {
-			parsed := ParseBoolExp(g, player, useLockText)
-			if !EvalBoolExp(g, player, objRef, objRef, parsed, 0) {
-				DebugLog("DOLLAR #%d(%s) USELOCK failed for player #%d, skipping", objRef, obj.Name, player)
-				return false
-			}
-		}
-	}
+	// NOTE: C TinyMUSH's atr_match does NOT check A_LUSE (USELOCK) for
+	// $-command matching. USELOCK is only checked for listen/^-patterns
+	// in atr_match1. We previously had a USELOCK check here which broke
+	// sled tech repairs and other cross-object $commands.
 
 	// Collect the child's own attribute numbers so parent attrs with the
 	// same number are skipped — in C TinyMUSH, child attrs override parents.
