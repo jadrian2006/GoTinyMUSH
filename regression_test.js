@@ -490,6 +490,43 @@ async function runTests() {
         }
     }
 
+    // ===== Nested @switch register persistence =====
+    log('\n--- Nested @switch registers ---');
+
+    // Test 1: Leading [setq()] before @switch — register must be available in body
+    await sendAndCapture('&TEST_REG1 me=[setq(0,HELLO)]@switch 1=1, {@pemit me=REG1_PASS_[r(0)]}, {@pemit me=REG1_FAIL}');
+    out = await sendAndCapture('@trigger me/TEST_REG1');
+    if (out.includes('REG1_PASS_HELLO')) {
+        pass('leading setq + @switch: register in body');
+    } else {
+        fail('leading setq + @switch', `expected REG1_PASS_HELLO, got: ${out.substring(0, 200)}`);
+    }
+
+    // Test 2: Nested @switch — register set before outer must persist into inner pattern
+    await sendAndCapture('&TEST_REG2 me=[setq(0,HELLO)]@switch 0=1, {@pemit me=REG2_OUTER}, {@switch [r(0)]=HELLO, {@pemit me=REG2_INNER_PASS}, {@pemit me=REG2_INNER_FAIL}}');
+    out = await sendAndCapture('@trigger me/TEST_REG2');
+    if (out.includes('REG2_INNER_PASS')) {
+        pass('nested @switch: register in inner pattern');
+    } else {
+        fail('nested @switch registers', `expected REG2_INNER_PASS, got: ${out.substring(0, 200)}`);
+    }
+
+    // Test 3: Registers persist across @trigger (C TinyMUSH wait_que clones registers)
+    await sendAndCapture('&TEST_REG3A me=[setq(0,TRIGGERED)]@trigger me/TEST_REG3B');
+    await sendAndCapture('&TEST_REG3B me=@pemit me=REG3_[r(0)]');
+    out = await sendAndCapture('@trigger me/TEST_REG3A');
+    if (out.includes('REG3_TRIGGERED')) {
+        pass('@trigger preserves registers');
+    } else {
+        fail('@trigger registers', `expected REG3_TRIGGERED, got: ${out.substring(0, 200)}`);
+    }
+
+    // Cleanup test attrs
+    await sendAndCapture('&TEST_REG1 me=');
+    await sendAndCapture('&TEST_REG2 me=');
+    await sendAndCapture('&TEST_REG3A me=');
+    await sendAndCapture('&TEST_REG3B me=');
+
     // ===== Help entries =====
     log('\n--- Help entries ---');
     const helpTopics = [

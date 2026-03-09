@@ -813,6 +813,46 @@ func TestSwitchParsing(t *testing.T) {
 	}
 }
 
+func TestNestedSwitchRegisters(t *testing.T) {
+	env := newTestEnv(t)
+	playerRef := env.game.Conns.GetByPlayer(1)[0].Player
+
+	// Helper: execute a command as a queue entry (simulates @trigger context)
+	execQueued := func(cmd string) string {
+		clearOutput(env.player)
+		qe := &QueueEntry{
+			Player:  playerRef,
+			Cause:   playerRef,
+			Caller:  playerRef,
+			Command: cmd,
+		}
+		env.game.ExecuteQueueEntry(qe)
+		return getOutput(env.player)
+	}
+
+	// Test 1: Leading [setq()] before @switch — registers must persist into
+	// the @switch body. This matches C TinyMUSH behavior where inline bracket
+	// expressions are evaluated before the command is identified.
+	out := execQueued("[setq(0,HELLO)]@switch 1=1, {think PASS_[r(0)]}, {think FAIL}")
+	if !strings.Contains(out, "PASS_HELLO") {
+		t.Errorf("leading setq + @switch: expected 'PASS_HELLO', got: %q", out)
+	}
+
+	// Test 2: Nested @switch with registers set before the outer @switch.
+	// The default body of the outer @switch contains an inner @switch that
+	// uses r(0) in its pattern. Registers must persist across the nesting.
+	out = execQueued("[setq(0,HELLO)]@switch 0=1, {think OUTER}, {@switch [r(0)]=HELLO, {think INNER_PASS}, {think INNER_FAIL}}")
+	if !strings.Contains(out, "INNER_PASS") {
+		t.Errorf("nested @switch registers: expected 'INNER_PASS', got: %q", out)
+	}
+
+	// Test 3: Multiple leading bracket expressions.
+	out = execQueued("[setq(0,X)][setq(1,Y)]@switch 1=1, {think [r(0)][r(1)]}")
+	if !strings.Contains(out, "XY") {
+		t.Errorf("multiple leading brackets: expected 'XY', got: %q", out)
+	}
+}
+
 // --- Help System ---
 
 func TestHelpNoFiles(t *testing.T) {

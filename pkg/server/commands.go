@@ -1375,8 +1375,11 @@ func (g *Game) PersistObjects(objs ...*gamedb.Object) {
 
 // NewGame creates a new Game instance.
 func NewGame(db *gamedb.Database) *Game {
-	// Find the next available dbref and clear stale CONNECTED flags
+	// Find the next available dbref, clear stale CONNECTED flags,
+	// and auto-set HAS_COMMANDS on objects with $-command attributes.
+	// C TinyMUSH sets HAS_COMMANDS during db load; we do it here.
 	maxRef := gamedb.DBRef(0)
+	hasCommandsFixed := 0
 	for ref, obj := range db.Objects {
 		if ref > maxRef {
 			maxRef = ref
@@ -1386,6 +1389,20 @@ func NewGame(db *gamedb.Database) *Game {
 		if obj.Flags[1]&gamedb.Flag2Connected != 0 {
 			obj.Flags[1] &^= gamedb.Flag2Connected
 		}
+		// Auto-set HAS_COMMANDS on objects with $-command attributes.
+		if !obj.HasFlag2(gamedb.Flag2HasCommands) {
+			for _, attr := range obj.Attrs {
+				text := eval.StripAttrPrefix(attr.Value)
+				if strings.HasPrefix(text, "$") {
+					obj.Flags[1] |= gamedb.Flag2HasCommands
+					hasCommandsFixed++
+					break
+				}
+			}
+		}
+	}
+	if hasCommandsFixed > 0 {
+		log.Printf("Auto-set HAS_COMMANDS on %d objects with $-command attributes", hasCommandsFixed)
 	}
 	bus := events.NewBus()
 	cm := NewConnManager()
@@ -3161,6 +3178,10 @@ func (g *Game) SetAttr(obj gamedb.DBRef, attrNum int, value string, executor ...
 			existing := ParseAttrInfo(attr.Value)
 			fullValue := fmt.Sprintf("\x01%s:%d:%s", owner, existing.Flags, value)
 			o.Attrs[i].Value = fullValue
+			// C TinyMUSH auto-sets HAS_COMMANDS when a $-command attribute is set.
+			if strings.HasPrefix(value, "$") && !o.HasFlag2(gamedb.Flag2HasCommands) {
+				o.Flags[1] |= gamedb.Flag2HasCommands
+			}
 			g.PersistObject(o)
 			return
 		}
@@ -3187,6 +3208,12 @@ func (g *Game) SetAttr(obj gamedb.DBRef, attrNum int, value string, executor ...
 
 	fullValue := fmt.Sprintf("\x01%s:%d:%s", owner, instFlags, value)
 	o.Attrs = append(o.Attrs, gamedb.Attribute{Number: attrNum, Value: fullValue})
+
+	// C TinyMUSH auto-sets HAS_COMMANDS when a $-command attribute is created.
+	if strings.HasPrefix(value, "$") && !o.HasFlag2(gamedb.Flag2HasCommands) {
+		o.Flags[1] |= gamedb.Flag2HasCommands
+	}
+
 	g.PersistObject(o)
 }
 

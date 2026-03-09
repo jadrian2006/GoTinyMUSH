@@ -61,7 +61,7 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 				continue
 			}
 			if !g.hasCommandsFlag(next) {
-				continue
+					continue
 			}
 			localObjs = append(localObjs, next)
 		}
@@ -531,6 +531,12 @@ func splitDeferredBody(cmd, prefix string) (lhs, body string, ok bool) {
 			}
 		}
 	}
+	// @trigger obj/attr without '=' (no args) is valid — return the full
+	// args as LHS with empty body. C TinyMUSH handles this via CS_ARGV
+	// where the '=' is optional.
+	if pfx == "@trigger" || pfx == "@tr" {
+		return strings.TrimSpace(argsStr), "", true
+	}
 	return "", "", false
 }
 
@@ -538,11 +544,36 @@ func splitDeferredBody(cmd, prefix string) (lhs, body string, ok bool) {
 // @dolist, @switch, @swi) and handles it with split-before-eval semantics.
 // The LHS (before '=') is evaluated; the RHS body is preserved raw.
 // Returns true if the command was handled.
+//
+// C TinyMUSH evaluates inline [bracket] expressions before identifying the
+// command name. Commands like "[setq(0,val)]@switch ..." have their leading
+// brackets evaluated first, then the @switch is recognized. Without this,
+// the command falls through to full ctx.Exec which strips braces and then
+// dispatches through ExecuteAsObject/doSwitchObj with a fresh register
+// context, losing any registers set by the leading expressions.
 func (g *Game) handleDeferredBodyCmd(cmd string, ctx *eval.EvalContext, entry *QueueEntry, descs []*Descriptor) bool {
+	actualCmd := cmd
+	leading := ""
+
+	// If the command starts with [...] bracket expressions (e.g.,
+	// [setq(0,val)]@switch ...), skip past them to find the actual command.
+	// The leading expressions will be evaluated before the deferred command
+	// is processed, preserving register context.
+	if len(cmd) > 0 && cmd[0] == '[' {
+		if end := skipLeadingBrackets(cmd); end > 0 && end < len(cmd) {
+			leading = cmd[:end]
+			actualCmd = strings.TrimSpace(cmd[end:])
+		}
+	}
+
 	for _, prefix := range []string{"@wait", "@dolist", "@switch", "@swi", "@trigger", "@tr"} {
-		if lhs, body, ok := splitDeferredBody(cmd, prefix); ok {
-			// Extract /switches from the command prefix
-			switches := extractDeferredSwitches(cmd, prefix)
+		if lhs, body, ok := splitDeferredBody(actualCmd, prefix); ok {
+			// Evaluate any leading [...] expressions first (sets registers, etc.)
+			if leading != "" {
+				ctx.Exec(leading, eval.EvFCheck|eval.EvEval, entry.Args)
+			}
+			// Extract /switches from the command prefix (not the leading brackets)
+			switches := extractDeferredSwitches(actualCmd, prefix)
 			switch prefix {
 			case "@wait":
 				g.handleWaitDeferred(ctx, entry, descs, lhs, body)
@@ -557,6 +588,35 @@ func (g *Game) handleDeferredBodyCmd(cmd string, ctx *eval.EvalContext, entry *Q
 		}
 	}
 	return false
+}
+
+// skipLeadingBrackets returns the index past all leading [...] bracket
+// expressions and any trailing whitespace. Returns 0 if the string doesn't
+// start with '['. Handles nested brackets and escaped characters.
+func skipLeadingBrackets(s string) int {
+	pos := 0
+	for pos < len(s) {
+		if s[pos] == '[' {
+			depth := 1
+			pos++ // skip opening [
+			for pos < len(s) && depth > 0 {
+				switch s[pos] {
+				case '[':
+					depth++
+				case ']':
+					depth--
+				case '\\':
+					pos++ // skip escaped char
+				}
+				pos++
+			}
+		} else if s[pos] == ' ' || s[pos] == '\t' {
+			pos++
+		} else {
+			break
+		}
+	}
+	return pos
 }
 
 // extractDeferredSwitches pulls /switch names from a command like "@dolist/now".
@@ -774,6 +834,12 @@ func (g *Game) handleTriggerDeferred(ctx *eval.EvalContext, entry *QueueEntry, d
 		Caller:  entry.Player,
 		Command: text,
 		Args:    trigArgs,
+	}
+	// C TinyMUSH's wait_que → setup_que copies the current register context
+	// (mudstate.rdata) into the queue entry. This preserves registers set by
+	// the triggering code so they're available in the triggered attribute.
+	if ctx.RData != nil {
+		qe.RData = ctx.RData.Clone()
 	}
 	if HasSwitch(switches, "now") {
 		g.ExecuteQueueEntry(qe)
