@@ -539,7 +539,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("SINGLETIME", fnSingletime, 1, 0)
 	ctx.RegisterFunction("LROOMS", fnLrooms, 0, eval.FnVarArgs)
 
-	// Flight/navigation functions
+	// Navigation functions (grid movement, terrain, POI)
 	ctx.RegisterFunction("HVEC", fnHvec, 1, 0)
 	ctx.RegisterFunction("HDELTA", fnHdelta, 2, 0)
 	ctx.RegisterFunction("HNAME", fnHname, 0, eval.FnVarArgs)
@@ -572,6 +572,14 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("POIINRANGE", fnPoiinrange, 3, 0)
 	ctx.RegisterFunction("POIDIST", fnPoidist, 2, 0)
 	ctx.RegisterFunction("POIBEARING", fnPoibearing, 2, 0)
+
+	// Topology / terrain functions
+	ctx.RegisterFunction("TOPOLOGY", fnTopology, 3, 0)
+	ctx.RegisterFunction("TOPOFLUSH", fnTopoflush, 1, 0)
+	ctx.RegisterFunction("DEPTH", fnDepth, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("ISLANDCHK", fnIslandchk, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("TOPOMAP", fnTopomap, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("CURRENT", fnCurrent, 0, eval.FnVarArgs)
 
 	// Mail system
 	ctx.RegisterFunction("MAIL", fnMail, 0, eval.FnVarArgs)

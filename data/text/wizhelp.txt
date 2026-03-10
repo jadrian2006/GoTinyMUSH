@@ -4001,3 +4001,116 @@ TLS/SSL - Encrypted connections
 
   See also: @queue.
 
+& TOPOLOGY()
+& topology()
+  topology(<zone dbref>, <x>, <y>)
+
+  Returns terrain elevation at (x, y) within the given zone.
+  Positive = above sea level (land). Negative = below (water depth).
+  Zero = sea level (shoreline). Deterministic: same inputs = same output.
+
+  Terrain defined by TOPO_* attrs on the zone object:
+    TOPO_SEED       - Integer seed for noise (unique per zone)
+    TOPO_BASE       - Baseline elevation (e.g., -20 for ocean)
+    TOPO_GRADIENT   - "axis rate" (e.g., "x -0.15")
+    TOPO_NOISE_AMP  - Noise roughness (default 2.0)
+    TOPO_NOISE_FREQ - Noise frequency (default 0.05)
+    TOPO_FEATURES   - Count of features
+    TOPO_F_1..N     - Feature definitions (see TOPOLOGY FEATURES)
+
+  See also: depth(), islandchk(), topoflush(), TOPOLOGY FEATURES.
+
+& TOPOLOGY FEATURES
+  Feature types (pipe-delimited on TOPO_F_N attrs):
+
+  seamount|cx cy|radius|falloff|peak_elev  - Circular underwater bump
+  island|cx cy|radius|peak_elev            - Land mass (peak > 0)
+  basin|cx cy|radius|floor_elev            - Circular depression
+  trench|x1 y1 x2 y2|width|floor_elev     - Linear depression
+  ridge|x1 y1 x2 y2|width|peak_elev       - Linear rise
+  shelf|x_start x_end|slope                - Gradual slope change
+
+  See also: topology(), topoflush().
+
+& DEPTH()
+& depth()
+  depth(<zone dbref>, <x>, <y>[, <tide_offset>])
+
+  Water depth at (x, y) as positive number. 0 if on land.
+  Optional tide_offset adjusts sea level (+2 high, -2 low).
+
+  See also: topology(), islandchk().
+
+& ISLANDCHK()
+& islandchk()
+  islandchk(<zone dbref>, <x>, <y>[, <tide_offset>])
+
+  Returns 1 if on land, 0 if water. Optional tide_offset.
+
+  See also: topology(), depth().
+
+& TOPOFLUSH()
+& topoflush()
+  topoflush(<zone dbref>)
+
+  Clears cached topology for a zone after modifying TOPO_* attrs.
+
+  See also: topology().
+
+& TOPOMAP()
+& topomap()
+  topomap(<zone dbref>, <x1>, <y1>, <x2>, <y2>[, <step>])
+
+  Renders an ANSI-colored ASCII map of the zone's topology between
+  (x1,y1) and (x2,y2). Step controls grid units per character (default 1).
+
+  Output uses Y-axis labels on left, X-axis labels on bottom.
+  Max output: 120 columns x 60 rows.
+
+  Character/color key:
+    ^  bright green   — high land (elev > 10)
+    .  yellow         — beach/shoreline (elev 0-10)
+    ~  bright cyan    — shallows (depth 0-5)
+    ~  cyan           — moderate (depth 5-15)
+    -  bright blue    — deep (depth 15-30)
+    -  blue           — very deep (depth 30-60)
+    =  magenta        — abyss (depth 60-100)
+    #  bright magenta — trench (depth 100+)
+
+  Example: topomap(#1234, 0, 0, 50, 50, 2) — 25x25 char map, 2 units/char
+
+  Builder workflow: modify TOPO_F_* attrs, topoflush(zone), topomap(zone,...)
+
+  See also: topology(), topoflush(), depth().
+
+& CURRENT()
+& current()
+  current(<zone dbref>, <x>, <y>[, <tide_phase>])
+
+  Returns the flow vector "dx dy" at a grid position. Combines:
+
+  1. Base prevailing current/wind (CURRENT_BASE attr)
+  2. Topology deflection — flow bends around terrain features
+  3. Tidal oscillation (CURRENT_TIDAL attr, driven by tide_phase)
+
+  tide_phase: -1.0 (ebb) to 1.0 (flood). Default 0 (slack).
+
+  The returned vector feeds directly into gridnav()'s drift parameter:
+    [setq(c, current(zone, x, y, tide_phase))]
+    [gridnav(pos, heading, speed, 0, r(c))]
+
+  Zone attributes:
+    CURRENT_BASE     "heading strength"  — prevailing direction + magnitude
+                     Heading in compass degrees: 0=N, 90=E, 180=S, 270=W
+    CURRENT_DEFLECT  factor              — topology deflection (default 1.0)
+                     0 = no deflection, higher = stronger terrain interaction
+    CURRENT_TIDAL    "heading strength"  — tidal component direction + peak magnitude
+
+  Topology interaction:
+    - Current deflects around islands, seamounts, ridges (gradient deflection)
+    - Shallow water (depth < 5) reduces current proportionally (friction)
+    - Land positions return "0 0" (no current on dry ground)
+    - Trench/valley features channel flow along their axis
+
+  See also: topology(), depth(), gridnav(), drift().
+

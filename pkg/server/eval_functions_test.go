@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -162,6 +164,41 @@ func (e *evalTestEnv) eval(expr string) string {
 	e.ctx.FuncInvkCtr = 0
 	e.ctx.FuncNestLev = 0
 	return e.ctx.Exec(expr, eval.EvFCheck|eval.EvEval, nil)
+}
+
+// setAttr sets a user-defined attribute on an object for testing.
+// Uses a global counter starting at 500 for auto-assigned attr numbers.
+var testAttrCounter = 500
+var testAttrMap = map[string]int{}
+
+func (e *evalTestEnv) setAttr(dbref gamedb.DBRef, name, value string) {
+	attrNum, exists := testAttrMap[name]
+	if !exists {
+		attrNum = testAttrCounter
+		testAttrCounter++
+		testAttrMap[name] = attrNum
+	}
+	// Always register with this game's DB (each test has a fresh DB)
+	e.game.DB.AddAttrDef(attrNum, name, 0)
+	obj := e.game.DB.Objects[dbref]
+	// Replace existing attr or append
+	for i, a := range obj.Attrs {
+		if a.Number == attrNum {
+			obj.Attrs[i].Value = "\x011:0:" + value
+			return
+		}
+	}
+	obj.Attrs = append(obj.Attrs, gamedb.Attribute{
+		Number: attrNum,
+		Value:  "\x011:0:" + value,
+	})
+}
+
+// toFloatTest parses a string to float64 for test assertions.
+func toFloatTest(s string) float64 {
+	v := 0.0
+	fmt.Sscanf(s, "%f", &v)
+	return v
 }
 
 // --- Object Functions ---
@@ -996,5 +1033,355 @@ func TestParentChainAttrInheritance(t *testing.T) {
 	got := e.eval("[get(#2/DESC)]")
 	if got != "Inherited desc" {
 		t.Errorf("parent chain attr: get(#2/DESC) = %q, want 'Inherited desc'", got)
+	}
+}
+
+// --- Topology tests ---
+
+func TestTopologyDeterminism(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// Add a zone object #8 with topology attrs
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Test Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "12345")
+	e.setAttr(8, "TOPO_BASE", "-20")
+	e.setAttr(8, "TOPO_GRADIENT", "x -0.1")
+	e.setAttr(8, "TOPO_NOISE_AMP", "1.0")
+	e.setAttr(8, "TOPO_NOISE_FREQ", "0.1")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+
+	// Same coordinates should always return the same value
+	v1 := e.eval("[topology(#8,100,150)]")
+	v2 := e.eval("[topology(#8,100,150)]")
+	if v1 != v2 {
+		t.Errorf("topology not deterministic: %q vs %q", v1, v2)
+	}
+
+	// Different coordinates should return different values (overwhelmingly likely)
+	v3 := e.eval("[topology(#8,200,250)]")
+	if v1 == v3 {
+		t.Errorf("topology returned same value for different coords: %q", v1)
+	}
+
+	// With gradient x -0.1, deeper as x increases
+	// At x=100: base(-20) + gradient(-10) + noise ≈ -30 + noise
+	// At x=200: base(-20) + gradient(-20) + noise ≈ -40 + noise
+	// The x=200 point should generally be more negative (deeper)
+	f1 := toFloatTest(v1)
+	f3 := toFloatTest(v3)
+	if f3 >= f1 {
+		t.Errorf("gradient not working: x=100 elev=%v, x=200 elev=%v (expected x=200 deeper)", f1, f3)
+	}
+}
+
+func TestTopologyIsland(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Ocean Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.eval("[topoflush(#8)]") // Clear cache from prior tests
+	e.setAttr(8, "TOPO_SEED", "99")
+	e.setAttr(8, "TOPO_BASE", "-30")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0") // No noise for clean test
+	e.setAttr(8, "TOPO_FEATURES", "1")
+	e.setAttr(8, "TOPO_F_1", "island|100 100|20|150")
+
+	// Center of island should be positive (land)
+	center := e.eval("[islandchk(#8,100,100)]")
+	if center != "1" {
+		t.Errorf("island center should be land: got %q", center)
+	}
+
+	// Far from island should be water
+	far := e.eval("[islandchk(#8,200,200)]")
+	if far != "0" {
+		t.Errorf("far from island should be water: got %q", far)
+	}
+
+	// Depth at center should be 0 (on land)
+	depthCenter := e.eval("[depth(#8,100,100)]")
+	if depthCenter != "0" {
+		t.Errorf("depth at island center should be 0: got %q", depthCenter)
+	}
+
+	// Depth far away should be positive (underwater)
+	depthFar := e.eval("[depth(#8,200,200)]")
+	if depthFar == "0" {
+		t.Errorf("depth far from island should be > 0: got %q", depthFar)
+	}
+}
+
+func TestTopologyTrench(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]") // Clear cache from prior tests
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Trench Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "42")
+	e.setAttr(8, "TOPO_BASE", "-20")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "1")
+	// Trench from (50,0) to (50,100), width 20, floor -150
+	e.setAttr(8, "TOPO_F_1", "trench|50 0 50 100|20|-150")
+
+	// On the trench centerline: should be much deeper
+	onTrench := e.eval("[topology(#8,50,50)]")
+	offTrench := e.eval("[topology(#8,100,50)]")
+
+	fOn := toFloatTest(onTrench)
+	fOff := toFloatTest(offTrench)
+	if fOn >= fOff {
+		t.Errorf("trench not deeper: on=%v, off=%v", fOn, fOff)
+	}
+	// Trench should add -150 at center, so total ≈ -170
+	if fOn > -100 {
+		t.Errorf("trench not deep enough: %v (expected < -100)", fOn)
+	}
+}
+
+func TestTopoflush(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]") // Clear cache from prior tests
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Flush Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-10")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+
+	v1 := e.eval("[topology(#8,50,50)]")
+
+	// Change base elevation
+	e.setAttr(8, "TOPO_BASE", "-50")
+	// Without flush, should still return cached value
+	v2 := e.eval("[topology(#8,50,50)]")
+	if v1 != v2 {
+		t.Errorf("cache not working: %q vs %q", v1, v2)
+	}
+
+	// After flush, should return new value
+	e.eval("[topoflush(#8)]")
+	v3 := e.eval("[topology(#8,50,50)]")
+	if v2 == v3 {
+		t.Errorf("topoflush did not clear cache: still %q", v3)
+	}
+}
+
+func TestTopologyDepthWithTide(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]") // Clear cache from prior tests
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Tide Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-1") // 1m underwater at base
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+
+	// Base depth should be 1
+	d1 := e.eval("[depth(#8,50,50)]")
+	if d1 != "1" {
+		t.Errorf("base depth: got %q, want 1", d1)
+	}
+
+	// High tide +2: effective elev = -1 + 2 = 1 (land!)
+	d2 := e.eval("[depth(#8,50,50,2)]")
+	if d2 != "0" {
+		t.Errorf("high tide should expose land: got %q, want 0", d2)
+	}
+
+	// Low tide -2: effective elev = -1 - 2 = -3, depth = 3
+	d3 := e.eval("[depth(#8,50,50,-2)]")
+	if d3 != "3" {
+		t.Errorf("low tide depth: got %q, want 3", d3)
+	}
+}
+
+func TestTopologyTopomap(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Map Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "42")
+	e.setAttr(8, "TOPO_BASE", "-20")
+	e.setAttr(8, "TOPO_NOISE_AMP", "3")
+	e.setAttr(8, "TOPO_FEATURES", "1")
+	e.setAttr(8, "TOPO_F_1", "island|25 25|10|50")
+
+	result := e.eval("[topomap(#8,0,0,50,50,2)]")
+
+	// Should contain newlines (multiple rows)
+	lines := strings.Split(result, "\n")
+	if len(lines) < 5 {
+		t.Errorf("topomap too few lines: %d", len(lines))
+	}
+
+	// Should contain ANSI escape codes
+	if !strings.Contains(result, "\033[") {
+		t.Errorf("topomap missing ANSI codes")
+	}
+
+	// Should contain land characters (island at 25,25)
+	if !strings.Contains(result, "^") && !strings.Contains(result, ".") {
+		t.Errorf("topomap missing land markers for island")
+	}
+
+	// Should contain water characters
+	if !strings.Contains(result, "~") && !strings.Contains(result, "-") {
+		t.Errorf("topomap missing water markers")
+	}
+
+	t.Logf("topomap output (%d lines):\n%s", len(lines), result)
+}
+
+func TestTopologyCurrentBase(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Current Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-30") // deep open water everywhere
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+	// Prevailing current: heading 90 (east) at 0.5 units/tick
+	e.setAttr(8, "CURRENT_BASE", "90 0.5")
+
+	result := e.eval("[current(#8,100,100)]")
+	parts := strings.Fields(result)
+	if len(parts) != 2 {
+		t.Fatalf("current should return 'dx dy': got %q", result)
+	}
+	dx := toFloatTest(parts[0])
+	dy := toFloatTest(parts[1])
+
+	// Heading 90 (east) → dx≈0.5, dy≈0
+	if math.Abs(dx-0.5) > 0.01 {
+		t.Errorf("east current dx: got %v, want ~0.5", dx)
+	}
+	if math.Abs(dy) > 0.01 {
+		t.Errorf("east current dy: got %v, want ~0", dy)
+	}
+}
+
+func TestTopologyCurrentDeflection(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Deflect Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-30")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "1")
+	e.setAttr(8, "TOPO_F_1", "island|50 50|15|80") // big island
+	// Eastward current at 0.5
+	e.setAttr(8, "CURRENT_BASE", "90 0.5")
+
+	// In open water far from island: should be ~pure east
+	openResult := e.eval("[current(#8,200,200)]")
+	openParts := strings.Fields(openResult)
+	openDx := toFloatTest(openParts[0])
+
+	// Test west of island: eastward current flows INTO the island, should deflect around
+	// Island at (50,50) radius 15, so (35,50) is right at the edge
+	nearResult := e.eval("[current(#8,36,50)]") // just inside west edge
+	nearParts := strings.Fields(nearResult)
+	nearDx := toFloatTest(nearParts[0])
+	nearDy := toFloatTest(nearParts[1])
+
+	// Near island with current hitting it, should develop a Y component
+	// (deflected around) and/or reduced X component
+	deflected := math.Abs(nearDy) > 0.01 || math.Abs(nearDx) < math.Abs(openDx)*0.9
+	if !deflected {
+		t.Errorf("current not deflected near island: open=(%v,0), near=(%v,%v)",
+			openDx, nearDx, nearDy)
+	}
+	t.Logf("open current: (%v, 0), near-island current: (%v, %v)", openDx, nearDx, nearDy)
+
+	// On the island itself: should be zero (land)
+	landResult := e.eval("[current(#8,50,50)]")
+	landParts := strings.Fields(landResult)
+	landDx := toFloatTest(landParts[0])
+	landDy := toFloatTest(landParts[1])
+	if landDx != 0 || landDy != 0 {
+		t.Errorf("current on land should be 0 0: got %v %v", landDx, landDy)
+	}
+}
+
+func TestTopologyCurrentTidal(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Tidal Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-20")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+	e.setAttr(8, "CURRENT_BASE", "90 0.3")         // eastward base
+	e.setAttr(8, "CURRENT_TIDAL", "0 0.2")          // north-south tidal component
+
+	// At flood tide (+1): tidal adds northward
+	flood := e.eval("[current(#8,100,100,1)]")
+	floodParts := strings.Fields(flood)
+	floodDy := toFloatTest(floodParts[1])
+
+	// At ebb tide (-1): tidal adds southward
+	ebb := e.eval("[current(#8,100,100,-1)]")
+	ebbParts := strings.Fields(ebb)
+	ebbDy := toFloatTest(ebbParts[1])
+
+	// Flood should push north (positive Y), ebb should push south (negative Y)
+	if floodDy <= 0 {
+		t.Errorf("flood tide should push north: dy=%v", floodDy)
+	}
+	if ebbDy >= 0 {
+		t.Errorf("ebb tide should push south: dy=%v", ebbDy)
+	}
+
+	// Difference should be about 2*0.2 = 0.4
+	diff := floodDy - ebbDy
+	if math.Abs(diff-0.4) > 0.01 {
+		t.Errorf("tidal swing: got %v, want ~0.4", diff)
 	}
 }
