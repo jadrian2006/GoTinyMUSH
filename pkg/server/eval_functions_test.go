@@ -1477,3 +1477,109 @@ func TestTopologyCurrentWind(t *testing.T) {
 		t.Errorf("storm should amplify wind current: got %v, want ~%v", stormMag, expectedMag*3)
 	}
 }
+
+func TestTopologyCurrentAirMedium(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Air Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-30") // ocean below
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+	e.setAttr(8, "AIR_BASE", "90 1.0") // prevailing east wind at 1.0
+
+	// Air current with no weather wind: should be base wind
+	air := e.eval("[current(#8,100,100,0,1,0,0,air)]")
+	airParts := strings.Fields(air)
+	airDx := toFloatTest(airParts[0])
+	if math.Abs(airDx-1.0) > 0.01 {
+		t.Errorf("air base wind: got dx=%v, want ~1.0", airDx)
+	}
+
+	// Water current at same position: should be 0 (no CURRENT_BASE set)
+	water := e.eval("[current(#8,100,100)]")
+	if water != "0 0" {
+		t.Errorf("water current should be 0 0 with no CURRENT_BASE: got %q", water)
+	}
+
+	// Air with weather wind: gets 100% (not 3% Ekman)
+	airWind := e.eval("[current(#8,100,100,0,1,90,5,air)]")
+	airWindParts := strings.Fields(airWind)
+	airWindDx := toFloatTest(airWindParts[0])
+	// base=1.0 east + weather wind 90°(east) at 5.0 = 6.0 east total
+	if math.Abs(airWindDx-6.0) > 0.01 {
+		t.Errorf("air+wind: got dx=%v, want ~6.0", airWindDx)
+	}
+
+	// Water with same wind: gets only 3% Ekman (deflected 45°)
+	waterWind := e.eval("[current(#8,100,100,0,1,90,5,water)]")
+	waterWindParts := strings.Fields(waterWind)
+	waterWindMag := math.Sqrt(
+		toFloatTest(waterWindParts[0])*toFloatTest(waterWindParts[0]) +
+			toFloatTest(waterWindParts[1])*toFloatTest(waterWindParts[1]))
+	// 5 * 0.03 = 0.15
+	if math.Abs(waterWindMag-0.15) > 0.01 {
+		t.Errorf("water Ekman magnitude: got %v, want ~0.15", waterWindMag)
+	}
+}
+
+func TestTopologyTemperature(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Temp Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-30")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "1")
+	e.setAttr(8, "TOPO_F_1", "island|50 50|15|80") // volcanic island
+	e.setAttr(8, "TEMP_BASE", "22")
+	e.setAttr(8, "TEMP_DEPTH_RATE", "0.2")
+	e.setAttr(8, "TEMP_GRADIENT", "y -0.02") // colder as y increases
+
+	// Surface temp at origin
+	t0 := toFloatTest(e.eval("[temperature(#8,0,0)]"))
+	// base=22, gradient y=0 → 22
+	if math.Abs(t0-22.0) > 0.5 {
+		t.Errorf("surface temp at origin: got %v, want ~22", t0)
+	}
+
+	// Northern position should be colder
+	tNorth := toFloatTest(e.eval("[temperature(#8,0,200)]"))
+	// base=22 + 200*(-0.02) = 18
+	if math.Abs(tNorth-18.0) > 0.5 {
+		t.Errorf("north temp: got %v, want ~18", tNorth)
+	}
+
+	// Deeper = colder
+	tDeep := toFloatTest(e.eval("[temperature(#8,0,0,10)]"))
+	// 22 - 10*0.2 = 20
+	if math.Abs(tDeep-20.0) > 0.5 {
+		t.Errorf("depth 10 temp: got %v, want ~20", tDeep)
+	}
+
+	// Near volcanic island = warmer
+	tVolcanic := toFloatTest(e.eval("[temperature(#8,50,50)]"))
+	// base=22 + gradient(50*-0.02=-1) + volcanic warming(~3) = ~24
+	if tVolcanic <= t0 {
+		t.Errorf("volcanic area should be warmer: volcanic=%v, open=%v", tVolcanic, t0)
+	}
+
+	// Season offset
+	tWinter := toFloatTest(e.eval("[temperature(#8,0,0,0,-5)]"))
+	// 22 + (-5) = 17
+	if math.Abs(tWinter-17.0) > 0.5 {
+		t.Errorf("winter temp: got %v, want ~17", tWinter)
+	}
+}

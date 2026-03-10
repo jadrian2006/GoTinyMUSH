@@ -580,6 +580,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("ISLANDCHK", fnIslandchk, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("TOPOMAP", fnTopomap, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("CURRENT", fnCurrent, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("TEMPERATURE", fnTemperature, 0, eval.FnVarArgs)
 
 	// Mail system
 	ctx.RegisterFunction("MAIL", fnMail, 0, eval.FnVarArgs)

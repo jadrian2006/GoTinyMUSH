@@ -1014,11 +1014,21 @@ type topoZone struct {
 	features  []topoFeature
 
 	// Current/flow fields
-	currBaseX   float64 // prevailing current vector (dx per tick)
+	currBaseX   float64 // prevailing water current vector (dx per tick)
 	currBaseY   float64
 	currDeflect float64 // topology deflection strength (default 1.0)
 	currTidal   float64 // tidal oscillation amplitude
 	currTidalHd float64 // tidal heading (radians)
+
+	// Air current fields (prevailing wind, separate from water current)
+	airBaseX float64
+	airBaseY float64
+
+	// Temperature fields
+	tempBase     float64 // surface temperature (zone attr)
+	tempDepthRate float64 // cooling per unit depth (default 0.1)
+	tempGradAxis byte    // 'x' or 'y' for latitude gradient
+	tempGradRate float64 // temp change per grid unit along axis
 }
 
 type topoFeatureType int
@@ -1141,6 +1151,44 @@ func topoParse(ctx *eval.EvalContext, zone gamedb.DBRef) *topoZone {
 			hdgDeg := toFloat(parts[0])
 			tz.currTidalHd = hdgDeg * math.Pi / 180.0
 			tz.currTidal = toFloat(parts[1])
+		}
+	}
+
+	// AIR_BASE: "heading strength" — prevailing wind (separate from water current)
+	// If not set, air current uses weather wind args only (no persistent base wind)
+	if s := getAttrByName(ctx, zone, "AIR_BASE"); s != "" {
+		parts := strings.Fields(s)
+		if len(parts) >= 2 {
+			hdgDeg := toFloat(parts[0])
+			strength := toFloat(parts[1])
+			hdgRad := hdgDeg * math.Pi / 180.0
+			tz.airBaseX = math.Sin(hdgRad) * strength
+			tz.airBaseY = math.Cos(hdgRad) * strength
+		}
+	}
+
+	// TEMP_BASE: surface temperature in arbitrary units (default 20)
+	tz.tempBase = 20.0
+	if s := getAttrByName(ctx, zone, "TEMP_BASE"); s != "" {
+		tz.tempBase = toFloat(s)
+	}
+
+	// TEMP_DEPTH_RATE: cooling per unit of depth (default 0.1)
+	tz.tempDepthRate = 0.1
+	if s := getAttrByName(ctx, zone, "TEMP_DEPTH_RATE"); s != "" {
+		tz.tempDepthRate = toFloat(s)
+	}
+
+	// TEMP_GRADIENT: "axis rate" — temperature change along a grid axis
+	// e.g., "y -0.02" = colder as y increases (north = colder)
+	if s := getAttrByName(ctx, zone, "TEMP_GRADIENT"); s != "" {
+		parts := strings.Fields(s)
+		if len(parts) >= 2 {
+			axis := strings.ToLower(parts[0])
+			if len(axis) > 0 {
+				tz.tempGradAxis = axis[0]
+			}
+			tz.tempGradRate = toFloat(parts[1])
 		}
 	}
 
@@ -1645,10 +1693,9 @@ func topoGradient(tz *topoZone, x, y, h float64) (float64, float64) {
 	return dEdx, dEdy
 }
 
-// topoDeflect applies topology-based deflection to a flow vector.
-// The gradient at the position pushes the flow perpendicular to terrain slopes.
-// Returns the deflected vector. Handles shallow-water friction and land blocking.
-func topoDeflect(tz *topoZone, x, y, fx, fy float64) (float64, float64) {
+// topoDeflectGradient applies gradient-based deflection to a flow vector.
+// Shared by both water and air mediums. Returns deflected (fx, fy).
+func topoDeflectGradient(tz *topoZone, x, y, fx, fy float64) (float64, float64) {
 	if tz.currDeflect <= 0 || (fx == 0 && fy == 0) {
 		return fx, fy
 	}
@@ -1657,79 +1704,56 @@ func topoDeflect(tz *topoZone, x, y, fx, fy float64) (float64, float64) {
 	gradMag := math.Sqrt(gx*gx + gy*gy)
 
 	if gradMag > 0.001 {
-		// Normalize gradient
 		gnx := gx / gradMag
 		gny := gy / gradMag
 
-		// Perpendicular to gradient (flow goes around, not through)
-		// Choose the perpendicular direction that aligns with flow
+		// Perpendicular to gradient — flow goes around, not through
 		perpX, perpY := -gny, gnx
 		dot := perpX*fx + perpY*fy
 		if dot < 0 {
 			perpX, perpY = gny, -gnx
 		}
 
-		// Deflection strength scales with gradient magnitude
 		deflectStr := math.Min(gradMag*tz.currDeflect, 1.0)
-
-		// Blend flow toward perpendicular direction
 		flowMag := math.Sqrt(fx*fx + fy*fy)
 		fx = fx*(1-deflectStr) + perpX*flowMag*deflectStr
 		fy = fy*(1-deflectStr) + perpY*flowMag*deflectStr
 	}
 
-	// Speed reduction near land — friction from shallow water / terrain
-	elev := topoElevation(tz, x, y)
-	if elev > -5 && elev <= 0 {
-		// Shallow water: reduce current proportionally
-		factor := -elev / 5.0 // 0 at shore, 1 at depth 5
-		fx *= factor
-		fy *= factor
-	} else if elev > 0 {
-		// On land: no water current (air current still flows over land)
-		fx, fy = 0, 0
-	}
-
 	return fx, fy
 }
 
-// currentVector computes the flow vector at a position.
-// Returns (dx, dy) per tick. Combines:
-//   - Base prevailing current (CURRENT_BASE) scaled by stormFactor
-//   - Wind-driven surface current (Ekman: ~3% of wind, deflected 45° right)
-//   - Topology deflection (gradient-based, applied to total flow)
-//   - Tidal oscillation (CURRENT_TIDAL × tidePhase)
-//
-// Parameters:
-//
-//	tidePhase: -1.0 (ebb) to 1.0 (flood)
-//	stormFactor: multiplier on base+wind current (1.0 = normal)
-//	windHdg: wind compass heading in degrees (0=N, 90=E)
-//	windStr: wind speed (arbitrary units; ocean surface current ≈ 3%)
-func currentVector(tz *topoZone, x, y, tidePhase, stormFactor, windHdg, windStr float64) (float64, float64) {
-	// Start with prevailing current, amplified by storm
+// waterCurrent computes the ocean surface flow vector at a position.
+// Combines base current, Ekman wind-driven current, topology deflection,
+// shallow-water friction, land blocking, and tidal oscillation.
+func waterCurrent(tz *topoZone, x, y, tidePhase, stormFactor, windHdg, windStr float64) (float64, float64) {
 	cx := tz.currBaseX * stormFactor
 	cy := tz.currBaseY * stormFactor
 
-	// Wind-driven surface current (Ekman transport approximation)
-	// Surface current ≈ 3% of wind speed, deflected 45° clockwise (northern hemisphere)
+	// Ekman transport: surface current ≈ 3% of wind, deflected 45° right (N hemisphere)
 	if windStr > 0 {
 		ekmanFraction := 0.03
-		ekmanDeflect := 45.0 * math.Pi / 180.0 // 45° clockwise
+		ekmanDeflect := 45.0 * math.Pi / 180.0
 		windRad := windHdg * math.Pi / 180.0
-		// Wind heading is where wind comes FROM in compass, but current flows
-		// in the wind's direction. Deflect 45° right for Ekman.
 		surfRad := windRad + ekmanDeflect
-		windCx := math.Sin(surfRad) * windStr * ekmanFraction * stormFactor
-		windCy := math.Cos(surfRad) * windStr * ekmanFraction * stormFactor
-		cx += windCx
-		cy += windCy
+		cx += math.Sin(surfRad) * windStr * ekmanFraction * stormFactor
+		cy += math.Cos(surfRad) * windStr * ekmanFraction * stormFactor
 	}
 
-	// Apply topology deflection to the combined flow
-	cx, cy = topoDeflect(tz, x, y, cx, cy)
+	// Topology deflection (shared gradient math)
+	cx, cy = topoDeflectGradient(tz, x, y, cx, cy)
 
-	// Tidal component: oscillates with tide phase (NOT amplified by storm)
+	// Water-specific: shallow friction and land blocking
+	elev := topoElevation(tz, x, y)
+	if elev > -5 && elev <= 0 {
+		factor := -elev / 5.0
+		cx *= factor
+		cy *= factor
+	} else if elev > 0 {
+		cx, cy = 0, 0
+	}
+
+	// Tidal component (NOT storm-amplified — tides are gravitational)
 	if tz.currTidal > 0 {
 		tidalStr := tz.currTidal * tidePhase
 		cx += math.Sin(tz.currTidalHd) * tidalStr
@@ -1739,13 +1763,58 @@ func currentVector(tz *topoZone, x, y, tidePhase, stormFactor, windHdg, windStr 
 	return cx, cy
 }
 
+// airCurrent computes the wind/air flow vector at a position.
+// Wind IS the current directly (100%, not 3% Ekman). No tidal component.
+// Topology deflection wraps wind around mountains/peaks.
+// Air flows freely over land (no blocking) but slows in valleys (optional).
+func airCurrent(tz *topoZone, x, y, stormFactor, windHdg, windStr float64) (float64, float64) {
+	// Start with prevailing wind (AIR_BASE attr)
+	cx := tz.airBaseX * stormFactor
+	cy := tz.airBaseY * stormFactor
+
+	// Weather wind adds directly at full strength (not Ekman-reduced)
+	if windStr > 0 {
+		windRad := windHdg * math.Pi / 180.0
+		cx += math.Sin(windRad) * windStr * stormFactor
+		cy += math.Cos(windRad) * windStr * stormFactor
+	}
+
+	// Topology deflection — wind wraps around mountains/peaks
+	cx, cy = topoDeflectGradient(tz, x, y, cx, cy)
+
+	// Air-specific: speed up over ridges (venturi effect), slow in lee
+	// When terrain rises (positive elev), wind accelerates slightly over the crest
+	elev := topoElevation(tz, x, y)
+	if elev > 0 {
+		// Over land/mountains: slight acceleration from compression
+		// Caps at 1.5× for very high terrain
+		venturi := 1.0 + math.Min(elev*0.005, 0.5)
+		cx *= venturi
+		cy *= venturi
+	}
+
+	return cx, cy
+}
+
+// currentVector dispatches to water or air current calculation.
+// medium: "water" (default) or "air"
+func currentVector(tz *topoZone, x, y, tidePhase, stormFactor, windHdg, windStr float64, medium string) (float64, float64) {
+	switch medium {
+	case "air":
+		return airCurrent(tz, x, y, stormFactor, windHdg, windStr)
+	default:
+		return waterCurrent(tz, x, y, tidePhase, stormFactor, windHdg, windStr)
+	}
+}
+
 // fnCurrent — get flow vector at a position.
-// current(zone_dbref, x, y[, tide_phase[, storm_factor[, wind_hdg, wind_str]]]) → "dx dy"
+// current(zone, x, y[, tide[, storm[, wind_hdg, wind_str[, medium]]]]) → "dx dy"
 //
 //	tide_phase:   -1.0 (ebb) to 1.0 (flood), default 0
 //	storm_factor: multiplier on currents (default 1.0, storm=2-4)
 //	wind_hdg:     wind compass heading in degrees (0=N, 90=E)
-//	wind_str:     wind speed — ocean surface current ≈ 3% of this
+//	wind_str:     wind speed — water gets 3% Ekman, air gets 100%
+//	medium:       "water" (default) or "air"
 func fnCurrent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 3 {
 		buf.WriteString("0 0")
@@ -1789,11 +1858,106 @@ func fnCurrent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 		windStr = toFloat(args[6])
 	}
 
+	medium := "water"
+	if len(args) > 7 {
+		m := strings.ToLower(strings.TrimSpace(args[7]))
+		if m == "air" {
+			medium = "air"
+		}
+	}
+
 	tz := topoParse(ctx, zone)
-	dx, dy := currentVector(tz, x, y, tidePhase, stormFactor, windHdg, windStr)
+	dx, dy := currentVector(tz, x, y, tidePhase, stormFactor, windHdg, windStr, medium)
 
 	writeFloat(buf, dx)
 	buf.WriteByte(' ')
 	writeFloat(buf, dy)
+}
+
+// fnTemperature — get temperature at a position and optional depth.
+// temperature(zone, x, y[, depth[, season_offset]]) → temperature value
+//
+// Temperature is computed from:
+//   - Base temperature (TEMP_BASE attr, default 20)
+//   - Depth cooling (deeper = colder, TEMP_DEPTH_RATE per unit, default 0.1)
+//   - Latitude/position gradient (TEMP_GRADIENT attr)
+//   - Feature warming (volcanic island/seamount = warmer nearby)
+//   - Optional season_offset added to base (weather system passes seasonal shift)
+func fnTemperature(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 3 {
+		buf.WriteString("0")
+		return
+	}
+
+	zoneStr := strings.TrimSpace(args[0])
+	if !strings.HasPrefix(zoneStr, "#") {
+		buf.WriteString("0")
+		return
+	}
+	zoneNum := toInt(zoneStr[1:])
+	zone := gamedb.DBRef(zoneNum)
+
+	x := toFloat(args[1])
+	y := toFloat(args[2])
+
+	queryDepth := 0.0 // depth below surface (positive = deeper)
+	if len(args) > 3 {
+		queryDepth = toFloat(args[3])
+		if queryDepth < 0 {
+			queryDepth = 0
+		}
+	}
+
+	seasonOffset := 0.0
+	if len(args) > 4 {
+		seasonOffset = toFloat(args[4])
+	}
+
+	tz := topoParse(ctx, zone)
+	temp := temperatureAt(tz, x, y, queryDepth, seasonOffset)
+
+	writeFloat(buf, temp)
+}
+
+// temperatureAt computes temperature at a position and depth.
+func temperatureAt(tz *topoZone, x, y, depth, seasonOffset float64) float64 {
+	temp := tz.tempBase + seasonOffset
+
+	// Position gradient (latitude/longitude variation)
+	switch tz.tempGradAxis {
+	case 'x':
+		temp += x * tz.tempGradRate
+	case 'y':
+		temp += y * tz.tempGradRate
+	}
+
+	// Depth cooling — thermocline effect
+	// Fast cooling in first 20 units, then slower (logarithmic)
+	if depth > 0 {
+		if depth <= 20 {
+			temp -= depth * tz.tempDepthRate
+		} else {
+			// First 20 units cool linearly, then logarithmic
+			temp -= 20 * tz.tempDepthRate
+			temp -= math.Log(depth-19) * tz.tempDepthRate * 5
+		}
+	}
+
+	// Feature warming — volcanic features warm nearby water
+	for _, f := range tz.features {
+		if f.ftype == topoIsland || f.ftype == topoSeamount {
+			dx := x - f.cx
+			dy := y - f.cy
+			dist := math.Sqrt(dx*dx + dy*dy)
+			if dist < f.radius*1.5 {
+				// Warm water near volcanic features, cosine falloff
+				t := dist / (f.radius * 1.5)
+				warming := 3.0 * 0.5 * (1.0 + math.Cos(t*math.Pi))
+				temp += warming
+			}
+		}
+	}
+
+	return temp
 }
 
