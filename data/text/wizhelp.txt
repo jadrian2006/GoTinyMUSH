@@ -4028,7 +4028,11 @@ TLS/SSL - Encrypted connections
   basin|cx cy|radius|floor_elev            - Circular depression
   trench|x1 y1 x2 y2|width|floor_elev     - Linear depression
   ridge|x1 y1 x2 y2|width|peak_elev       - Linear rise
-  shelf|x_start x_end|slope                - Gradual slope change
+  shelf|x_start x_end|slope                - Gradual slope on X axis
+  shelf_y|y_start y_end|slope              - Gradual slope on Y axis
+
+  Shelf direction: if start < end, full elevation at start tapering to 0
+  at end (west/north coast). If start > end, reversed (east/south coast).
 
   See also: topology(), topoflush().
 

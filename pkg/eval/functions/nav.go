@@ -1039,6 +1039,7 @@ const (
 	topoIsland
 	topoRidge
 	topoShelf
+	topoShelfY
 	topoBasin
 )
 
@@ -1300,6 +1301,21 @@ func parseTopoFeature(s string) (topoFeature, bool) {
 		f.slope = toFloat(parts[2])
 		return f, true
 
+	case "shelf_y":
+		// shelf_y|y_start y_end|slope — same as shelf but on Y axis
+		if len(parts) < 3 {
+			return f, false
+		}
+		bounds := parseVector(parts[1])
+		if len(bounds) < 2 {
+			return f, false
+		}
+		f.ftype = topoShelfY
+		f.cx = bounds[0] // y_start
+		f.x2 = bounds[1] // y_end
+		f.slope = toFloat(parts[2])
+		return f, true
+
 	default:
 		return f, false
 	}
@@ -1363,13 +1379,53 @@ func topoFeatureContrib(f topoFeature, x, y float64) float64 {
 		return topoLinearContrib(f.cx, f.cy, f.x2, f.y2, f.width, f.peakElev, x, y)
 
 	case topoShelf:
-		if x <= f.cx {
+		// Shelf: elevation transition on X axis.
+		// If x_start < x_end: full elevation at x<=x_start, taper to 0 at x_end (west coast).
+		// If x_start > x_end: full elevation at x>=x_start, taper to 0 at x_end (east coast).
+		if f.cx < f.x2 {
+			if x <= f.cx {
+				return f.slope
+			}
+			if x >= f.x2 {
+				return 0
+			}
+			t := (x - f.cx) / (f.x2 - f.cx)
+			return f.slope * 0.5 * (1.0 + math.Cos(t*math.Pi))
+		}
+		// East coast: reversed
+		if x >= f.cx {
+			return f.slope
+		}
+		if x <= f.x2 {
 			return 0
 		}
-		if x >= f.x2 {
-			return (f.x2 - f.cx) * f.slope
+		t := (f.cx - x) / (f.cx - f.x2)
+		return f.slope * 0.5 * (1.0 + math.Cos(t*math.Pi))
+
+	case topoShelfY:
+		// Shelf on Y axis: elevation transition between y_start and y_end.
+		// If y_start < y_end: full elevation at y<=y_start, taper to 0 at y_end (north coast).
+		// If y_start > y_end: full elevation at y>=y_start, taper to 0 at y_end (south coast).
+		if f.cx < f.x2 {
+			// North coast: shelf at low Y
+			if y <= f.cx {
+				return f.slope
+			}
+			if y >= f.x2 {
+				return 0
+			}
+			t := (y - f.cx) / (f.x2 - f.cx)
+			return f.slope * 0.5 * (1.0 + math.Cos(t*math.Pi))
 		}
-		return (x - f.cx) * f.slope
+		// South coast: shelf at high Y (y_start > y_end means reversed)
+		if y >= f.cx {
+			return f.slope
+		}
+		if y <= f.x2 {
+			return 0
+		}
+		t := (f.cx - y) / (f.cx - f.x2)
+		return f.slope * 0.5 * (1.0 + math.Cos(t*math.Pi))
 
 	default:
 		return 0

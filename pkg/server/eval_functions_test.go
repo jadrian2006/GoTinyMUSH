@@ -1583,3 +1583,60 @@ func TestTopologyTemperature(t *testing.T) {
 		t.Errorf("winter temp: got %v, want ~17", tWinter)
 	}
 }
+
+func TestTopologyShelfY(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Bay Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+	}
+
+	// Base -20 ocean, no gradient, no noise
+	// North shelf_y: y=0..40, slope 25 → beach at y=0, deep by y=40
+	// South shelf_y: y=200..160, slope 25 → beach at y=200, deep by y=160
+	e.setAttr(8, "TOPO_SEED", "100")
+	e.setAttr(8, "TOPO_BASE", "-20")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "2")
+	e.setAttr(8, "TOPO_F_1", "shelf_y|0 40|25")
+	e.setAttr(8, "TOPO_F_2", "shelf_y|200 160|25")
+
+	// North coast: y=0 should be above water (elev = -20 + 25 = 5)
+	dN0 := e.eval("[depth(#8,100,0)]")
+	if dN0 != "0" {
+		t.Errorf("north beach (y=0): got depth %q, want 0 (land)", dN0)
+	}
+
+	// North edge of shelf: y=40 should be full ocean depth
+	dN40 := toFloatTest(e.eval("[depth(#8,100,40)]"))
+	if dN40 < 19 {
+		t.Errorf("north shelf edge (y=40): got depth %v, want ~20", dN40)
+	}
+
+	// Midpoint y=20: should have some shelf contribution (cosine halfway ≈ 12.5)
+	dN20 := toFloatTest(e.eval("[depth(#8,100,20)]"))
+	if dN20 < 2 || dN20 > 15 {
+		t.Errorf("north shelf mid (y=20): got depth %v, want 2-15", dN20)
+	}
+
+	// South coast: y=200 should be above water (elev = -20 + 25 = 5)
+	dS200 := e.eval("[depth(#8,100,200)]")
+	if dS200 != "0" {
+		t.Errorf("south beach (y=200): got depth %q, want 0 (land)", dS200)
+	}
+
+	// South shelf interior: y=160 should be full depth
+	dS160 := toFloatTest(e.eval("[depth(#8,100,160)]"))
+	if dS160 < 19 {
+		t.Errorf("south shelf edge (y=160): got depth %v, want ~20", dS160)
+	}
+
+	// Middle of ocean: y=100, no shelf, full depth
+	dMid := toFloatTest(e.eval("[depth(#8,100,100)]"))
+	if math.Abs(dMid-20.0) > 1 {
+		t.Errorf("open ocean (y=100): got depth %v, want ~20", dMid)
+	}
+}
