@@ -1645,54 +1645,91 @@ func topoGradient(tz *topoZone, x, y, h float64) (float64, float64) {
 	return dEdx, dEdy
 }
 
-// currentVector computes the flow vector at a position.
-// Returns (dx, dy) per tick. Combines base flow, topology deflection, and tidal component.
-// tidePhase is -1.0 to 1.0 (from external tide calculation).
-func currentVector(tz *topoZone, x, y, tidePhase float64) (float64, float64) {
-	// Start with prevailing current
-	cx, cy := tz.currBaseX, tz.currBaseY
-
-	// Topology deflection: flow bends around terrain features
-	if tz.currDeflect > 0 && (cx != 0 || cy != 0) {
-		gx, gy := topoGradient(tz, x, y, 1.0)
-		gradMag := math.Sqrt(gx*gx + gy*gy)
-
-		if gradMag > 0.001 {
-			// Normalize gradient
-			gnx := gx / gradMag
-			gny := gy / gradMag
-
-			// Perpendicular to gradient (flow goes around, not through)
-			// Choose the perpendicular direction that aligns with base flow
-			perpX, perpY := -gny, gnx
-			dot := perpX*cx + perpY*cy
-			if dot < 0 {
-				perpX, perpY = gny, -gnx
-			}
-
-			// Deflection strength scales with gradient magnitude
-			// Clamp gradMag contribution to avoid extreme deflection
-			deflectStr := math.Min(gradMag*tz.currDeflect, 1.0)
-
-			// Blend base flow toward perpendicular direction
-			cx = cx*(1-deflectStr) + perpX*math.Sqrt(cx*cx+cy*cy)*deflectStr
-			cy = cy*(1-deflectStr) + perpY*math.Sqrt(cx*cx+cy*cy)*deflectStr
-		}
-
-		// Speed reduction near land — friction from shallow water / terrain
-		elev := topoElevation(tz, x, y)
-		if elev > -5 && elev <= 0 {
-			// Shallow water: reduce current proportionally
-			factor := -elev / 5.0 // 0 at shore, 1 at depth 5
-			cx *= factor
-			cy *= factor
-		} else if elev > 0 {
-			// On land: no current
-			cx, cy = 0, 0
-		}
+// topoDeflect applies topology-based deflection to a flow vector.
+// The gradient at the position pushes the flow perpendicular to terrain slopes.
+// Returns the deflected vector. Handles shallow-water friction and land blocking.
+func topoDeflect(tz *topoZone, x, y, fx, fy float64) (float64, float64) {
+	if tz.currDeflect <= 0 || (fx == 0 && fy == 0) {
+		return fx, fy
 	}
 
-	// Tidal component: oscillates with tide phase
+	gx, gy := topoGradient(tz, x, y, 1.0)
+	gradMag := math.Sqrt(gx*gx + gy*gy)
+
+	if gradMag > 0.001 {
+		// Normalize gradient
+		gnx := gx / gradMag
+		gny := gy / gradMag
+
+		// Perpendicular to gradient (flow goes around, not through)
+		// Choose the perpendicular direction that aligns with flow
+		perpX, perpY := -gny, gnx
+		dot := perpX*fx + perpY*fy
+		if dot < 0 {
+			perpX, perpY = gny, -gnx
+		}
+
+		// Deflection strength scales with gradient magnitude
+		deflectStr := math.Min(gradMag*tz.currDeflect, 1.0)
+
+		// Blend flow toward perpendicular direction
+		flowMag := math.Sqrt(fx*fx + fy*fy)
+		fx = fx*(1-deflectStr) + perpX*flowMag*deflectStr
+		fy = fy*(1-deflectStr) + perpY*flowMag*deflectStr
+	}
+
+	// Speed reduction near land — friction from shallow water / terrain
+	elev := topoElevation(tz, x, y)
+	if elev > -5 && elev <= 0 {
+		// Shallow water: reduce current proportionally
+		factor := -elev / 5.0 // 0 at shore, 1 at depth 5
+		fx *= factor
+		fy *= factor
+	} else if elev > 0 {
+		// On land: no water current (air current still flows over land)
+		fx, fy = 0, 0
+	}
+
+	return fx, fy
+}
+
+// currentVector computes the flow vector at a position.
+// Returns (dx, dy) per tick. Combines:
+//   - Base prevailing current (CURRENT_BASE) scaled by stormFactor
+//   - Wind-driven surface current (Ekman: ~3% of wind, deflected 45° right)
+//   - Topology deflection (gradient-based, applied to total flow)
+//   - Tidal oscillation (CURRENT_TIDAL × tidePhase)
+//
+// Parameters:
+//
+//	tidePhase: -1.0 (ebb) to 1.0 (flood)
+//	stormFactor: multiplier on base+wind current (1.0 = normal)
+//	windHdg: wind compass heading in degrees (0=N, 90=E)
+//	windStr: wind speed (arbitrary units; ocean surface current ≈ 3%)
+func currentVector(tz *topoZone, x, y, tidePhase, stormFactor, windHdg, windStr float64) (float64, float64) {
+	// Start with prevailing current, amplified by storm
+	cx := tz.currBaseX * stormFactor
+	cy := tz.currBaseY * stormFactor
+
+	// Wind-driven surface current (Ekman transport approximation)
+	// Surface current ≈ 3% of wind speed, deflected 45° clockwise (northern hemisphere)
+	if windStr > 0 {
+		ekmanFraction := 0.03
+		ekmanDeflect := 45.0 * math.Pi / 180.0 // 45° clockwise
+		windRad := windHdg * math.Pi / 180.0
+		// Wind heading is where wind comes FROM in compass, but current flows
+		// in the wind's direction. Deflect 45° right for Ekman.
+		surfRad := windRad + ekmanDeflect
+		windCx := math.Sin(surfRad) * windStr * ekmanFraction * stormFactor
+		windCy := math.Cos(surfRad) * windStr * ekmanFraction * stormFactor
+		cx += windCx
+		cy += windCy
+	}
+
+	// Apply topology deflection to the combined flow
+	cx, cy = topoDeflect(tz, x, y, cx, cy)
+
+	// Tidal component: oscillates with tide phase (NOT amplified by storm)
 	if tz.currTidal > 0 {
 		tidalStr := tz.currTidal * tidePhase
 		cx += math.Sin(tz.currTidalHd) * tidalStr
@@ -1703,8 +1740,12 @@ func currentVector(tz *topoZone, x, y, tidePhase float64) (float64, float64) {
 }
 
 // fnCurrent — get flow vector at a position.
-// current(zone_dbref, x, y[, tide_phase]) → "dx dy"
-// tide_phase: -1.0 (ebb) to 1.0 (flood), default 0.
+// current(zone_dbref, x, y[, tide_phase[, storm_factor[, wind_hdg, wind_str]]]) → "dx dy"
+//
+//	tide_phase:   -1.0 (ebb) to 1.0 (flood), default 0
+//	storm_factor: multiplier on currents (default 1.0, storm=2-4)
+//	wind_hdg:     wind compass heading in degrees (0=N, 90=E)
+//	wind_str:     wind speed — ocean surface current ≈ 3% of this
 func fnCurrent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 3 {
 		buf.WriteString("0 0")
@@ -1721,6 +1762,7 @@ func fnCurrent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 
 	x := toFloat(args[1])
 	y := toFloat(args[2])
+
 	tidePhase := 0.0
 	if len(args) > 3 {
 		tidePhase = toFloat(args[3])
@@ -1732,8 +1774,23 @@ func fnCurrent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 		}
 	}
 
+	stormFactor := 1.0
+	if len(args) > 4 {
+		stormFactor = toFloat(args[4])
+		if stormFactor < 0 {
+			stormFactor = 0
+		}
+	}
+
+	windHdg := 0.0
+	windStr := 0.0
+	if len(args) > 6 {
+		windHdg = toFloat(args[5])
+		windStr = toFloat(args[6])
+	}
+
 	tz := topoParse(ctx, zone)
-	dx, dy := currentVector(tz, x, y, tidePhase)
+	dx, dy := currentVector(tz, x, y, tidePhase, stormFactor, windHdg, windStr)
 
 	writeFloat(buf, dx)
 	buf.WriteByte(' ')

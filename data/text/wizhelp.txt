@@ -4085,18 +4085,24 @@ TLS/SSL - Encrypted connections
 
 & CURRENT()
 & current()
-  current(<zone dbref>, <x>, <y>[, <tide_phase>])
+  current(<zone>, <x>, <y>[, <tide>[, <storm>[, <wind_hdg>, <wind_str>]]])
 
   Returns the flow vector "dx dy" at a grid position. Combines:
 
-  1. Base prevailing current/wind (CURRENT_BASE attr)
-  2. Topology deflection — flow bends around terrain features
-  3. Tidal oscillation (CURRENT_TIDAL attr, driven by tide_phase)
+  1. Base prevailing current (CURRENT_BASE) × storm_factor
+  2. Wind-driven surface current (Ekman: ~3% of wind, 45° right deflection)
+  3. Topology deflection — flow bends around terrain features
+  4. Tidal oscillation (CURRENT_TIDAL × tide_phase, NOT storm-amplified)
 
-  tide_phase: -1.0 (ebb) to 1.0 (flood). Default 0 (slack).
+  Parameters:
+    tide_phase:    -1.0 (ebb) to 1.0 (flood). Default 0 (slack).
+    storm_factor:  Multiplier on base+wind currents. Default 1.0.
+                   Storm=2-4, hurricane=5+. Does NOT amplify tidal.
+    wind_hdg:      Wind compass heading (0=N, 90=E, 180=S, 270=W)
+    wind_str:      Wind speed. Surface current ≈ 3% × storm_factor.
 
   The returned vector feeds directly into gridnav()'s drift parameter:
-    [setq(c, current(zone, x, y, tide_phase))]
+    [setq(c, current(zone, x, y, tide, storm, wind_hdg, wind_str))]
     [gridnav(pos, heading, speed, 0, r(c))]
 
   Zone attributes:
@@ -4104,13 +4110,19 @@ TLS/SSL - Encrypted connections
                      Heading in compass degrees: 0=N, 90=E, 180=S, 270=W
     CURRENT_DEFLECT  factor              — topology deflection (default 1.0)
                      0 = no deflection, higher = stronger terrain interaction
-    CURRENT_TIDAL    "heading strength"  — tidal component direction + peak magnitude
+    CURRENT_TIDAL    "heading strength"  — tidal component direction + peak mag
 
   Topology interaction:
-    - Current deflects around islands, seamounts, ridges (gradient deflection)
+    - Current deflects around islands, seamounts, ridges (gradient)
     - Shallow water (depth < 5) reduces current proportionally (friction)
-    - Land positions return "0 0" (no current on dry ground)
+    - Land positions return "0 0" (no water current on dry ground)
     - Trench/valley features channel flow along their axis
+
+  Wind-driven current (Ekman transport):
+    Ocean surface current flows ~45° right of wind direction (N hemisphere).
+    Magnitude ≈ 3% of wind speed. Storms amplify both base and wind current.
+    This models real-world wind-wave coupling — storms create both bigger
+    waves and stronger directional surface currents.
 
   See also: topology(), depth(), gridnav(), drift().
 

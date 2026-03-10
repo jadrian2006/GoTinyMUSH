@@ -1385,3 +1385,95 @@ func TestTopologyCurrentTidal(t *testing.T) {
 		t.Errorf("tidal swing: got %v, want ~0.4", diff)
 	}
 }
+
+func TestTopologyCurrentStorm(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Storm Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-30")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+	e.setAttr(8, "CURRENT_BASE", "90 0.5") // east at 0.5
+
+	// Normal conditions (storm_factor=1)
+	normal := e.eval("[current(#8,100,100,0,1)]")
+	normalParts := strings.Fields(normal)
+	normalDx := toFloatTest(normalParts[0])
+
+	// Storm doubles current (storm_factor=2)
+	storm := e.eval("[current(#8,100,100,0,2)]")
+	stormParts := strings.Fields(storm)
+	stormDx := toFloatTest(stormParts[0])
+
+	// Storm current should be ~2x normal
+	if math.Abs(stormDx-normalDx*2) > 0.01 {
+		t.Errorf("storm not doubling: normal=%v, storm=%v (want %v)", normalDx, stormDx, normalDx*2)
+	}
+
+	// Heavy storm (factor=4)
+	heavy := e.eval("[current(#8,100,100,0,4)]")
+	heavyParts := strings.Fields(heavy)
+	heavyDx := toFloatTest(heavyParts[0])
+	if math.Abs(heavyDx-normalDx*4) > 0.01 {
+		t.Errorf("heavy storm not 4x: normal=%v, heavy=%v (want %v)", normalDx, heavyDx, normalDx*4)
+	}
+}
+
+func TestTopologyCurrentWind(t *testing.T) {
+	e := newEvalTestEnv(t)
+	e.eval("[topoflush(#8)]")
+	e.game.DB.Objects[8] = &gamedb.Object{
+		DBRef: 8, Name: "Wind Zone",
+		Location: gamedb.Nothing, Contents: gamedb.Nothing, Exits: gamedb.Nothing,
+		Link: gamedb.Nothing, Next: gamedb.Nothing,
+		Owner: 1, Parent: gamedb.Nothing, Zone: gamedb.Nothing,
+		Flags: [3]int{int(gamedb.TypeThing), 0, 0},
+	}
+	e.setAttr(8, "TOPO_SEED", "1")
+	e.setAttr(8, "TOPO_BASE", "-30")
+	e.setAttr(8, "TOPO_NOISE_AMP", "0")
+	e.setAttr(8, "TOPO_FEATURES", "0")
+	// No base current — wind only
+	e.setAttr(8, "CURRENT_BASE", "0 0")
+
+	// No wind: should be 0 0
+	noWind := e.eval("[current(#8,100,100)]")
+	if noWind != "0 0" {
+		t.Errorf("no wind should be 0 0: got %q", noWind)
+	}
+
+	// Strong north wind (hdg 0, speed 10): Ekman → ~3% at 45° right (NE)
+	// wind hdg 0 (N) + 45° deflect → surface current flows NE
+	withWind := e.eval("[current(#8,100,100,0,1,0,10)]")
+	windParts := strings.Fields(withWind)
+	windDx := toFloatTest(windParts[0])
+	windDy := toFloatTest(windParts[1])
+
+	// Ekman: 10 * 0.03 = 0.3 at 45° → dx≈0.212, dy≈0.212
+	expectedMag := 10 * 0.03
+	actualMag := math.Sqrt(windDx*windDx + windDy*windDy)
+	if math.Abs(actualMag-expectedMag) > 0.01 {
+		t.Errorf("wind current magnitude: got %v, want ~%v", actualMag, expectedMag)
+	}
+
+	// Both dx and dy should be positive (NE direction)
+	if windDx <= 0 || windDy <= 0 {
+		t.Errorf("north wind should create NE current: got (%v, %v)", windDx, windDy)
+	}
+
+	// Storm amplifies wind-driven current too
+	stormWind := e.eval("[current(#8,100,100,0,3,0,10)]")
+	stormParts := strings.Fields(stormWind)
+	stormMag := math.Sqrt(toFloatTest(stormParts[0])*toFloatTest(stormParts[0]) +
+		toFloatTest(stormParts[1])*toFloatTest(stormParts[1]))
+	if math.Abs(stormMag-expectedMag*3) > 0.01 {
+		t.Errorf("storm should amplify wind current: got %v, want ~%v", stormMag, expectedMag*3)
+	}
+}
