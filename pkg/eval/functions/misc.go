@@ -484,10 +484,11 @@ func fnUptime(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ game
 	}
 }
 
-// starttime() - returns Unix timestamp of server start
+// starttime() - returns ctime-format date string of server start
 func fnStarttime(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if ctx.StartTime > 0 {
-		buf.WriteString(strconv.FormatInt(ctx.StartTime, 10))
+		t := time.Unix(ctx.StartTime, 0)
+		buf.WriteString(t.Format("Mon Jan 02 15:04:05 2006"))
 	} else {
 		buf.WriteString("-1")
 	}

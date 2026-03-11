@@ -1643,3 +1643,84 @@ func TestTopologyShelfY(t *testing.T) {
 		t.Errorf("open ocean (y=100): got depth %v, want ~20", dMid)
 	}
 }
+
+// --- #lambda tests ---
+
+func TestLambdaMap(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// map passes each element as %0
+	got := e.eval("[map(#lambda/[strlen(%0)],abc de f)]")
+	if got != "3 2 1" {
+		t.Errorf("map(#lambda) = %q, want '3 2 1'", got)
+	}
+}
+
+func TestLambdaFilter(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// filter passes each element as %0, keeps elements where result is true
+	got := e.eval("[filter(#lambda/[gt(strlen(%0),1)],a bc d ef)]")
+	if got != "bc ef" {
+		t.Errorf("filter(#lambda) = %q, want 'bc ef'", got)
+	}
+}
+
+func TestLambdaFold(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// fold(#lambda/[add(%0,%1)], 1 2 3 4) should return "10"
+	got := e.eval("[fold(#lambda/[add(%0,%1)],1 2 3 4)]")
+	if got != "10" {
+		t.Errorf("fold(#lambda) = %q, want '10'", got)
+	}
+}
+
+func TestLambdaStep(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// step passes chunks as %0, %1; step size 2 means pairs
+	// cat() joins with space, so "a b" per pair
+	got := e.eval("[step(#lambda/[cat(%0,%1)],a b c d,2)]")
+	if got != "a b c d" {
+		t.Errorf("step(#lambda) = %q, want 'a b c d'", got)
+	}
+	// Also test with add() for numeric step
+	got2 := e.eval("[step(#lambda/[add(%0,%1)],1 2 3 4,2)]")
+	if got2 != "3 7" {
+		t.Errorf("step(#lambda/add) = %q, want '3 7'", got2)
+	}
+}
+
+func TestLambdaMix(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// mix passes corresponding elements as %0, %1
+	got := e.eval("[mix(#lambda/[add(%0,%1)],1 2 3,10 20 30)]")
+	if got != "11 22 33" {
+		t.Errorf("mix(#lambda) = %q, want '11 22 33'", got)
+	}
+}
+
+func TestLambdaSortby(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// sortby(#lambda/[sub(strlen(%0),strlen(%1))], cc a bbb) should sort by string length
+	got := e.eval("[sortby(#lambda/[sub(strlen(%0),strlen(%1))],cc a bbb)]")
+	if got != "a cc bbb" {
+		t.Errorf("sortby(#lambda) = %q, want 'a cc bbb'", got)
+	}
+}
+
+func TestLambdaForeach(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// foreach(abc, #lambda/[ucstr(%0)]) should uppercase each character
+	got := e.eval("[foreach(abc,#lambda/[ucstr(%0)])]")
+	if got != "ABC" {
+		t.Errorf("foreach(#lambda) = %q, want 'ABC'", got)
+	}
+}
+
+func TestSortbyWithNonexistentAttr(t *testing.T) {
+	e := newEvalTestEnv(t)
+	// sortby with a nonexistent function should return the list unchanged
+	// (comparison function returns "" → 0, so no swaps in stable sort)
+	got := e.eval("[sortby(#2/NOSUCHATTR,3 1 4 1 5)]")
+	if got != "3 1 4 1 5" {
+		t.Errorf("sortby(nonexistent) = %q, want '3 1 4 1 5' (unchanged)", got)
+	}
+}

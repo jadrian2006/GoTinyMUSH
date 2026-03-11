@@ -68,16 +68,34 @@ func fnParse(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller,
 	fnIter(ctx, args, buf, caller, cause)
 }
 
+// evalFunRef evaluates a function reference argument for FnNoEval iteration functions.
+// If the raw argument starts with "#lambda/", it is returned as-is so that CallIterFun
+// can use the expression directly. Otherwise, it is evaluated normally so that
+// constructs like [num(me)]/ATTR work.
+func evalFunRef(ctx *eval.EvalContext, raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if len(trimmed) >= 8 && strings.EqualFold(trimmed[:8], "#lambda/") {
+		return trimmed
+	}
+	return ctx.Exec(raw, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+}
+
+// evalArg is a shorthand for evaluating a single NoEval argument.
+func evalArg(ctx *eval.EvalContext, raw string) string {
+	return ctx.Exec(raw, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+}
+
 // fnMap implements map(obj/attr, list[, delim[, odelim]])
 func fnMap(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
+	objAttr := evalFunRef(ctx, args[0])
+	listStr := evalArg(ctx, args[1])
 	delim := " "
 	odelim := " "
-	if len(args) > 2 && args[2] != "" { delim = args[2] }
-	if len(args) > 3 && args[3] != "" { odelim = args[3] }
+	if len(args) > 2 { d := evalArg(ctx, args[2]); if d != "" { delim = d } }
+	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { odelim = d } }
 
-	objAttr := args[0]
-	words := splitList(args[1], delim)
+	words := splitList(listStr, delim)
 
 	var results []string
 	for _, word := range words {
@@ -90,13 +108,14 @@ func fnMap(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 // fnFilter implements filter(obj/attr, list[, delim[, odelim]])
 func fnFilter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
+	objAttr := evalFunRef(ctx, args[0])
+	listStr := evalArg(ctx, args[1])
 	delim := " "
 	odelim := " "
-	if len(args) > 2 && args[2] != "" { delim = args[2] }
-	if len(args) > 3 && args[3] != "" { odelim = args[3] }
+	if len(args) > 2 { d := evalArg(ctx, args[2]); if d != "" { delim = d } }
+	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { odelim = d } }
 
-	objAttr := args[0]
-	words := splitList(args[1], delim)
+	words := splitList(listStr, delim)
 
 	var results []string
 	for _, word := range words {
@@ -111,16 +130,17 @@ func fnFilter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 // fnFold implements fold(obj/attr, list[, base[, delim]])
 func fnFold(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
+	objAttr := evalFunRef(ctx, args[0])
+	listStr := evalArg(ctx, args[1])
 	delim := " "
-	if len(args) > 3 && args[3] != "" { delim = args[3] }
+	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
 
-	objAttr := args[0]
-	words := splitList(args[1], delim)
+	words := splitList(listStr, delim)
 	if len(words) == 0 { return }
 
 	acc := ""
 	if len(args) > 2 {
-		acc = args[2]
+		acc = evalArg(ctx, args[2])
 	} else {
 		acc = words[0]
 		words = words[1:]
@@ -135,8 +155,10 @@ func fnFold(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 // fnForeach implements foreach(string, obj/attr)
 func fnForeach(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	for _, ch := range args[0] {
-		result := ctx.CallIterFun(args[1], []string{string(ch)})
+	str := evalArg(ctx, args[0])
+	objAttr := evalFunRef(ctx, args[1])
+	for _, ch := range str {
+		result := ctx.CallIterFun(objAttr, []string{string(ch)})
 		buf.WriteString(result)
 	}
 }
@@ -144,12 +166,11 @@ func fnForeach(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 // fnWhile implements while(obj/attr1, obj/attr2, initial[, delim])
 func fnWhile(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 3 { return }
+	condFn := evalFunRef(ctx, args[0])
+	bodyFn := evalFunRef(ctx, args[1])
+	current := evalArg(ctx, args[2])
 	delim := " "
-	if len(args) > 3 && args[3] != "" { delim = args[3] }
-
-	condFn := args[0]
-	bodyFn := args[1]
-	current := args[2]
+	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
 
 	var results []string
 	limit := 10000
@@ -205,13 +226,15 @@ func fnInum(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 func fnStep(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	// step(obj/attr, list, step[, delim[, odelim]])
 	if len(args) < 3 { return }
+	objAttr := evalFunRef(ctx, args[0])
+	listStr := evalArg(ctx, args[1])
+	stepStr := evalArg(ctx, args[2])
 	delim := " "
 	odelim := " "
-	if len(args) > 3 && args[3] != "" { delim = args[3] }
-	if len(args) > 4 && args[4] != "" { odelim = args[4] }
-	objAttr := args[0]
-	words := splitList(args[1], delim)
-	step := toInt(args[2])
+	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
+	if len(args) > 4 { d := evalArg(ctx, args[4]); if d != "" { odelim = d } }
+	words := splitList(listStr, delim)
+	step := toInt(stepStr)
 	if step <= 0 { step = 1 }
 	var results []string
 	for i := 0; i < len(words); i += step {
@@ -227,10 +250,13 @@ func fnStep(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 func fnMix(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	// mix(obj/attr, list1, list2[, ...][, delim])
 	if len(args) < 3 { return }
-	objAttr := args[0]
+	objAttr := evalFunRef(ctx, args[0])
 	delim := " "
-	// Last arg might be delimiter
-	lists := args[1:]
+	// Evaluate all list args
+	lists := make([]string, len(args)-1)
+	for i := 1; i < len(args); i++ {
+		lists[i-1] = evalArg(ctx, args[i])
+	}
 	words := make([][]string, len(lists))
 	for i, l := range lists {
 		words[i] = splitList(l, delim)
@@ -357,12 +383,13 @@ func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, brea
 // fnFilterbool — like filter but returns boolean result directly.
 func fnFilterbool(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
+	objAttr := evalFunRef(ctx, args[0])
+	listStr := evalArg(ctx, args[1])
 	delim := " "
 	odelim := " "
-	if len(args) > 2 && args[2] != "" { delim = args[2] }
-	if len(args) > 3 && args[3] != "" { odelim = args[3] }
-	objAttr := args[0]
-	words := splitList(args[1], delim)
+	if len(args) > 2 { d := evalArg(ctx, args[2]); if d != "" { delim = d } }
+	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { odelim = d } }
+	words := splitList(listStr, delim)
 	var results []string
 	for _, word := range words {
 		result := ctx.CallIterFun(objAttr, []string{word})
@@ -377,11 +404,11 @@ func fnFilterbool(ctx *eval.EvalContext, args []string, buf *strings.Builder, _,
 // until(condfn, bodyfn, initial[, delim])
 func fnUntil(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 3 { return }
+	condFn := evalFunRef(ctx, args[0])
+	bodyFn := evalFunRef(ctx, args[1])
+	current := evalArg(ctx, args[2])
 	delim := " "
-	if len(args) > 3 && args[3] != "" { delim = args[3] }
-	condFn := args[0]
-	bodyFn := args[1]
-	current := args[2]
+	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
 	var results []string
 	limit := 10000
 	for i := 0; i < limit; i++ {

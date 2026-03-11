@@ -561,12 +561,13 @@ func fnLor(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 // sortby(sortfn, list[, delim])
 func fnSortby(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	sortFn := args[0]
+	sortFn := evalFunRef(ctx, args[0])
+	listStr := evalArg(ctx, args[1])
 	delim := " "
-	if len(args) > 2 && args[2] != "" { delim = args[2] }
-	words := splitList(args[1], delim)
+	if len(args) > 2 { d := evalArg(ctx, args[2]); if d != "" { delim = d } }
+	words := splitList(listStr, delim)
 	if len(words) <= 1 {
-		buf.WriteString(args[1])
+		buf.WriteString(listStr)
 		return
 	}
 	sort.SliceStable(words, func(i, j int) bool {

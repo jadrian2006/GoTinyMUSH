@@ -507,6 +507,9 @@ var knownFlags = map[string][2]int{
 	"HAS_STARTUP": {0, gamedb.FlagHasStartup},
 	"HAS_COMMANDS": {1, gamedb.Flag2HasCommands}, "COMMANDS": {1, gamedb.Flag2HasCommands},
 	"INSTANCE": {2, gamedb.Flag3Instance},
+	"KEY": {1, gamedb.Flag2Key}, "CONSTANT": {1, gamedb.Flag2ConstAttrs},
+	"FREE": {1, gamedb.Flag2Floating}, "ZONE": {1, gamedb.Flag2ZoneParent},
+	"ORPHAN": {2, gamedb.Flag3Orphan},
 	"PLAYER": {-1, int(gamedb.TypePlayer)}, "ROOM": {-1, int(gamedb.TypeRoom)},
 	"EXIT": {-1, int(gamedb.TypeExit)}, "THING": {-1, int(gamedb.TypeThing)},
 }
@@ -1197,46 +1200,71 @@ func fnOrflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 }
 
 // flagCharToName maps single-character flag abbreviations to flag names.
+// Letters match C TinyMUSH 3.3: type letters (P/R/E) check object type,
+// uppercase/lowercase letters check gen_flags.
 func flagCharToName(ch byte) string {
 	switch ch {
-	case 'W': return "WIZARD"
-	case 'r': return "ROYALTY"
+	// Object type letters (handled via knownFlags type-check path)
+	case 'P': return "PLAYER"
+	case 'R': return "ROOM"
+	case 'E': return "EXIT"
+	// Uppercase flag letters
+	case 'A': return "ABODE"
+	case 'B': return "BLIND"
+	case 'C': return "CHOWN_OK"
 	case 'D': return "DARK"
-	case 'v': return "VERBOSE"
-	case 'V': return "VISUAL"
+	case 'F': return "FREE"
+	case 'G': return "GOING"
 	case 'H': return "HAVEN"
-	case 'h': return "HALT"
-	case 'q': return "QUIET"
+	case 'I': return "INHERIT"
+	case 'J': return "JUMP_OK"
+	case 'K': return "KEY"
+	case 'L': return "LINK_OK"
+	case 'M': return "MONITOR"
+	case 'N': return "NOSPOOF"
+	case 'O': return "OPAQUE"
+	case 'Q': return "QUIET"
 	case 'S': return "STICKY"
 	case 'T': return "TRACE"
-	case 'o': return "OPAQUE"
-	case 'p': return "PUPPET"
-	case 'N': return "NOSPOOF"
-	case 'R': return "ROBOT"
-	case 'M': return "MONITOR"
-	case 'e': return "ENTER_OK"
-	case 'l': return "LINK_OK"
-	case 'J': return "JUMP_OK"
-	case 'c': return "CHOWN_OK"
-	case 'd': return "DESTROY_OK"
-	case 'A': return "ABODE"
-	case 'i': return "INHERIT"
-	case 's': return "SAFE"
-	case 'G': return "GOING"
-	case 'X': return "IMMORTAL"
-	case 'C': return "CONNECTED"
-	case 'g': return "GAGGED"
-	case 'F': return "FIXED"
-	case 'b': return "BOUNCE"
-	case 'L': return "LIGHT"
-	case 'a': return "ANSI"
 	case 'U': return "UNFINDABLE"
-	case 'P': return "PARENT_OK"
-	case 'K': return "CONTROL_OK"
-	case 'n': return "NO_BLEED"
-	case 'O': return "STOP"
-	case 'Z': return "SLAVE"
-	case 'B': return "PLAYER"
+	case 'V': return "VISUAL"
+	case 'W': return "WIZARD"
+	case 'X': return "ANSI"
+	case 'Y': return "PARENT_OK"
+	case 'Z': return "ROYALTY"
+	// Lowercase flag letters
+	case 'a': return "AUDIBLE"
+	case 'b': return "BOUNCE"
+	case 'c': return "CONNECTED"
+	case 'd': return "DESTROY_OK"
+	case 'e': return "ENTER_OK"
+	case 'f': return "FIXED"
+	case 'g': return "UNINSPECTED"
+	case 'h': return "HALT"
+	case 'i': return "IMMORTAL"
+	case 'j': return "GAGGED"
+	case 'k': return "CONSTANT"
+	case 'l': return "LIGHT"
+	case 'm': return "MYOPIC"
+	case 'n': return "AUDITORIUM"
+	case 'o': return "ZONE"
+	case 'p': return "PUPPET"
+	case 'q': return "TERSE"
+	case 'r': return "ROBOT"
+	case 's': return "SAFE"
+	case 't': return "TRANSPARENT"
+	case 'u': return "SUSPECT"
+	case 'v': return "VERBOSE"
+	case 'w': return "STAFF"
+	case 'x': return "SLAVE"
+	case 'y': return "ORPHAN"
+	case 'z': return "CONTROL_OK"
+	// Special flag letters (note: '!' is negate prefix in andflags/orflags, not STOP)
+	case '$': return "COMMANDS"
+	case '-': return "NOBLEED"
+	case '|': return "VACATION"
+	case '?': return "HEAD"
+	case '+': return "WATCHER"
 	default: return ""
 	}
 }
@@ -1480,7 +1508,7 @@ func fnZfun(ctx *eval.EvalContext, args []string, buf *strings.Builder, player, 
 	pObj, ok := ctx.DB.Objects[ctx.Player]
 	if !ok { return }
 	zone := pObj.Zone
-	if zone == gamedb.Nothing { return }
+	if zone == gamedb.Nothing { buf.WriteString("#-1 INVALID ZONE"); return }
 	// Get attr from zone
 	attrName := strings.ToUpper(args[0])
 	text := getAttrByName(ctx, zone, attrName)

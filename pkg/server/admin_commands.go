@@ -657,6 +657,13 @@ func cmdMvattr(g *Game, d *Descriptor, args string, _ []string) {
 	objStr := strings.TrimSpace(args[:eqIdx])
 	attrList := strings.TrimSpace(args[eqIdx+1:])
 
+	// In C, nargs < 2 check comes before object lookup
+	attrs := strings.Split(attrList, ",")
+	if len(attrs) < 2 {
+		g.Notify(d.Player, "Nothing to do.")
+		return
+	}
+
 	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
@@ -664,12 +671,6 @@ func cmdMvattr(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	if !g.Controls(d.Player, target) {
 		g.Notify(d.Player, "Permission denied.")
-		return
-	}
-
-	attrs := strings.Split(attrList, ",")
-	if len(attrs) < 2 {
-		g.Notify(d.Player, "Nothing to do.")
 		return
 	}
 

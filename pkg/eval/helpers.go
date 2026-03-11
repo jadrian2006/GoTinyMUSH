@@ -11,8 +11,20 @@ import (
 // Unlike CallUFun (used by u()/ulocal()), iteration functions in C TinyMUSH evaluate the
 // fetched attr text with the CALLING object as executor (%!), not the target object.
 // This means v() inside the callback resolves on the caller, not on obj.
+//
+// Supports #lambda/expression syntax: if the object part is "#lambda", the expression
+// after the "/" is used directly as the code to evaluate, without any attribute lookup.
 func (ctx *EvalContext) CallIterFun(objAttr string, callArgs []string) string {
 	parts := strings.SplitN(objAttr, "/", 2)
+
+	// Handle #lambda/expression — inline anonymous function
+	if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "#lambda") {
+		text := parts[1]
+		if text == "" {
+			return ""
+		}
+		return ctx.Exec(text, EvFCheck|EvEval, callArgs)
+	}
 
 	var ref gamedb.DBRef
 	var attrName string
@@ -48,8 +60,20 @@ func (ctx *EvalContext) CallIterFun(objAttr string, callArgs []string) string {
 
 // CallUFun calls a user-defined function specified as "obj/attr" with the given arguments.
 // It fetches the attribute text, sets up %0-%9 from callArgs, evaluates it, and returns the result.
+//
+// Supports #lambda/expression syntax: if the object part is "#lambda", the expression
+// after the "/" is used directly as the code to evaluate, without any attribute lookup.
 func (ctx *EvalContext) CallUFun(objAttr string, callArgs []string) string {
 	parts := strings.SplitN(objAttr, "/", 2)
+
+	// Handle #lambda/expression — inline anonymous function
+	if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "#lambda") {
+		text := parts[1]
+		if text == "" {
+			return ""
+		}
+		return ctx.Exec(text, EvFCheck|EvEval, callArgs)
+	}
 
 	var ref gamedb.DBRef
 	var attrName string
