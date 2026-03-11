@@ -94,15 +94,24 @@ func fnLnum(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 	if len(args) > 1 {
 		start = toInt(args[0])
 		end = toInt(args[1])
+	} else {
+		// 1-arg form: lnum(N) generates N items 0..N-1.
+		// C does top-- so the inclusive loop produces same result.
+		if end < 1 {
+			return
+		}
+		end--
 	}
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	var nums []string
+	// C uses i <= top (ascending) and i >= top (descending) — inclusive both ends.
+	// 1-arg form already decremented end so <= still produces 0..N-1.
 	if start <= end {
-		for i := start; i < end; i++ {
+		for i := start; i <= end; i++ {
 			nums = append(nums, strconv.Itoa(i))
 		}
 	} else {
-		for i := start; i > end; i-- {
+		for i := start; i >= end; i-- {
 			nums = append(nums, strconv.Itoa(i))
 		}
 	}
@@ -116,7 +125,7 @@ func fnMember(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	words := splitList(args[0], delim)
 	target := args[1]
 	for i, w := range words {
-		if strings.EqualFold(w, target) {
+		if w == target {
 			writeInt(buf, i+1)
 			return
 		}
@@ -133,7 +142,7 @@ func fnRemove(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	found := false
 	var result []string
 	for _, w := range words {
-		if !found && strings.EqualFold(w, target) {
+		if !found && w == target {
 			found = true
 			continue
 		}
@@ -147,7 +156,7 @@ func fnInsert(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	delim := " "
 	if len(args) > 3 && args[3] != "" { delim = args[3] }
 	words := splitList(args[0], delim)
-	pos := toInt(args[1])
+	pos := toInt(args[1]) - 1 // C is 1-indexed
 	if pos < 0 { pos = 0 }
 	newWord := args[2]
 	if pos >= len(words) {
@@ -178,24 +187,47 @@ func fnLdelete(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	buf.WriteString(strings.Join(result, delim))
 }
 
+// autodetectSortType inspects list contents to choose sort type like C's autodetect_list().
+func autodetectSortType(words []string) string {
+	if len(words) == 0 { return "a" }
+	allNum := true
+	allDbref := true
+	for _, w := range words {
+		w = strings.TrimSpace(w)
+		if w == "" { continue }
+		if allDbref && !(len(w) > 1 && w[0] == '#' && (w[1] >= '0' && w[1] <= '9' || w[1] == '-')) {
+			allDbref = false
+		}
+		if allNum {
+			_, err := strconv.ParseFloat(w, 64)
+			if err != nil { allNum = false }
+		}
+	}
+	if allDbref { return "d" }
+	if allNum { return "n" }
+	return "a"
+}
+
+// sort(list[, sorttype[, delim[, odelim]]])
 func fnSort(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
+	sortType := ""
 	delim := " "
-	if len(args) > 1 && args[1] != "" { delim = args[1] }
-	sortType := "a" // alphabetic
-	if len(args) > 2 && args[2] != "" { sortType = strings.ToLower(args[2]) }
+	if len(args) > 1 && args[1] != "" { sortType = strings.ToLower(args[1]) }
+	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	words := splitList(args[0], delim)
+	if sortType == "" { sortType = autodetectSortType(words) }
 	switch sortType {
-	case "n", "i": // numeric or integer
-		sort.Slice(words, func(i, j int) bool {
+	case "n", "i", "f": // numeric/integer/float
+		sort.SliceStable(words, func(i, j int) bool {
 			return toFloat(words[i]) < toFloat(words[j])
 		})
 	case "d": // dbref
-		sort.Slice(words, func(i, j int) bool {
+		sort.SliceStable(words, func(i, j int) bool {
 			return parseDBRefNum(words[i]) < parseDBRefNum(words[j])
 		})
 	default: // alphabetic
-		sort.Slice(words, func(i, j int) bool {
+		sort.SliceStable(words, func(i, j int) bool {
 			return strings.ToLower(words[i]) < strings.ToLower(words[j])
 		})
 	}
@@ -211,88 +243,111 @@ func parseDBRefNum(s string) int {
 func fnSetunion(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	delim := " "
+	sortType := ""
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	outDelim := delim
 	if len(args) > 3 && args[3] != "" { outDelim = args[3] }
+	if len(args) > 4 && args[4] != "" { sortType = strings.ToLower(args[4]) }
 	a := splitList(args[0], delim)
 	b := splitList(args[1], delim)
 	seen := make(map[string]bool)
 	var result []string
 	for _, w := range a {
-		lw := strings.ToLower(w)
-		if !seen[lw] { seen[lw] = true; result = append(result, w) }
+		if !seen[w] { seen[w] = true; result = append(result, w) }
 	}
 	for _, w := range b {
-		lw := strings.ToLower(w)
-		if !seen[lw] { seen[lw] = true; result = append(result, w) }
+		if !seen[w] { seen[w] = true; result = append(result, w) }
 	}
+	sortSetResult(result, sortType)
 	buf.WriteString(strings.Join(result, outDelim))
 }
 
 func fnSetdiff(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	delim := " "
+	sortType := ""
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	outDelim := delim
 	if len(args) > 3 && args[3] != "" { outDelim = args[3] }
+	if len(args) > 4 && args[4] != "" { sortType = strings.ToLower(args[4]) }
 	b := splitList(args[1], delim)
 	bSet := make(map[string]bool)
-	for _, w := range b { bSet[strings.ToLower(w)] = true }
+	for _, w := range b { bSet[w] = true }
 	a := splitList(args[0], delim)
 	var result []string
 	seen := make(map[string]bool)
 	for _, w := range a {
-		lw := strings.ToLower(w)
-		if !bSet[lw] && !seen[lw] { seen[lw] = true; result = append(result, w) }
+		if !bSet[w] && !seen[w] { seen[w] = true; result = append(result, w) }
 	}
+	sortSetResult(result, sortType)
 	buf.WriteString(strings.Join(result, outDelim))
 }
 
 func fnSetinter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	delim := " "
+	sortType := ""
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	outDelim := delim
 	if len(args) > 3 && args[3] != "" { outDelim = args[3] }
+	if len(args) > 4 && args[4] != "" { sortType = strings.ToLower(args[4]) }
 	b := splitList(args[1], delim)
 	bSet := make(map[string]bool)
-	for _, w := range b { bSet[strings.ToLower(w)] = true }
+	for _, w := range b { bSet[w] = true }
 	a := splitList(args[0], delim)
 	var result []string
 	seen := make(map[string]bool)
 	for _, w := range a {
-		lw := strings.ToLower(w)
-		if bSet[lw] && !seen[lw] { seen[lw] = true; result = append(result, w) }
+		if bSet[w] && !seen[w] { seen[w] = true; result = append(result, w) }
 	}
+	sortSetResult(result, sortType)
 	buf.WriteString(strings.Join(result, outDelim))
 }
 
+// sortSetResult sorts a result list for set operations (default: case-insensitive alpha).
+func sortSetResult(result []string, sortType string) {
+	if sortType == "" { sortType = "a" }
+	switch sortType {
+	case "n", "i", "f":
+		sort.SliceStable(result, func(i, j int) bool {
+			return toFloat(result[i]) < toFloat(result[j])
+		})
+	case "d":
+		sort.SliceStable(result, func(i, j int) bool {
+			return parseDBRefNum(result[i]) < parseDBRefNum(result[j])
+		})
+	default:
+		sort.SliceStable(result, func(i, j int) bool {
+			return strings.ToLower(result[i]) < strings.ToLower(result[j])
+		})
+	}
+}
+
 // fnSetsymdiff — symmetric difference of two lists: (A-B) ∪ (B-A).
-// setsymdiff(list1, list2[, delim[, odelim]])
+// setsymdiff(list1, list2[, delim[, odelim[, sorttype]]])
 func fnSetsymdiff(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	delim := " "
+	sortType := ""
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	outDelim := delim
 	if len(args) > 3 && args[3] != "" { outDelim = args[3] }
+	if len(args) > 4 && args[4] != "" { sortType = strings.ToLower(args[4]) }
 	a := splitList(args[0], delim)
 	b := splitList(args[1], delim)
 	aSet := make(map[string]bool)
-	for _, w := range a { aSet[strings.ToLower(w)] = true }
+	for _, w := range a { aSet[w] = true }
 	bSet := make(map[string]bool)
-	for _, w := range b { bSet[strings.ToLower(w)] = true }
+	for _, w := range b { bSet[w] = true }
 	var result []string
 	seen := make(map[string]bool)
-	// Items in A but not in B
 	for _, w := range a {
-		lw := strings.ToLower(w)
-		if !bSet[lw] && !seen[lw] { seen[lw] = true; result = append(result, w) }
+		if !bSet[w] && !seen[w] { seen[w] = true; result = append(result, w) }
 	}
-	// Items in B but not in A
 	for _, w := range b {
-		lw := strings.ToLower(w)
-		if !aSet[lw] && !seen[lw] { seen[lw] = true; result = append(result, w) }
+		if !aSet[w] && !seen[w] { seen[w] = true; result = append(result, w) }
 	}
+	sortSetResult(result, sortType)
 	buf.WriteString(strings.Join(result, outDelim))
 }
 
@@ -562,17 +617,46 @@ func fnLedit(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	buf.WriteString(strings.Join(words, delim))
 }
 
-// fnIsort — case-insensitive alphabetic sort.
-// isort(list[, delim])
+// fnIsort — returns original 1-based positions of elements in sorted order.
+// isort(list[, sorttype[, delim]])
+// E.g. isort(c a b) → "2 3 1" (element at pos 2 is smallest, etc.)
 func fnIsort(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
+	sortType := ""
 	delim := " "
-	if len(args) > 1 && args[1] != "" { delim = args[1] }
+	if len(args) > 1 && args[1] != "" { sortType = strings.ToLower(args[1]) }
+	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	words := splitList(args[0], delim)
-	sort.SliceStable(words, func(i, j int) bool {
-		return strings.ToLower(words[i]) < strings.ToLower(words[j])
-	})
-	buf.WriteString(strings.Join(words, delim))
+	if len(words) == 0 { return }
+
+	// Build index array
+	indices := make([]int, len(words))
+	for i := range indices { indices[i] = i }
+
+	if sortType == "" { sortType = autodetectSortType(words) }
+
+	// Sort indices by comparing the words they reference
+	switch sortType {
+	case "n", "i", "f":
+		sort.SliceStable(indices, func(a, b int) bool {
+			return toFloat(words[indices[a]]) < toFloat(words[indices[b]])
+		})
+	case "d":
+		sort.SliceStable(indices, func(a, b int) bool {
+			return parseDBRefNum(words[indices[a]]) < parseDBRefNum(words[indices[b]])
+		})
+	default:
+		sort.SliceStable(indices, func(a, b int) bool {
+			return strings.ToLower(words[indices[a]]) < strings.ToLower(words[indices[b]])
+		})
+	}
+
+	// Output 1-based positions
+	var parts []string
+	for _, idx := range indices {
+		parts = append(parts, strconv.Itoa(idx+1))
+	}
+	buf.WriteString(strings.Join(parts, delim))
 }
 
 // fnMerge — character-level string merge (C TinyMUSH merge()).

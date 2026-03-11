@@ -24,7 +24,7 @@ type ProgramData struct {
 func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("@program: Usage: @program <player>=<obj>/<attr>")
+		g.Notify(d.Player, "@program: Usage: @program <player>=<obj>/<attr>")
 		return
 	}
 
@@ -34,25 +34,25 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 	// Resolve target player
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]
 	if !ok || targetObj.ObjType() != gamedb.TypePlayer {
-		d.Send("@program: Target must be a player.")
+		g.Notify(d.Player, "@program: Target must be a player.")
 		return
 	}
 
 	// Permission check: caller must control the target player
 	if !Controls(g, d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	// Parse obj/attr — split on first '/' to get obj and attr[:prompt]
 	slashIdx := strings.IndexByte(objAttr, '/')
 	if slashIdx < 0 {
-		d.Send("@program: Usage: @program <player>=<obj>/<attr>")
+		g.Notify(d.Player, "@program: Usage: @program <player>=<obj>/<attr>")
 		return
 	}
 	objStr := strings.TrimSpace(objAttr[:slashIdx])
@@ -70,14 +70,14 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 	// Resolve the object relative to the caller
 	obj := g.MatchObject(d.Player, objStr)
 	if obj == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
 	// Look up the attribute text
 	cmdText := g.GetAttrTextByName(obj, attrName)
 	if cmdText == "" {
-		d.Send("No such attribute.")
+		g.Notify(d.Player, "No such attribute.")
 		return
 	}
 
@@ -87,7 +87,7 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 	// Find all descriptors for the target player and set program state
 	targetDescs := g.Conns.GetByPlayer(target)
 	if len(targetDescs) == 0 {
-		d.Send("@program: That player is not connected.")
+		g.Notify(d.Player, "@program: That player is not connected.")
 		// Clean up the attr we just set
 		g.removeAttr(target, gamedb.A_PROGCMD)
 		return
@@ -135,16 +135,16 @@ func cmdQuitProgram(g *Game, d *Descriptor, args string, switches []string) {
 		// Cancel another player's program
 		target = g.MatchObject(d.Player, args)
 		if target == gamedb.Nothing {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 		if !Controls(g, d.Player, target) {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		descs := g.Conns.GetByPlayer(target)
 		if len(descs) == 0 {
-			d.Send("That player is not connected.")
+			g.Notify(d.Player, "That player is not connected.")
 			return
 		}
 	}
@@ -159,7 +159,7 @@ func cmdQuitProgram(g *Game, d *Descriptor, args string, switches []string) {
 		}
 	}
 	if !inProg {
-		d.Send("That player is not in a program.")
+		g.Notify(d.Player, "That player is not in a program.")
 		return
 	}
 

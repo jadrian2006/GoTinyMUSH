@@ -32,10 +32,8 @@ func (g *Game) ConnectedPlayersVisible(viewer gamedb.DBRef) []gamedb.DBRef {
 	var visible []gamedb.DBRef
 	for _, p := range all {
 		if obj, ok := g.DB.Objects[p]; ok {
+			// Only filter DARK wizards — C TinyMUSH does NOT filter UNFINDABLE from lwho()
 			if obj.HasFlag(gamedb.FlagDark) && obj.HasFlag(gamedb.FlagWizard) {
-				continue
-			}
-			if obj.HasFlag2(gamedb.Flag2Unfindable) {
 				continue
 			}
 		}
@@ -374,6 +372,19 @@ func (g *Game) GetObjLockStr(obj gamedb.DBRef) string {
 		return ""
 	}
 	return gamedb.SerializeBoolExp(o.Lock)
+}
+
+// UnparseLockStr parses a serialized lock string and returns a human-readable
+// representation using F_FUNCTION format: players shown as *Name, else #dbref.
+func (g *Game) UnparseLockStr(player gamedb.DBRef, lockStr string) string {
+	if lockStr == "" {
+		return ""
+	}
+	parsed := ParseBoolExp(g, player, lockStr)
+	if parsed == nil {
+		return lockStr
+	}
+	return UnparseBoolExpFunction(g, parsed)
 }
 
 // CanReadAttrGS checks if player can read a specific attribute on obj.

@@ -139,7 +139,7 @@ func (g *Game) LoadHelpFiles(textDir string) {
 
 func cmdHelp(g *Game, d *Descriptor, args string, _ []string) {
 	if g.HelpMain == nil {
-		d.Send("No help available.")
+		g.Notify(d.Player, "No help available.")
 		return
 	}
 	if args == "" {
@@ -147,15 +147,15 @@ func cmdHelp(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpMain.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }
 
 func cmdQhelp(g *Game, d *Descriptor, args string, _ []string) {
 	if g.HelpQuick == nil {
-		d.Send("No quick help available.")
+		g.Notify(d.Player, "No quick help available.")
 		return
 	}
 	if args == "" {
@@ -163,20 +163,20 @@ func cmdQhelp(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpQuick.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }
 
 func cmdWizhelp(g *Game, d *Descriptor, args string, _ []string) {
 	// Wizard-only
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if g.HelpWiz == nil {
-		d.Send("No wizard help available.")
+		g.Notify(d.Player, "No wizard help available.")
 		return
 	}
 	if args == "" {
@@ -184,15 +184,15 @@ func cmdWizhelp(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpWiz.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }
 
 func cmdNews(g *Game, d *Descriptor, args string, _ []string) {
 	if g.HelpNews == nil {
-		d.Send("No news available.")
+		g.Notify(d.Player, "No news available.")
 		return
 	}
 	if args == "" {
@@ -200,15 +200,15 @@ func cmdNews(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpNews.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }
 
 func cmdPlusHelp(g *Game, d *Descriptor, args string, _ []string) {
 	if g.HelpPlus == nil {
-		d.Send("No +help available.")
+		g.Notify(d.Player, "No +help available.")
 		return
 	}
 	if args == "" {
@@ -216,15 +216,15 @@ func cmdPlusHelp(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpPlus.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }
 
 func cmdMan(g *Game, d *Descriptor, args string, _ []string) {
 	if g.HelpMan == nil {
-		d.Send("No manual available.")
+		g.Notify(d.Player, "No manual available.")
 		return
 	}
 	if args == "" {
@@ -232,19 +232,19 @@ func cmdMan(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpMan.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }
 
 func cmdWizNews(g *Game, d *Descriptor, args string, _ []string) {
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if g.HelpWizNews == nil {
-		d.Send("No wizard news available.")
+		g.Notify(d.Player, "No wizard news available.")
 		return
 	}
 	if args == "" {
@@ -252,15 +252,15 @@ func cmdWizNews(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpWizNews.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }
 
 func cmdJhelp(g *Game, d *Descriptor, args string, _ []string) {
 	if g.HelpJobs == nil {
-		d.Send("No +jhelp available.")
+		g.Notify(d.Player, "No +jhelp available.")
 		return
 	}
 	if args == "" {
@@ -268,8 +268,8 @@ func cmdJhelp(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	text := g.HelpJobs.Lookup(args)
 	if text == "" {
-		d.Send(fmt.Sprintf("No entry for '%s'.", args))
+		g.Notify(d.Player, fmt.Sprintf("No entry for '%s'.", args))
 		return
 	}
-	d.Send(text)
+	g.Notify(d.Player, text)
 }

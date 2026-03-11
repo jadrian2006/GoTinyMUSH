@@ -57,7 +57,7 @@ func cmdMail(g *Game, d *Descriptor, args string, switches []string) {
 		case "safe":
 			mailSafe(g, d, args)
 		default:
-			d.Send(fmt.Sprintf("@mail: Unknown switch /%s.", sw))
+			g.Notify(d.Player, fmt.Sprintf("@mail: Unknown switch /%s.", sw))
 		}
 		return
 	}
@@ -98,7 +98,7 @@ func cmdMail(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	d.Send("Usage: @mail [<num>|<player>=<subj>/<body>]")
+	g.Notify(d.Player, "Usage: @mail [<num>|<player>=<subj>/<body>]")
 }
 
 // cmdMailDash handles the "- <text>" prefix command for draft body appending.
@@ -111,7 +111,7 @@ func cmdMailDash(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	if !g.Mail.HasDraft(d.Player) {
-		d.Send("You don't have a mail draft in progress. Use @mail/to <players> first.")
+		g.Notify(d.Player, "You don't have a mail draft in progress. Use @mail/to <players> first.")
 		return
 	}
 
@@ -120,13 +120,13 @@ func cmdMailDash(g *Game, d *Descriptor, args string, switches []string) {
 		draft.Body.WriteString("\n")
 	}
 	draft.Body.WriteString(args)
-	d.Send("Text added to mail draft.")
+	g.Notify(d.Player, "Text added to mail draft.")
 }
 
 // mailTo sets draft recipients.
 func mailTo(g *Game, d *Descriptor, args string) {
 	if args == "" {
-		d.Send("Usage: @mail/to <player list>")
+		g.Notify(d.Player, "Usage: @mail/to <player list>")
 		return
 	}
 	recipients := parseMailRecipients(g, d, args)
@@ -136,14 +136,14 @@ func mailTo(g *Game, d *Descriptor, args string) {
 	draft := g.Mail.GetDraft(d.Player)
 	draft.To = recipients
 	names := FormatRecipients(g.DB, recipients)
-	d.Send(fmt.Sprintf("Mail recipients set to: %s", names))
-	d.Send("Use @mail/subject <text>, then - <text> to compose body, then @mail/send.")
+	g.Notify(d.Player, fmt.Sprintf("Mail recipients set to: %s", names))
+	g.Notify(d.Player, "Use @mail/subject <text>, then - <text> to compose body, then @mail/send.")
 }
 
 // mailCC sets draft CC recipients.
 func mailCC(g *Game, d *Descriptor, args string) {
 	if args == "" {
-		d.Send("Usage: @mail/cc <player list>")
+		g.Notify(d.Player, "Usage: @mail/cc <player list>")
 		return
 	}
 	recipients := parseMailRecipients(g, d, args)
@@ -153,66 +153,66 @@ func mailCC(g *Game, d *Descriptor, args string) {
 	draft := g.Mail.GetDraft(d.Player)
 	draft.CC = recipients
 	names := FormatRecipients(g.DB, recipients)
-	d.Send(fmt.Sprintf("Mail CC set to: %s", names))
+	g.Notify(d.Player, fmt.Sprintf("Mail CC set to: %s", names))
 }
 
 // mailSubject sets draft subject.
 func mailSubject(g *Game, d *Descriptor, args string) {
 	if args == "" {
-		d.Send("Usage: @mail/subject <text>")
+		g.Notify(d.Player, "Usage: @mail/subject <text>")
 		return
 	}
 	draft := g.Mail.GetDraft(d.Player)
 	draft.Subject = args
-	d.Send(fmt.Sprintf("Mail subject set to: %s", args))
+	g.Notify(d.Player, fmt.Sprintf("Mail subject set to: %s", args))
 }
 
 // mailProof previews the current draft.
 func mailProof(g *Game, d *Descriptor) {
 	if !g.Mail.HasDraft(d.Player) {
-		d.Send("You have no mail draft in progress.")
+		g.Notify(d.Player, "You have no mail draft in progress.")
 		return
 	}
 	draft := g.Mail.GetDraft(d.Player)
-	d.Send("--- Mail Draft ---")
-	d.Send(fmt.Sprintf("To: %s", FormatRecipients(g.DB, draft.To)))
+	g.Notify(d.Player, "--- Mail Draft ---")
+	g.Notify(d.Player, fmt.Sprintf("To: %s", FormatRecipients(g.DB, draft.To)))
 	if len(draft.CC) > 0 {
-		d.Send(fmt.Sprintf("CC: %s", FormatRecipients(g.DB, draft.CC)))
+		g.Notify(d.Player, fmt.Sprintf("CC: %s", FormatRecipients(g.DB, draft.CC)))
 	}
-	d.Send(fmt.Sprintf("Subject: %s", draft.Subject))
-	d.Send("---")
+	g.Notify(d.Player, fmt.Sprintf("Subject: %s", draft.Subject))
+	g.Notify(d.Player, "---")
 	body := draft.Body.String()
 	if body == "" {
-		d.Send("(empty body)")
+		g.Notify(d.Player, "(empty body)")
 	} else {
-		d.Send(body)
+		g.Notify(d.Player, body)
 	}
-	d.Send("--- End Draft ---")
+	g.Notify(d.Player, "--- End Draft ---")
 }
 
 // mailAbort discards the current draft.
 func mailAbort(g *Game, d *Descriptor) {
 	if !g.Mail.HasDraft(d.Player) {
-		d.Send("You have no mail draft to abort.")
+		g.Notify(d.Player, "You have no mail draft to abort.")
 		return
 	}
 	g.Mail.ClearDraft(d.Player)
-	d.Send("Mail draft discarded.")
+	g.Notify(d.Player, "Mail draft discarded.")
 }
 
 // mailSend sends the current draft.
 func mailSend(g *Game, d *Descriptor, args string) {
 	if !g.Mail.HasDraft(d.Player) {
-		d.Send("You have no mail draft to send. Use @mail/to <players> first.")
+		g.Notify(d.Player, "You have no mail draft to send. Use @mail/to <players> first.")
 		return
 	}
 	draft := g.Mail.GetDraft(d.Player)
 	if len(draft.To) == 0 {
-		d.Send("Your draft has no recipients. Use @mail/to <players>.")
+		g.Notify(d.Player, "Your draft has no recipients. Use @mail/to <players>.")
 		return
 	}
 	if draft.Subject == "" {
-		d.Send("Your draft has no subject. Use @mail/subject <text>.")
+		g.Notify(d.Player, "Your draft has no subject. Use @mail/subject <text>.")
 		return
 	}
 
@@ -224,43 +224,43 @@ func mailSend(g *Game, d *Descriptor, args string) {
 func mailRead(g *Game, d *Descriptor, args string) {
 	num, err := strconv.Atoi(strings.TrimSpace(args))
 	if err != nil {
-		d.Send("Usage: @mail/read <number>")
+		g.Notify(d.Player, "Usage: @mail/read <number>")
 		return
 	}
 
 	msg := g.Mail.GetMessage(d.Player, num)
 	if msg == nil {
-		d.Send(fmt.Sprintf("You don't have a message #%d.", num))
+		g.Notify(d.Player, fmt.Sprintf("You don't have a message #%d.", num))
 		return
 	}
 
 	g.Mail.MarkRead(d.Player, num)
 	persistMailMessage(g, d.Player, msg)
 
-	d.Send(fmt.Sprintf("--- Message %d ---", msg.ID))
-	d.Send(fmt.Sprintf("From: %s  Date: %s", playerName(g.DB, msg.From), msg.Time.Format("Mon Jan 02 15:04 2006")))
-	d.Send(fmt.Sprintf("To: %s", FormatRecipients(g.DB, msg.To)))
+	g.Notify(d.Player, fmt.Sprintf("--- Message %d ---", msg.ID))
+	g.Notify(d.Player, fmt.Sprintf("From: %s  Date: %s", playerName(g.DB, msg.From), msg.Time.Format("Mon Jan 02 15:04 2006")))
+	g.Notify(d.Player, fmt.Sprintf("To: %s", FormatRecipients(g.DB, msg.To)))
 	if len(msg.CC) > 0 {
-		d.Send(fmt.Sprintf("CC: %s", FormatRecipients(g.DB, msg.CC)))
+		g.Notify(d.Player, fmt.Sprintf("CC: %s", FormatRecipients(g.DB, msg.CC)))
 	}
-	d.Send(fmt.Sprintf("Subject: %s", msg.Subject))
-	d.Send("---")
+	g.Notify(d.Player, fmt.Sprintf("Subject: %s", msg.Subject))
+	g.Notify(d.Player, "---")
 	if msg.Body != "" {
-		d.Send(msg.Body)
+		g.Notify(d.Player, msg.Body)
 	}
-	d.Send("--- End Message ---")
+	g.Notify(d.Player, "--- End Message ---")
 }
 
 // mailList lists inbox messages.
 func mailList(g *Game, d *Descriptor) {
 	inbox := g.Mail.GetInbox(d.Player)
 	if len(inbox) == 0 {
-		d.Send("You have no mail.")
+		g.Notify(d.Player, "You have no mail.")
 		return
 	}
 
-	d.Send(fmt.Sprintf("--- Mailbox for %s (%d messages) ---", playerName(g.DB, d.Player), len(inbox)))
-	d.Send(fmt.Sprintf("%-4s %-5s %-16s %-20s %s", "#", "Flags", "From", "Date", "Subject"))
+	g.Notify(d.Player, fmt.Sprintf("--- Mailbox for %s (%d messages) ---", playerName(g.DB, d.Player), len(inbox)))
+	g.Notify(d.Player, fmt.Sprintf("%-4s %-5s %-16s %-20s %s", "#", "Flags", "From", "Date", "Subject"))
 	for _, msg := range inbox {
 		from := playerName(g.DB, msg.From)
 		if len(from) > 16 {
@@ -270,33 +270,33 @@ func mailList(g *Game, d *Descriptor) {
 		if len(subj) > 30 {
 			subj = subj[:27] + "..."
 		}
-		d.Send(fmt.Sprintf("%-4d %-5s %-16s %-20s %s",
+		g.Notify(d.Player, fmt.Sprintf("%-4d %-5s %-16s %-20s %s",
 			msg.ID,
 			FormatMailFlags(msg),
 			from,
 			msg.Time.Format("Jan 02 15:04"),
 			subj))
 	}
-	d.Send("---")
+	g.Notify(d.Player, "---")
 }
 
 // mailClear marks a message for deletion.
 func mailClear(g *Game, d *Descriptor, args string) {
 	num, err := strconv.Atoi(strings.TrimSpace(args))
 	if err != nil {
-		d.Send("Usage: @mail/clear <number>")
+		g.Notify(d.Player, "Usage: @mail/clear <number>")
 		return
 	}
 	if g.Mail.MarkCleared(d.Player, num) {
 		msg := g.Mail.GetMessage(d.Player, num)
 		persistMailMessage(g, d.Player, msg)
-		d.Send(fmt.Sprintf("Message %d marked for clearing.", num))
+		g.Notify(d.Player, fmt.Sprintf("Message %d marked for clearing.", num))
 	} else {
 		msg := g.Mail.GetMessage(d.Player, num)
 		if msg != nil && msg.Flags&gamedb.MailSafe != 0 {
-			d.Send(fmt.Sprintf("Message %d is marked safe and cannot be cleared.", num))
+			g.Notify(d.Player, fmt.Sprintf("Message %d is marked safe and cannot be cleared.", num))
 		} else {
-			d.Send(fmt.Sprintf("You don't have a message #%d.", num))
+			g.Notify(d.Player, fmt.Sprintf("You don't have a message #%d.", num))
 		}
 	}
 }
@@ -305,15 +305,15 @@ func mailClear(g *Game, d *Descriptor, args string) {
 func mailUnclear(g *Game, d *Descriptor, args string) {
 	num, err := strconv.Atoi(strings.TrimSpace(args))
 	if err != nil {
-		d.Send("Usage: @mail/unclear <number>")
+		g.Notify(d.Player, "Usage: @mail/unclear <number>")
 		return
 	}
 	if g.Mail.MarkUncleared(d.Player, num) {
 		msg := g.Mail.GetMessage(d.Player, num)
 		persistMailMessage(g, d.Player, msg)
-		d.Send(fmt.Sprintf("Message %d uncleared.", num))
+		g.Notify(d.Player, fmt.Sprintf("Message %d uncleared.", num))
 	} else {
-		d.Send(fmt.Sprintf("You don't have a message #%d.", num))
+		g.Notify(d.Player, fmt.Sprintf("You don't have a message #%d.", num))
 	}
 }
 
@@ -321,25 +321,25 @@ func mailUnclear(g *Game, d *Descriptor, args string) {
 func mailPurge(g *Game, d *Descriptor) {
 	purged := g.Mail.PurgeCleared(d.Player)
 	if len(purged) == 0 {
-		d.Send("You have no cleared messages to purge.")
+		g.Notify(d.Player, "You have no cleared messages to purge.")
 		return
 	}
 	if g.Store != nil {
 		g.Store.DeleteMailMessages(d.Player, purged)
 	}
-	d.Send(fmt.Sprintf("%d message(s) purged.", len(purged)))
+	g.Notify(d.Player, fmt.Sprintf("%d message(s) purged.", len(purged)))
 }
 
 // mailReply starts a reply to a message.
 func mailReply(g *Game, d *Descriptor, args string) {
 	num, err := strconv.Atoi(strings.TrimSpace(args))
 	if err != nil {
-		d.Send("Usage: @mail/reply <number>")
+		g.Notify(d.Player, "Usage: @mail/reply <number>")
 		return
 	}
 	msg := g.Mail.GetMessage(d.Player, num)
 	if msg == nil {
-		d.Send(fmt.Sprintf("You don't have a message #%d.", num))
+		g.Notify(d.Player, fmt.Sprintf("You don't have a message #%d.", num))
 		return
 	}
 
@@ -350,15 +350,15 @@ func mailReply(g *Game, d *Descriptor, args string) {
 		subj = "Re: " + subj
 	}
 	draft.Subject = subj
-	d.Send(fmt.Sprintf("Replying to %s. Subject: %s", playerName(g.DB, msg.From), subj))
-	d.Send("Use - <text> to compose body, then @mail/send.")
+	g.Notify(d.Player, fmt.Sprintf("Replying to %s. Subject: %s", playerName(g.DB, msg.From), subj))
+	g.Notify(d.Player, "Use - <text> to compose body, then @mail/send.")
 }
 
 // mailForward forwards a message to other players.
 func mailForward(g *Game, d *Descriptor, args string) {
 	idx := strings.Index(args, "=")
 	if idx < 0 {
-		d.Send("Usage: @mail/forward <number>=<player list>")
+		g.Notify(d.Player, "Usage: @mail/forward <number>=<player list>")
 		return
 	}
 	numStr := strings.TrimSpace(args[:idx])
@@ -366,12 +366,12 @@ func mailForward(g *Game, d *Descriptor, args string) {
 
 	num, err := strconv.Atoi(numStr)
 	if err != nil {
-		d.Send("Usage: @mail/forward <number>=<player list>")
+		g.Notify(d.Player, "Usage: @mail/forward <number>=<player list>")
 		return
 	}
 	msg := g.Mail.GetMessage(d.Player, num)
 	if msg == nil {
-		d.Send(fmt.Sprintf("You don't have a message #%d.", num))
+		g.Notify(d.Player, fmt.Sprintf("You don't have a message #%d.", num))
 		return
 	}
 
@@ -396,19 +396,19 @@ func mailStats(g *Game, d *Descriptor, args string) {
 	if args != "" {
 		// Wizards can see stats for other players
 		if !Wizard(g, d.Player) {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		target := LookupPlayer(g.DB, strings.TrimSpace(args))
 		if target == gamedb.Nothing {
-			d.Send("No such player.")
+			g.Notify(d.Player, "No such player.")
 			return
 		}
 		player = target
 	}
 
 	total, unread, cleared := g.Mail.CountMessages(player)
-	d.Send(fmt.Sprintf("Mail stats for %s: %d total, %d unread, %d cleared.",
+	g.Notify(d.Player, fmt.Sprintf("Mail stats for %s: %d total, %d unread, %d cleared.",
 		playerName(g.DB, player), total, unread, cleared))
 }
 
@@ -416,15 +416,15 @@ func mailStats(g *Game, d *Descriptor, args string) {
 func mailSafe(g *Game, d *Descriptor, args string) {
 	num, err := strconv.Atoi(strings.TrimSpace(args))
 	if err != nil {
-		d.Send("Usage: @mail/safe <number>")
+		g.Notify(d.Player, "Usage: @mail/safe <number>")
 		return
 	}
 	if g.Mail.MarkSafe(d.Player, num) {
 		msg := g.Mail.GetMessage(d.Player, num)
 		persistMailMessage(g, d.Player, msg)
-		d.Send(fmt.Sprintf("Message %d marked safe.", num))
+		g.Notify(d.Player, fmt.Sprintf("Message %d marked safe.", num))
 	} else {
-		d.Send(fmt.Sprintf("You don't have a message #%d.", num))
+		g.Notify(d.Player, fmt.Sprintf("You don't have a message #%d.", num))
 	}
 }
 
@@ -443,13 +443,13 @@ func parseMailRecipients(g *Game, d *Descriptor, input string) []gamedb.DBRef {
 		}
 		ref := LookupPlayer(g.DB, name)
 		if ref == gamedb.Nothing {
-			d.Send(fmt.Sprintf("No such player: %s", name))
+			g.Notify(d.Player, fmt.Sprintf("No such player: %s", name))
 			return nil
 		}
 		result = append(result, ref)
 	}
 	if len(result) == 0 {
-		d.Send("No valid recipients specified.")
+		g.Notify(d.Player, "No valid recipients specified.")
 	}
 	return result
 }
@@ -476,7 +476,7 @@ func deliverMail(g *Game, d *Descriptor, to, cc []gamedb.DBRef, subject, body st
 	}
 
 	names := FormatRecipients(g.DB, to)
-	d.Send(fmt.Sprintf("Mail sent to %s.", names))
+	g.Notify(d.Player, fmt.Sprintf("Mail sent to %s.", names))
 }
 
 // persistMailMessage writes a single message update to bbolt.

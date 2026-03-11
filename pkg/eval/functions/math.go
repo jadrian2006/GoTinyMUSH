@@ -1,7 +1,6 @@
 package functions
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -69,39 +68,49 @@ func writeInt(buf *strings.Builder, i int) {
 	buf.WriteString(strconv.Itoa(i))
 }
 
+// writeFloat formats like C's fval(): %.6f then strip trailing zeros after decimal.
+// Examples: 3.800000 -> 3.8, 1.000000 -> 1, 3.141593 -> 3.141593
 func writeFloat(buf *strings.Builder, f float64) {
-	if f == float64(int64(f)) {
-		buf.WriteString(strconv.FormatInt(int64(f), 10))
-	} else {
-		buf.WriteString(strconv.FormatFloat(f, 'f', 6, 64))
+	s := strconv.FormatFloat(f, 'f', 6, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
 	}
+	buf.WriteString(s)
 }
 
 // --- Arithmetic ---
 
-// add() returns integer result (C TinyMUSH ival behavior: parse as float, compute, truncate).
+// add() uses fval output — float with trailing zero stripping.
 func fnAdd(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) == 0 {
+		buf.WriteString("#-1 TOO FEW ARGUMENTS")
+		return
+	}
 	sum := 0.0
 	for _, a := range args {
 		sum += toFloat(a)
 	}
-	writeInt(buf, int(sum))
+	writeFloat(buf, sum)
 }
 
-// sub() returns integer result (C TinyMUSH ival behavior: parse as float, compute, truncate).
+// sub() uses fval output.
 func fnSub(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
-	writeInt(buf, int(toFloat(args[0])-toFloat(args[1])))
+	writeFloat(buf, toFloat(args[0])-toFloat(args[1]))
 }
 
-// mul() returns integer result (C TinyMUSH ival behavior: parse as float, compute, truncate).
+// mul() uses fval output.
 func fnMul(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) == 0 { buf.WriteString("0"); return }
+	if len(args) == 0 {
+		buf.WriteString("#-1 TOO FEW ARGUMENTS")
+		return
+	}
 	prod := 1.0
 	for _, a := range args {
 		prod *= toFloat(a)
 	}
-	writeInt(buf, int(prod))
+	writeFloat(buf, prod)
 }
 
 // fadd() returns float result.
@@ -149,11 +158,27 @@ func fnFdiv(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 	writeFloat(buf, toFloat(args[0])/b)
 }
 
+// fnModulo implements C's true mathematical modulo (result always non-negative for positive divisor).
 func fnModulo(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
 	b := toInt(args[1])
 	if b == 0 {
-		buf.WriteString("#-1 DIVIDE BY ZERO")
+		buf.WriteString("0")
+		return
+	}
+	r := toInt(args[0]) % b
+	if r < 0 {
+		if b > 0 { r += b } else { r -= b }
+	}
+	writeInt(buf, r)
+}
+
+// fnRemainder implements C's % operator (sign follows dividend).
+func fnRemainder(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { buf.WriteString("0"); return }
+	b := toInt(args[1])
+	if b == 0 {
+		buf.WriteString("0")
 		return
 	}
 	writeInt(buf, toInt(args[0])%b)
@@ -221,7 +246,12 @@ func fnSqrt(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 
 func fnPower(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
-	writeFloat(buf, math.Pow(toFloat(args[0]), toFloat(args[1])))
+	base := toFloat(args[0])
+	if base < 0 {
+		buf.WriteString("#-1 POWER OF NEGATIVE")
+		return
+	}
+	writeFloat(buf, math.Pow(base, toFloat(args[1])))
 }
 
 func fnMax(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -245,11 +275,12 @@ func fnMin(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 }
 
 func fnPi(_ *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	buf.WriteString(fmt.Sprintf("%.6f", math.Pi))
+	// C uses higher precision for constants than fval()
+	buf.WriteString("3.141592654")
 }
 
 func fnE(_ *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	buf.WriteString(fmt.Sprintf("%.6f", math.E))
+	buf.WriteString("2.718281828")
 }
 
 // --- Comparison ---
@@ -318,19 +349,26 @@ func fnNot(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	buf.WriteString(boolToStr(toInt(args[0]) == 0))
 }
 
+// xlate matches C's xlate(): false for empty, "0", and strings starting with "#-"
+func xlate(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "0" {
+		return false
+	}
+	if strings.HasPrefix(s, "#-") {
+		return false
+	}
+	return true
+}
+
 func fnNotBool(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("1"); return }
-	buf.WriteString(boolToStr(strings.TrimSpace(args[0]) == "" || args[0] == "0"))
+	buf.WriteString(boolToStr(!xlate(args[0])))
 }
 
 func fnT(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("0"); return }
-	s := strings.TrimSpace(args[0])
-	if s == "" || s == "0" {
-		buf.WriteString("0")
-	} else {
-		buf.WriteString("1")
-	}
+	buf.WriteString(boolToStr(xlate(args[0])))
 }
 
 // --- Trigonometric functions ---
@@ -439,7 +477,16 @@ func fnLog(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 		buf.WriteString("#-1 LOG OF NEGATIVE OR ZERO")
 		return
 	}
-	writeFloat(buf, math.Log10(v))
+	if len(args) > 1 {
+		base := toFloat(args[1])
+		if base <= 0 || base == 1 {
+			buf.WriteString("#-1 LOG BASE OUT OF RANGE")
+			return
+		}
+		writeFloat(buf, math.Log(v)/math.Log(base))
+	} else {
+		writeFloat(buf, math.Log(v)/math.Log(10))
+	}
 }
 
 // --- Bitwise ---
@@ -485,7 +532,7 @@ func fnDist2d(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	if len(args) < 4 { buf.WriteString("0"); return }
 	dx := toFloat(args[2]) - toFloat(args[0])
 	dy := toFloat(args[3]) - toFloat(args[1])
-	writeFloat(buf, math.Sqrt(dx*dx+dy*dy))
+	writeFloat(buf, math.Round(math.Sqrt(dx*dx+dy*dy)))
 }
 
 func fnDist3d(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -493,7 +540,7 @@ func fnDist3d(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	dx := toFloat(args[3]) - toFloat(args[0])
 	dy := toFloat(args[4]) - toFloat(args[1])
 	dz := toFloat(args[5]) - toFloat(args[2])
-	writeFloat(buf, math.Sqrt(dx*dx+dy*dy+dz*dz))
+	writeFloat(buf, math.Round(math.Sqrt(dx*dx+dy*dy+dz*dz)))
 }
 
 // --- Alpha comparison ---

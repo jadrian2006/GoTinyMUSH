@@ -10,7 +10,7 @@ import (
 
 // fnIter implements iter(list, pattern[, idelim[, odelim]])
 // Iterates over list, evaluating pattern for each element.
-// ## = current element, #@ = position (0-indexed), #+ = second list element
+// ## = current element, #@ = position (1-indexed, matching C), #+ = second list element
 func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
 	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
@@ -41,7 +41,7 @@ func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	first := true
 	for i, word := range words {
 		ctx.Loop.LoopTokens[idx] = word
-		ctx.Loop.LoopNumbers[idx] = i
+		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 		if result != "" {
 			if !first {
@@ -168,21 +168,35 @@ func fnIlev(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb
 	writeInt(buf, ctx.Loop.InLoop-1)
 }
 
+// fnItext — itext(N) returns loop token at absolute nesting level N.
+// C uses absolute indexing: itext(0) = outermost loop, itext(ilev()) = innermost.
 func fnItext(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	n := toInt(args[0])
-	idx := ctx.Loop.InLoop - 1 - n
-	if idx >= 0 && idx < len(ctx.Loop.LoopTokens) {
-		buf.WriteString(ctx.Loop.LoopTokens[idx])
+	if n >= 0 && n <= ctx.Loop.InLoop-1 && n < len(ctx.Loop.LoopTokens) {
+		buf.WriteString(ctx.Loop.LoopTokens[n])
 	}
 }
 
+// fnItext2 — itext2(N) returns iter2 second-list token at absolute nesting level N.
+func fnItext2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 { return }
+	n := toInt(args[0])
+	if n >= 0 && n <= ctx.Loop.InLoop-1 && n < len(ctx.Loop.LoopTokens2) {
+		buf.WriteString(ctx.Loop.LoopTokens2[n])
+	}
+}
+
+// fnInum — inum(N) returns loop number at absolute nesting level N.
+// C uses absolute indexing: inum(0) = outermost loop.
 func fnInum(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	n := toInt(args[0])
-	idx := ctx.Loop.InLoop - 1 - n
-	if idx >= 0 && idx < len(ctx.Loop.LoopNumbers) {
-		buf.WriteString(strconv.Itoa(ctx.Loop.LoopNumbers[idx]))
+	if n >= 0 && n <= ctx.Loop.InLoop-1 && n < len(ctx.Loop.LoopNumbers) {
+		buf.WriteString(strconv.Itoa(ctx.Loop.LoopNumbers[n]))
+	} else {
+		// C returns 0 for out-of-range nesting levels
+		buf.WriteString("0")
 	}
 }
 
@@ -269,7 +283,7 @@ func fnIter2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		if i < len(words2) { w2 = words2[i] }
 		ctx.Loop.LoopTokens[idx] = w1
 		ctx.Loop.LoopTokens2[idx] = w2
-		ctx.Loop.LoopNumbers[idx] = i
+		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 		results = append(results, result)
 	}
@@ -281,18 +295,20 @@ func fnIter2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	buf.WriteString(strings.Join(results, odelim))
 }
 
-// fnWhentrue — returns list elements where condition evaluates true.
+// fnWhentrue — iterate like iter(), outputting the pattern result, until
+// the pattern evaluates to false then stop (including the false result).
 // whentrue(list, pattern[, idelim[, odelim]])
 func fnWhentrue(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	whenHelper(ctx, args, buf, true)
 }
 
-// fnWhenfalse — returns list elements where condition evaluates false.
+// fnWhenfalse — iterate like iter(), outputting the pattern result, until
+// the pattern evaluates to true then stop (including the true result).
 func fnWhenfalse(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	whenHelper(ctx, args, buf, false)
 }
 
-func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, wantTrue bool) {
+func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, breakOnFalse bool) {
 	if len(args) < 2 { return }
 	listStr := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 	pattern := args[1]
@@ -311,13 +327,24 @@ func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, want
 	ctx.Loop.LoopNumbers = append(ctx.Loop.LoopNumbers, 0)
 	idx := ctx.Loop.InLoop - 1
 
-	var results []string
+	first := true
 	for i, word := range words {
 		ctx.Loop.LoopTokens[idx] = word
-		ctx.Loop.LoopNumbers[idx] = i
+		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-		if isTrue(result) == wantTrue {
-			results = append(results, word)
+		// Output the result (like iter), with separator
+		if !first {
+			buf.WriteString(odelim)
+		}
+		buf.WriteString(result)
+		first = false
+		// Check break condition AFTER outputting
+		resultTrue := isTrue(result)
+		if breakOnFalse && !resultTrue {
+			break // whentrue: stop when result is false
+		}
+		if !breakOnFalse && resultTrue {
+			break // whenfalse: stop when result is true
 		}
 	}
 
@@ -325,7 +352,6 @@ func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, want
 	ctx.Loop.LoopTokens2 = ctx.Loop.LoopTokens2[:idx]
 	ctx.Loop.LoopNumbers = ctx.Loop.LoopNumbers[:idx]
 	ctx.Loop.InLoop--
-	buf.WriteString(strings.Join(results, odelim))
 }
 
 // fnFilterbool — like filter but returns boolean result directly.
@@ -390,7 +416,7 @@ func fnLoop(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 
 	for i, word := range words {
 		ctx.Loop.LoopTokens[idx] = word
-		ctx.Loop.LoopNumbers[idx] = i
+		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 		if result != "" {
 			ctx.Notifications = append(ctx.Notifications, eval.Notification{
@@ -440,7 +466,7 @@ func fnList2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		if i < len(words2) { w2 = words2[i] }
 		ctx.Loop.LoopTokens[idx] = w1
 		ctx.Loop.LoopTokens2[idx] = w2
-		ctx.Loop.LoopNumbers[idx] = i
+		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 		if result != "" {
 			ctx.Notifications = append(ctx.Notifications, eval.Notification{
@@ -498,7 +524,7 @@ func when2Helper(ctx *eval.EvalContext, args []string, buf *strings.Builder, wan
 		if i < len(words2) { w2 = words2[i] }
 		ctx.Loop.LoopTokens[idx] = w1
 		ctx.Loop.LoopTokens2[idx] = w2
-		ctx.Loop.LoopNumbers[idx] = i
+		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 		if isTrue(result) == wantTrue {
 			results = append(results, w1)

@@ -1044,9 +1044,9 @@ func TestSetVAttrClearNoEquals(t *testing.T) {
 	env.game.ProcessQueue()
 	out := getOutput(env.player)
 
-	// Should report "Cleared"
-	if !strings.Contains(out, "Cleared") {
-		t.Errorf("expected 'Cleared' in output, got: %q", out)
+	// C TinyMUSH says "Set." even when clearing — match that behavior
+	if !strings.Contains(out, "Set.") {
+		t.Errorf("expected 'Set.' in output, got: %q", out)
 	}
 
 	// Verify the attribute is actually gone

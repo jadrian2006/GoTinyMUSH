@@ -56,6 +56,13 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				atSpace = true
 			}
 			pos++
+			// Space is not a function-name char — clear EvFCheck (one-shot)
+			// so subsequent bare function calls are treated as literal text.
+			// Matches C TinyMUSH: "x min(3,7,1)" → "x min(3,7,1)" not "x 1".
+			oldLen = buf.Len()
+			if evalFlags&EvFCheckPersist == 0 {
+				evalFlags &^= EvFCheck
+			}
 
 		case '\033': // ESC byte — pass through literally (ANSI sequences in already-evaluated text)
 			buf.WriteByte(ch)
@@ -284,8 +291,27 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				buf.WriteString("#-1 FUNCTION RECURSION LIMIT EXCEEDED")
 			} else if ctx.FuncInvkCtr >= ctx.FuncInvkLim {
 				buf.WriteString("#-1 FUNCTION INVOCATION LIMIT EXCEEDED")
-			} else if fn.Flags&FnVarArgs != 0 || nfargs == fn.NArgs || nfargs == -fn.NArgs {
-				// Call the function
+			} else if fn.Flags&FnVarArgs != 0 {
+				// VarArgs: enforce min/max if set (matching C fn_range_check format)
+				if (fn.MinArgs > 0 && nfargs < fn.MinArgs) || (fn.MaxArgs > 0 && nfargs > fn.MaxArgs) {
+					if fn.MaxArgs == fn.MinArgs+1 {
+						buf.WriteString(fmt.Sprintf("#-1 FUNCTION (%s) EXPECTS %d OR %d ARGUMENTS BUT GOT %d",
+							fn.Name, fn.MinArgs, fn.MaxArgs, nfargs))
+					} else if fn.MaxArgs > 0 && fn.MinArgs > 0 {
+						buf.WriteString(fmt.Sprintf("#-1 FUNCTION (%s) EXPECTS BETWEEN %d AND %d ARGUMENTS BUT GOT %d",
+							fn.Name, fn.MinArgs, fn.MaxArgs, nfargs))
+					} else if fn.MinArgs > 0 {
+						buf.WriteString(fmt.Sprintf("#-1 FUNCTION (%s) EXPECTS AT LEAST %d ARGUMENTS BUT GOT %d",
+							fn.Name, fn.MinArgs, nfargs))
+					} else {
+						buf.WriteString(fmt.Sprintf("#-1 FUNCTION (%s) EXPECTS AT MOST %d ARGUMENTS BUT GOT %d",
+							fn.Name, fn.MaxArgs, nfargs))
+					}
+				} else {
+					fn.Handler(ctx, evaledArgs, buf, ctx.Caller, ctx.Cause)
+				}
+			} else if nfargs == fn.NArgs || nfargs == -fn.NArgs {
+				// Fixed args: exact match
 				fn.Handler(ctx, evaledArgs, buf, ctx.Caller, ctx.Cause)
 			} else {
 				buf.WriteString(fmt.Sprintf("#-1 FUNCTION (%s) EXPECTS %d ARGUMENTS BUT GOT %d",
@@ -357,12 +383,21 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			// Scan the mundane run for function name boundaries.
 			// After any non-function-name character (not a-z, A-Z, 0-9, _),
 			// reset oldLen to that position in the output buffer.
+			// Also: in C TinyMUSH, EvFCheck is a one-shot flag that only
+			// allows the FIRST token to be a bare function call. Any
+			// non-function-name character before the first '(' clears it,
+			// so "-- min(3,7,1)" treats min() as literal text.
 			runStart := buf.Len()
 			buf.WriteString(input[start:pos])
 			for ri := 0; ri < pos-start; ri++ {
 				c := input[start+ri]
 				if !isFuncNameChar(c) {
 					oldLen = runStart + ri + 1
+					// Clear EvFCheck after non-function-name chars
+					// (matching C's one-shot behavior)
+					if evalFlags&EvFCheckPersist == 0 {
+						evalFlags &^= EvFCheck
+					}
 				}
 			}
 		}

@@ -15,9 +15,9 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("FSUB", fnFsub, 2, 0)
 	ctx.RegisterFunction("FMUL", fnFmul, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("FDIV", fnFdiv, 2, 0)
-	ctx.RegisterFunction("MOD", fnModulo, 2, 0)
-	ctx.RegisterFunction("MODULO", fnModulo, 2, 0)    // alias
-	ctx.RegisterFunction("REMAINDER", fnModulo, 2, 0) // alias
+	ctx.RegisterFunction("MOD", fnRemainder, 2, 0)       // C mod() = remainder
+	ctx.RegisterFunction("MODULO", fnModulo, 2, 0)       // true mathematical modulo
+	ctx.RegisterFunction("REMAINDER", fnRemainder, 2, 0) // C % operator
 	ctx.RegisterFunction("ABS", fnAbs, 1, 0)
 	ctx.RegisterFunction("SIGN", fnSign, 1, 0)
 	ctx.RegisterFunction("INC", fnInc, 1, 0)
@@ -50,7 +50,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	// Exponential/Logarithmic
 	ctx.RegisterFunction("EXP", fnExp, 1, 0)
 	ctx.RegisterFunction("LN", fnLn, 1, 0)
-	ctx.RegisterFunction("LOG", fnLog, 1, 0)
+	ctx.RegisterFunctionV("LOG", fnLog, 1, 2, 0)
 
 	// Bitwise
 	ctx.RegisterFunction("SHL", fnShl, 2, 0)
@@ -171,7 +171,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("URL_UNESCAPE", fnUrlUnescape, 1, 0)
 	ctx.RegisterFunction("ANSIPOS", fnAnsipos, 2, 0)
 	ctx.RegisterFunction("SPEAK", fnSpeak, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("WILDMATCH", fnWildmatch, 2, 0)
+	ctx.RegisterFunction("WILDMATCH", fnWildmatch, 3, 0)
 
 	// Additional string functions (RhostMUSH)
 	ctx.RegisterFunction("PRINTF", fnPrintf, 0, eval.FnVarArgs)
@@ -263,6 +263,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("WHILE", fnWhile, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("ILEV", fnIlev, 0, 0)
 	ctx.RegisterFunction("ITEXT", fnItext, 1, 0)
+	ctx.RegisterFunction("ITEXT2", fnItext2, 1, 0)
 	ctx.RegisterFunction("INUM", fnInum, 1, 0)
 	ctx.RegisterFunction("STEP", fnStep, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("MIX", fnMix, 0, eval.FnVarArgs)
@@ -314,9 +315,9 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("CON", fnCon, 1, 0)
 	ctx.RegisterFunction("EXIT", fnExit, 1, 0)
 	ctx.RegisterFunction("NEXT", fnNext, 1, 0)
-	ctx.RegisterFunction("LCON", fnLcon, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("LEXITS", fnLexits, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("EXITS", fnLexits, 0, eval.FnVarArgs)
+	ctx.RegisterFunctionV("LCON", fnLcon, 1, 2, eval.FnVarArgs)
+	ctx.RegisterFunctionV("LEXITS", fnLexits, 1, 2, eval.FnVarArgs)
+	ctx.RegisterFunctionV("EXITS", fnLexits, 1, 2, eval.FnVarArgs)
 	ctx.RegisterFunction("LATTR", fnLattr, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("NATTR", fnNattr, 1, 0)
 	ctx.RegisterFunction("HOME", fnHome, 1, 0)

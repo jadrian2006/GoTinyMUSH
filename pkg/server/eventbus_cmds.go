@@ -14,13 +14,13 @@ import (
 // Switches route to subcommands: create, set, destroy, lock, list, info, subs, pubs, stats, drain, bus, alias.
 func cmdQueue(g *Game, d *Descriptor, args string, switches []string) {
 	if g.EventQueues == nil {
-		d.Send("Event bus not initialized.")
+		g.Notify(d.Player, "Event bus not initialized.")
 		return
 	}
 
 	if len(switches) == 0 {
-		d.Send("Usage: @queue/<switch> [args]")
-		d.Send("Switches: create, set, destroy, lock, list, info, subs, pubs, stats, drain, bus, alias")
+		g.Notify(d.Player, "Usage: @queue/<switch> [args]")
+		g.Notify(d.Player, "Switches: create, set, destroy, lock, list, info, subs, pubs, stats, drain, bus, alias")
 		return
 	}
 
@@ -56,21 +56,21 @@ func cmdQueue(g *Game, d *Descriptor, args string, switches []string) {
 	case "alias":
 		cmdQueueAlias(g, d, args)
 	default:
-		d.Send(fmt.Sprintf("Unknown @queue switch: %s", sw))
+		g.Notify(d.Player, fmt.Sprintf("Unknown @queue switch: %s", sw))
 	}
 }
 
 // cmdQueueCreate handles @queue/create <name>=<options>
 func cmdQueueCreate(g *Game, d *Descriptor, args string, _ []string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	name, optStr, _ := strings.Cut(args, "=")
 	name = strings.TrimSpace(name)
 	if name == "" {
-		d.Send("Usage: @queue/create <name>=<options>")
+		g.Notify(d.Player, "Usage: @queue/create <name>=<options>")
 		return
 	}
 
@@ -81,28 +81,28 @@ func cmdQueueCreate(g *Game, d *Descriptor, args string, _ []string) {
 		for _, opt := range strings.Fields(optStr) {
 			key, val, ok := strings.Cut(opt, ":")
 			if !ok {
-				d.Send(fmt.Sprintf("Invalid option format: %s (use key:value)", opt))
+				g.Notify(d.Player, fmt.Sprintf("Invalid option format: %s (use key:value)", opt))
 				return
 			}
 			switch strings.ToLower(key) {
 			case "rate":
 				n, err := strconv.Atoi(val)
 				if err != nil || n < 0 {
-					d.Send(fmt.Sprintf("Invalid rate: %s", val))
+					g.Notify(d.Player, fmt.Sprintf("Invalid rate: %s", val))
 					return
 				}
 				q.Rate = n
 			case "scope":
 				scope, ok := eventbus.ParseScopeType(strings.ToLower(val))
 				if !ok {
-					d.Send(fmt.Sprintf("Invalid scope: %s (use global, object, or parent)", val))
+					g.Notify(d.Player, fmt.Sprintf("Invalid scope: %s (use global, object, or parent)", val))
 					return
 				}
 				q.Scope = scope
 			case "max_subs":
 				n, err := strconv.Atoi(val)
 				if err != nil || n < 1 {
-					d.Send(fmt.Sprintf("Invalid max_subs: %s", val))
+					g.Notify(d.Player, fmt.Sprintf("Invalid max_subs: %s", val))
 					return
 				}
 				q.MaxSubs = n
@@ -113,49 +113,49 @@ func cmdQueueCreate(g *Game, d *Descriptor, args string, _ []string) {
 				case "no", "0", "false":
 					q.Enabled = false
 				default:
-					d.Send(fmt.Sprintf("Invalid enabled value: %s (use yes or no)", val))
+					g.Notify(d.Player, fmt.Sprintf("Invalid enabled value: %s (use yes or no)", val))
 					return
 				}
 			default:
-				d.Send(fmt.Sprintf("Unknown option: %s", key))
+				g.Notify(d.Player, fmt.Sprintf("Unknown option: %s", key))
 				return
 			}
 		}
 	}
 
 	if err := g.EventQueues.CreateQueue(q); err != nil {
-		d.Send(fmt.Sprintf("Error: %v", err))
+		g.Notify(d.Player, fmt.Sprintf("Error: %v", err))
 		return
 	}
 
 	g.PersistEventQueue(q)
-	d.Send(fmt.Sprintf("Queue %q created. Rate:%d Scope:%s MaxSubs:%d Enabled:%v",
+	g.Notify(d.Player, fmt.Sprintf("Queue %q created. Rate:%d Scope:%s MaxSubs:%d Enabled:%v",
 		q.Name, q.Rate, q.Scope, q.MaxSubs, q.Enabled))
 }
 
 // cmdQueueSet handles @queue/set <name>=<option>:<value>
 func cmdQueueSet(g *Game, d *Descriptor, args string, _ []string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	name, optStr, ok := strings.Cut(args, "=")
 	name = strings.TrimSpace(name)
 	if !ok || name == "" {
-		d.Send("Usage: @queue/set <name>=<option>:<value>")
+		g.Notify(d.Player, "Usage: @queue/set <name>=<option>:<value>")
 		return
 	}
 
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 
 	key, val, ok := strings.Cut(strings.TrimSpace(optStr), ":")
 	if !ok {
-		d.Send("Usage: @queue/set <name>=<option>:<value>")
+		g.Notify(d.Player, "Usage: @queue/set <name>=<option>:<value>")
 		return
 	}
 
@@ -163,14 +163,14 @@ func cmdQueueSet(g *Game, d *Descriptor, args string, _ []string) {
 	case "rate":
 		n, err := strconv.Atoi(val)
 		if err != nil || n < 0 {
-			d.Send(fmt.Sprintf("Invalid rate: %s", val))
+			g.Notify(d.Player, fmt.Sprintf("Invalid rate: %s", val))
 			return
 		}
 		q.Rate = n
 	case "max_subs":
 		n, err := strconv.Atoi(val)
 		if err != nil || n < 1 {
-			d.Send(fmt.Sprintf("Invalid max_subs: %s", val))
+			g.Notify(d.Player, fmt.Sprintf("Invalid max_subs: %s", val))
 			return
 		}
 		q.MaxSubs = n
@@ -181,43 +181,43 @@ func cmdQueueSet(g *Game, d *Descriptor, args string, _ []string) {
 		case "no", "0", "false":
 			q.Enabled = false
 		default:
-			d.Send(fmt.Sprintf("Invalid enabled value: %s", val))
+			g.Notify(d.Player, fmt.Sprintf("Invalid enabled value: %s", val))
 			return
 		}
 	default:
-		d.Send(fmt.Sprintf("Unknown option: %s", key))
+		g.Notify(d.Player, fmt.Sprintf("Unknown option: %s", key))
 		return
 	}
 
 	g.PersistEventQueue(q)
-	d.Send(fmt.Sprintf("Queue %q updated: %s:%s", q.Name, key, val))
+	g.Notify(d.Player, fmt.Sprintf("Queue %q updated: %s:%s", q.Name, key, val))
 }
 
 // cmdQueueDestroy handles @queue/destroy <name>
 func cmdQueueDestroy(g *Game, d *Descriptor, args string, _ []string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	name := strings.TrimSpace(args)
 	if err := g.EventQueues.DestroyQueue(name); err != nil {
-		d.Send(fmt.Sprintf("Error: %v", err))
+		g.Notify(d.Player, fmt.Sprintf("Error: %v", err))
 		return
 	}
 	g.DeleteEventQueue(name)
-	d.Send(fmt.Sprintf("Queue %q destroyed.", name))
+	g.Notify(d.Player, fmt.Sprintf("Queue %q destroyed.", name))
 }
 
 // cmdQueueLock handles @queue/lock/pub, @queue/lock/sub, @queue/lock/admin
 func cmdQueueLock(g *Game, d *Descriptor, args string, switches []string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	// switches[0] = "lock", switches[1] = "pub"|"sub"|"admin"
 	if len(switches) < 2 {
-		d.Send("Usage: @queue/lock/pub|sub|admin <name>=<lock_expression>")
+		g.Notify(d.Player, "Usage: @queue/lock/pub|sub|admin <name>=<lock_expression>")
 		return
 	}
 
@@ -228,7 +228,7 @@ func cmdQueueLock(g *Game, d *Descriptor, args string, switches []string) {
 
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 
@@ -240,22 +240,22 @@ func cmdQueueLock(g *Game, d *Descriptor, args string, switches []string) {
 	case "admin":
 		q.AdminLock = lockStr
 	default:
-		d.Send(fmt.Sprintf("Unknown lock type: %s (use pub, sub, or admin)", lockType))
+		g.Notify(d.Player, fmt.Sprintf("Unknown lock type: %s (use pub, sub, or admin)", lockType))
 		return
 	}
 
 	g.PersistEventQueue(q)
 	if lockStr == "" {
-		d.Send(fmt.Sprintf("Queue %q %s lock cleared (wizard-only).", q.Name, lockType))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q %s lock cleared (wizard-only).", q.Name, lockType))
 	} else {
-		d.Send(fmt.Sprintf("Queue %q %s lock set to: %s", q.Name, lockType, lockStr))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q %s lock set to: %s", q.Name, lockType, lockStr))
 	}
 }
 
 // cmdQueueAlias handles @queue/alias <alias>=<queue_name>
 func cmdQueueAlias(g *Game, d *Descriptor, args string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -263,25 +263,25 @@ func cmdQueueAlias(g *Game, d *Descriptor, args string) {
 	alias = strings.TrimSpace(alias)
 	queueName = strings.TrimSpace(queueName)
 	if !ok || alias == "" || queueName == "" {
-		d.Send("Usage: @queue/alias <alias>=<queue_name>")
+		g.Notify(d.Player, "Usage: @queue/alias <alias>=<queue_name>")
 		return
 	}
 
 	if err := g.EventQueues.AddAlias(alias, queueName); err != nil {
-		d.Send(fmt.Sprintf("Error: %v", err))
+		g.Notify(d.Player, fmt.Sprintf("Error: %v", err))
 		return
 	}
-	d.Send(fmt.Sprintf("Alias %q -> %q created.", alias, queueName))
+	g.Notify(d.Player, fmt.Sprintf("Alias %q -> %q created.", alias, queueName))
 }
 
 // cmdQueueList handles @queue/list
 func cmdQueueList(g *Game, d *Descriptor, _ string) {
 	names := g.EventQueues.QueueNames()
 	if len(names) == 0 {
-		d.Send("No event queues defined.")
+		g.Notify(d.Player, "No event queues defined.")
 		return
 	}
-	d.Send(fmt.Sprintf("Event Queues (%d):", len(names)))
+	g.Notify(d.Player, fmt.Sprintf("Event Queues (%d):", len(names)))
 	for _, name := range names {
 		q := g.EventQueues.GetQueue(name)
 		if q == nil {
@@ -295,7 +295,7 @@ func cmdQueueList(g *Game, d *Descriptor, _ string) {
 		if len(q.Aliases) > 0 {
 			aliases = " (alias: " + strings.Join(q.Aliases, ", ") + ")"
 		}
-		d.Send(fmt.Sprintf("  %-20s Rate:%-4d Scope:%-7s Subs:%-3d Enabled:%s%s",
+		g.Notify(d.Player, fmt.Sprintf("  %-20s Rate:%-4d Scope:%-7s Subs:%-3d Enabled:%s%s",
 			q.Name, q.Rate, q.Scope, q.ActiveSubCount(), enabled, aliases))
 	}
 }
@@ -305,17 +305,17 @@ func cmdQueueInfo(g *Game, d *Descriptor, args string) {
 	name := strings.TrimSpace(args)
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 
-	d.Send(fmt.Sprintf("Queue: %s", q.Name))
+	g.Notify(d.Player, fmt.Sprintf("Queue: %s", q.Name))
 	if len(q.Aliases) > 0 {
-		d.Send(fmt.Sprintf("  Aliases: %s", strings.Join(q.Aliases, ", ")))
+		g.Notify(d.Player, fmt.Sprintf("  Aliases: %s", strings.Join(q.Aliases, ", ")))
 	}
-	d.Send(fmt.Sprintf("  Rate: %d  Scope: %s  MaxSubs: %d  Enabled: %v",
+	g.Notify(d.Player, fmt.Sprintf("  Rate: %d  Scope: %s  MaxSubs: %d  Enabled: %v",
 		q.Rate, q.Scope, q.MaxSubs, q.Enabled))
-	d.Send(fmt.Sprintf("  Subscribers: %d  Publishers: %d  Pending: %d",
+	g.Notify(d.Player, fmt.Sprintf("  Subscribers: %d  Publishers: %d  Pending: %d",
 		q.ActiveSubCount(), q.ActivePubCount(), q.PendingCount()))
 
 	pubLock := q.PubLock
@@ -330,9 +330,9 @@ func cmdQueueInfo(g *Game, d *Descriptor, args string) {
 	if adminLock == "" {
 		adminLock = "(wizard-only)"
 	}
-	d.Send(fmt.Sprintf("  PubLock: %s", pubLock))
-	d.Send(fmt.Sprintf("  SubLock: %s", subLock))
-	d.Send(fmt.Sprintf("  AdminLock: %s", adminLock))
+	g.Notify(d.Player, fmt.Sprintf("  PubLock: %s", pubLock))
+	g.Notify(d.Player, fmt.Sprintf("  SubLock: %s", subLock))
+	g.Notify(d.Player, fmt.Sprintf("  AdminLock: %s", adminLock))
 }
 
 // cmdQueueSubs handles @queue/subs <name>
@@ -340,16 +340,16 @@ func cmdQueueSubs(g *Game, d *Descriptor, args string) {
 	name := strings.TrimSpace(args)
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 
 	if len(q.Subscribers) == 0 {
-		d.Send(fmt.Sprintf("Queue %q has no subscribers.", q.Name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q has no subscribers.", q.Name))
 		return
 	}
 
-	d.Send(fmt.Sprintf("Subscribers for %s (%d):", q.Name, len(q.Subscribers)))
+	g.Notify(d.Player, fmt.Sprintf("Subscribers for %s (%d):", q.Name, len(q.Subscribers)))
 	for _, sub := range q.Subscribers {
 		bind := ""
 		if sub.Bind != gamedb.Nothing {
@@ -359,7 +359,7 @@ func cmdQueueSubs(g *Game, d *Descriptor, args string) {
 		if obj, ok := g.DB.Objects[sub.Object]; ok {
 			objName = fmt.Sprintf("%s(#%d)", obj.Name, sub.Object)
 		}
-		d.Send(fmt.Sprintf("  %s/%s%s", objName, sub.Attr, bind))
+		g.Notify(d.Player, fmt.Sprintf("  %s/%s%s", objName, sub.Attr, bind))
 	}
 }
 
@@ -368,22 +368,22 @@ func cmdQueuePubs(g *Game, d *Descriptor, args string) {
 	name := strings.TrimSpace(args)
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 
 	if len(q.Publishers) == 0 {
-		d.Send(fmt.Sprintf("Queue %q has no publishers.", q.Name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q has no publishers.", q.Name))
 		return
 	}
 
-	d.Send(fmt.Sprintf("Publishers for %s (%d unique):", q.Name, len(q.Publishers)))
+	g.Notify(d.Player, fmt.Sprintf("Publishers for %s (%d unique):", q.Name, len(q.Publishers)))
 	for ref := range q.Publishers {
 		objName := fmt.Sprintf("#%d", ref)
 		if obj, ok := g.DB.Objects[ref]; ok {
 			objName = fmt.Sprintf("%s(#%d)", obj.Name, ref)
 		}
-		d.Send(fmt.Sprintf("  %s", objName))
+		g.Notify(d.Player, fmt.Sprintf("  %s", objName))
 	}
 }
 
@@ -392,7 +392,7 @@ func cmdQueueStats(g *Game, d *Descriptor, args string) {
 	name := strings.TrimSpace(args)
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 
@@ -406,67 +406,67 @@ func cmdQueueStats(g *Game, d *Descriptor, args string) {
 		enabled = "no"
 	}
 
-	d.Send(fmt.Sprintf("Queue: %s%s", q.Name, aliases))
-	d.Send(fmt.Sprintf("Created: %s  Scope: %s  Rate: %d  Enabled: %s",
+	g.Notify(d.Player, fmt.Sprintf("Queue: %s%s", q.Name, aliases))
+	g.Notify(d.Player, fmt.Sprintf("Created: %s  Scope: %s  Rate: %d  Enabled: %s",
 		s.CreatedAt.Format("2006-01-02 15:04:05"), q.Scope, q.Rate, enabled))
-	d.Send("")
-	d.Send("--- Publishers ---")
-	d.Send(fmt.Sprintf("  Unique publishers:     %d", q.ActivePubCount()))
+	g.Notify(d.Player, "")
+	g.Notify(d.Player, "--- Publishers ---")
+	g.Notify(d.Player, fmt.Sprintf("  Unique publishers:     %d", q.ActivePubCount()))
 	if !s.LastPublishTime.IsZero() {
-		d.Send(fmt.Sprintf("  Last publish:          %s", fmtAgo(s.LastPublishTime)))
+		g.Notify(d.Player, fmt.Sprintf("  Last publish:          %s", fmtAgo(s.LastPublishTime)))
 	}
-	d.Send("")
-	d.Send("--- Subscribers ---")
-	d.Send(fmt.Sprintf("  Active subscribers:    %d", q.ActiveSubCount()))
-	d.Send(fmt.Sprintf("  Pending events:        %d", q.PendingCount()))
-	d.Send("")
-	d.Send("--- Volume (since reset) ---")
-	d.Send(fmt.Sprintf("  Publishes received:    %d", s.PublishCount))
-	d.Send(fmt.Sprintf("  Events fired:          %d", s.FireCount))
-	d.Send(fmt.Sprintf("  Deliveries (sub hits): %d", s.DeliverCount))
-	d.Send(fmt.Sprintf("  Dropped:               %d", s.DroppedCount))
-	d.Send(fmt.Sprintf("  Lock rejects:          %d", s.RejectCount))
-	d.Send("")
-	d.Send("--- Payload Size ---")
+	g.Notify(d.Player, "")
+	g.Notify(d.Player, "--- Subscribers ---")
+	g.Notify(d.Player, fmt.Sprintf("  Active subscribers:    %d", q.ActiveSubCount()))
+	g.Notify(d.Player, fmt.Sprintf("  Pending events:        %d", q.PendingCount()))
+	g.Notify(d.Player, "")
+	g.Notify(d.Player, "--- Volume (since reset) ---")
+	g.Notify(d.Player, fmt.Sprintf("  Publishes received:    %d", s.PublishCount))
+	g.Notify(d.Player, fmt.Sprintf("  Events fired:          %d", s.FireCount))
+	g.Notify(d.Player, fmt.Sprintf("  Deliveries (sub hits): %d", s.DeliverCount))
+	g.Notify(d.Player, fmt.Sprintf("  Dropped:               %d", s.DroppedCount))
+	g.Notify(d.Player, fmt.Sprintf("  Lock rejects:          %d", s.RejectCount))
+	g.Notify(d.Player, "")
+	g.Notify(d.Player, "--- Payload Size ---")
 	if s.PublishCount > 0 {
 		avg := s.TotalPayloadBytes / s.PublishCount
-		d.Send(fmt.Sprintf("  Average:               %d bytes", avg))
-		d.Send(fmt.Sprintf("  Min:                   %d bytes", s.MinPayloadBytes))
-		d.Send(fmt.Sprintf("  Max:                   %d bytes", s.MaxPayloadBytes))
-		d.Send(fmt.Sprintf("  Total:                 %s", fmtBytes(s.TotalPayloadBytes)))
+		g.Notify(d.Player, fmt.Sprintf("  Average:               %d bytes", avg))
+		g.Notify(d.Player, fmt.Sprintf("  Min:                   %d bytes", s.MinPayloadBytes))
+		g.Notify(d.Player, fmt.Sprintf("  Max:                   %d bytes", s.MaxPayloadBytes))
+		g.Notify(d.Player, fmt.Sprintf("  Total:                 %s", fmtBytes(s.TotalPayloadBytes)))
 	} else {
-		d.Send("  (no events)")
+		g.Notify(d.Player, "  (no events)")
 	}
-	d.Send("")
-	d.Send("--- Handler Performance ---")
+	g.Notify(d.Player, "")
+	g.Notify(d.Player, "--- Handler Performance ---")
 	if s.DeliverCount > 0 {
 		avgNs := s.TotalEvalNs / s.DeliverCount
-		d.Send(fmt.Sprintf("  Avg eval time:         %s", fmtNs(avgNs)))
-		d.Send(fmt.Sprintf("  Min eval time:         %s", fmtNs(s.MinEvalNs)))
-		d.Send(fmt.Sprintf("  Max eval time:         %s", fmtNs(s.MaxEvalNs)))
-		d.Send(fmt.Sprintf("  Total eval time:       %s", fmtNs(s.TotalEvalNs)))
+		g.Notify(d.Player, fmt.Sprintf("  Avg eval time:         %s", fmtNs(avgNs)))
+		g.Notify(d.Player, fmt.Sprintf("  Min eval time:         %s", fmtNs(s.MinEvalNs)))
+		g.Notify(d.Player, fmt.Sprintf("  Max eval time:         %s", fmtNs(s.MaxEvalNs)))
+		g.Notify(d.Player, fmt.Sprintf("  Total eval time:       %s", fmtNs(s.TotalEvalNs)))
 	} else {
-		d.Send("  (no deliveries)")
+		g.Notify(d.Player, "  (no deliveries)")
 	}
-	d.Send("")
-	d.Send("--- Budget ---")
-	d.Send(fmt.Sprintf("  Budget per tick:       %d", eventbus.MaxBusHandlersPerTick))
-	d.Send(fmt.Sprintf("  Budget exhausted:      %d times", s.BudgetExhausted))
-	d.Send(fmt.Sprintf("  Gen 1 events:          %d", s.Gen1Count))
-	d.Send(fmt.Sprintf("  Gen 2 rejected:        %d", s.Gen2Rejected))
+	g.Notify(d.Player, "")
+	g.Notify(d.Player, "--- Budget ---")
+	g.Notify(d.Player, fmt.Sprintf("  Budget per tick:       %d", eventbus.MaxBusHandlersPerTick))
+	g.Notify(d.Player, fmt.Sprintf("  Budget exhausted:      %d times", s.BudgetExhausted))
+	g.Notify(d.Player, fmt.Sprintf("  Gen 1 events:          %d", s.Gen1Count))
+	g.Notify(d.Player, fmt.Sprintf("  Gen 2 rejected:        %d", s.Gen2Rejected))
 }
 
 // cmdQueueStatsReset handles @queue/stats/reset <name>
 func cmdQueueStatsReset(g *Game, d *Descriptor, args string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	name := strings.TrimSpace(args)
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 
@@ -476,44 +476,44 @@ func cmdQueueStatsReset(g *Game, d *Descriptor, args string) {
 		MinPayloadBytes: -1,
 		MinEvalNs:       -1,
 	}
-	d.Send(fmt.Sprintf("Stats for %q reset.", q.Name))
+	g.Notify(d.Player, fmt.Sprintf("Stats for %q reset.", q.Name))
 }
 
 // cmdQueueDrain handles @queue/drain <name>
 func cmdQueueDrain(g *Game, d *Descriptor, args string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	name := strings.TrimSpace(args)
 	q := g.EventQueues.GetQueue(name)
 	if q == nil {
-		d.Send(fmt.Sprintf("Queue %q not found.", name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q not found.", name))
 		return
 	}
 	pending := q.PendingCount()
 	if pending == 0 {
-		d.Send(fmt.Sprintf("Queue %q has no pending events.", q.Name))
+		g.Notify(d.Player, fmt.Sprintf("Queue %q has no pending events.", q.Name))
 		return
 	}
 	// Force process this queue's pending events
-	d.Send(fmt.Sprintf("Draining %d pending events from %q...", pending, q.Name))
+	g.Notify(d.Player, fmt.Sprintf("Draining %d pending events from %q...", pending, q.Name))
 	// The actual drain happens on the next ProcessEventBus tick
 }
 
 // cmdQueueBus handles @queue/bus — global bus stats
 func cmdQueueBus(g *Game, d *Descriptor) {
 	s := &g.EventQueues.Stats
-	d.Send("--- Event Bus (Global) ---")
-	d.Send(fmt.Sprintf("  Total queues:          %d", len(g.EventQueues.QueueNames())))
-	d.Send(fmt.Sprintf("  Total ticks:           %d", s.TotalTicks))
-	d.Send(fmt.Sprintf("  Total handlers fired:  %d", s.TotalHandlersFired))
-	d.Send(fmt.Sprintf("  Budget exhausted:      %d times", s.BudgetExhausted))
+	g.Notify(d.Player, "--- Event Bus (Global) ---")
+	g.Notify(d.Player, fmt.Sprintf("  Total queues:          %d", len(g.EventQueues.QueueNames())))
+	g.Notify(d.Player, fmt.Sprintf("  Total ticks:           %d", s.TotalTicks))
+	g.Notify(d.Player, fmt.Sprintf("  Total handlers fired:  %d", s.TotalHandlersFired))
+	g.Notify(d.Player, fmt.Sprintf("  Budget exhausted:      %d times", s.BudgetExhausted))
 	if !s.LastTickTime.IsZero() {
-		d.Send(fmt.Sprintf("  Last tick:             %s", fmtAgo(s.LastTickTime)))
+		g.Notify(d.Player, fmt.Sprintf("  Last tick:             %s", fmtAgo(s.LastTickTime)))
 	}
-	d.Send(fmt.Sprintf("  Max handlers/tick:     %d", eventbus.MaxBusHandlersPerTick))
-	d.Send(fmt.Sprintf("  Max generation:        %d", eventbus.MaxBusGeneration))
+	g.Notify(d.Player, fmt.Sprintf("  Max handlers/tick:     %d", eventbus.MaxBusHandlersPerTick))
+	g.Notify(d.Player, fmt.Sprintf("  Max generation:        %d", eventbus.MaxBusGeneration))
 }
 
 // --- Formatting helpers ---

@@ -295,7 +295,7 @@ func fnName(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 		if idx := strings.IndexByte(name, ';'); idx >= 0 { name = name[:idx] }
 		buf.WriteString(name)
 	} else {
-		buf.WriteString("#-1 NOT FOUND")
+		buf.WriteString("#-1 NO MATCH")
 	}
 }
 
@@ -305,14 +305,75 @@ func fnNum(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	buf.WriteString(fmt.Sprintf("#%d", ref))
 }
 
+// locatable checks whether player can discover the location of target.
+// Matches C TinyMUSH locatable() in predicates.c.
+func locatable(ctx *eval.EvalContext, player, target gamedb.DBRef) bool {
+	tObj, ok := ctx.DB.Objects[target]
+	if !ok {
+		return false
+	}
+	locIt := tObj.Location
+
+	// Can always locate yourself
+	if target == player {
+		return true
+	}
+
+	// Wizard can locate anything
+	if pObj, ok := ctx.DB.Objects[player]; ok {
+		if pObj.Flags[0]&gamedb.FlagWizard != 0 {
+			return true
+		}
+	}
+
+	// Target is VISUAL (examinable by anyone)
+	if tObj.Flags[0]&gamedb.FlagVisual != 0 {
+		return true
+	}
+
+	// Player owns the target
+	if tObj.Owner == player {
+		return true
+	}
+
+	// Target is in player's inventory
+	if locIt == player {
+		return true
+	}
+
+	// Target is in same room as player
+	if pObj, ok := ctx.DB.Objects[player]; ok {
+		if locIt != gamedb.Nothing && locIt == pObj.Location {
+			return true
+		}
+		// Player can examine target's location (owns it or it's VISUAL)
+		if locObj, ok := ctx.DB.Objects[locIt]; ok {
+			if locObj.Owner == player || locObj.Flags[0]&gamedb.FlagVisual != 0 {
+				return true
+			}
+		}
+	}
+
+	// Target is findable (not UNFINDABLE) and room is not a hideout
+	if tObj.Flags[1]&gamedb.Flag2Unfindable == 0 {
+		return true
+	}
+
+	return false
+}
+
 func fnLoc(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
-	if obj, ok := ctx.DB.Objects[ref]; ok {
-		buf.WriteString(fmt.Sprintf("#%d", obj.Location))
-	} else {
+	if _, ok := ctx.DB.Objects[ref]; !ok {
 		buf.WriteString("#-1")
+		return
 	}
+	if !locatable(ctx, ctx.Player, ref) {
+		buf.WriteString("#-1")
+		return
+	}
+	buf.WriteString(fmt.Sprintf("#%d", ctx.DB.Objects[ref].Location))
 }
 
 func fnOwner(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -331,7 +392,7 @@ func fnType(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		buf.WriteString(obj.ObjType().String())
 	} else {
-		buf.WriteString("#-1 NOT FOUND")
+		buf.WriteString("#-1 NO MATCH")
 	}
 }
 
@@ -339,7 +400,7 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
-	if !ok { buf.WriteString("#-1 NOT FOUND"); return }
+	if !ok { buf.WriteString("#-1 NO MATCH"); return }
 
 	// Type letter first
 	switch obj.ObjType() {
@@ -400,9 +461,8 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if f2&gamedb.Flag2Staff != 0 { buf.WriteByte('w') }
 	if f2&gamedb.Flag2Slave != 0 { buf.WriteByte('x') }
 	if f2&gamedb.Flag2ControlOK != 0 { buf.WriteByte('z') }
-	// Symbol flags
+	// Symbol flags (HAS_COMMANDS '$' is internal — C's decode_flags skips it)
 	if f2&gamedb.Flag2StopMatch != 0 { buf.WriteByte('!') }
-	if f2&gamedb.Flag2HasCommands != 0 { buf.WriteByte('$') }
 	if f2&gamedb.Flag2NoBLeed != 0 { buf.WriteByte('-') }
 	if f2&gamedb.Flag2Watcher != 0 { buf.WriteByte('+') }
 	// Internal flags (=, *, &, @) are suppressed by C's flags() — skip them
@@ -641,7 +701,6 @@ func fnLcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 }
 
 func fnLexits(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
@@ -871,6 +930,11 @@ func fnLockFn(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		// Fall back to obj.Lock (header BoolExp) when attr 42 is empty
 		if text == "" && lockAttr == 42 {
 			text = ctx.GameState.GetObjLockStr(ref)
+		}
+		// Decompile the lock to human-readable form: *PlayerName for players, #dbref for others
+		// Matches C TinyMUSH's unparse_boolexp_function (F_FUNCTION format)
+		if text != "" {
+			text = ctx.GameState.UnparseLockStr(ctx.Player, text)
 		}
 		buf.WriteString(text)
 	}

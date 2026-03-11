@@ -82,7 +82,11 @@ func NewDescriptor(id int, conn net.Conn) *Descriptor {
 }
 
 // Send writes a string to the client connection.
+// Empty messages are silently skipped (matching C's raw_notify behavior).
 func (d *Descriptor) Send(msg string) {
+	if msg == "" {
+		return
+	}
 	if d.SendFunc != nil {
 		d.SendFunc(msg)
 		return

@@ -40,11 +40,16 @@ func fnMid(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	s := args[0]
 	start := toInt(args[1])
 	length := toInt(args[2])
-	if start < 0 { start = 0 }
+	if length < 0 { return }
+	// C behavior: negative start reduces length by |start|, clamps start to 0
+	if start < 0 {
+		length += start // reduces length
+		start = 0
+	}
+	if length <= 0 { return }
 	if start >= len(s) { return }
 	end := start + length
 	if end > len(s) { end = len(s) }
-	if length < 0 { return }
 	buf.WriteString(s[start:end])
 }
 
@@ -94,16 +99,14 @@ func fnPos(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 
 func fnLpos(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	target := args[1]
-	search := args[0]
-	if search == "" { return }
+	s := args[0]
+	charset := args[1]
+	if charset == "" { return }
 	var positions []string
-	pos := 0
-	for {
-		idx := strings.Index(target[pos:], search)
-		if idx < 0 { break }
-		positions = append(positions, strconv.Itoa(pos+idx))
-		pos += idx + len(search)
+	for i, ch := range s {
+		if strings.ContainsRune(charset, ch) {
+			positions = append(positions, strconv.Itoa(i))
+		}
 	}
 	buf.WriteString(strings.Join(positions, " "))
 }
@@ -113,23 +116,24 @@ func fnEdit(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 		return
 	}
 	result := args[0]
-	from := args[1]
-	to := args[2]
-	if from == "" {
-		buf.WriteString(result)
-		return
+	// Process pairs of from/to arguments (C supports multiple pairs)
+	for i := 1; i+1 < len(args); i += 2 {
+		from := args[i]
+		to := args[i+1]
+		if from == "" {
+			continue
+		}
+		if from == "^" {
+			// Prepend
+			result = to + result
+		} else if from == "$" {
+			// Append
+			result = result + to
+		} else {
+			result = strings.ReplaceAll(result, from, to)
+		}
 	}
-	// C TinyMUSH edit() has $=append and ^=prepend anchors, with \$/\^ for
-	// literal matching. C's eval preserves backslash escapes (\$ stays as \$),
-	// so edit_string can distinguish anchor $ from escaped \$.
-	// Go's eval CONSUMES backslash escapes (\$ → $), making it impossible to
-	// distinguish anchors from escaped literals. Since literal $ replacement
-	// (e.g. sled paintjob edit(v(paintjob), \\$, %b)) is the common case,
-	// we handle \$ and \^ escape stripping but skip the bare anchor feature.
-	if len(from) == 2 && (from[0] == '\\' || from[0] == '%') && (from[1] == '$' || from[1] == '^') {
-		from = from[1:]
-	}
-	buf.WriteString(strings.ReplaceAll(result, from, to))
+	buf.WriteString(result)
 }
 
 func fnReplace(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -167,18 +171,27 @@ func fnTrim(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 
 func fnSquish(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
-	s := strings.TrimSpace(args[0])
-	// Compress runs of spaces
+	s := args[0]
+	delim := " "
+	if len(args) > 1 && args[1] != "" { delim = args[1] }
+	if delim == " " {
+		s = strings.TrimSpace(s)
+	} else {
+		s = strings.Trim(s, delim)
+	}
+	// Compress runs of delimiter
 	prev := false
-	for _, ch := range s {
-		if ch == ' ' {
+	for i := 0; i < len(s); {
+		if strings.HasPrefix(s[i:], delim) {
 			if !prev {
-				buf.WriteRune(' ')
+				buf.WriteString(delim)
 				prev = true
 			}
+			i += len(delim)
 		} else {
-			buf.WriteRune(ch)
+			buf.WriteByte(s[i])
 			prev = false
+			i++
 		}
 	}
 }
@@ -209,11 +222,7 @@ func fnLjust(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	fill := " "
 	if len(args) > 2 && len(args[2]) > 0 { fill = args[2] }
 	buf.WriteString(s)
-	vLen := visualLen(s)
-	padLen := width - vLen
-	for i := 0; i < padLen; i += len(fill) {
-		buf.WriteString(fill)
-	}
+	writePad(buf, width-visualLen(s), fill)
 }
 
 func fnRjust(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -222,11 +231,23 @@ func fnRjust(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	width := toInt(args[1])
 	fill := " "
 	if len(args) > 2 && len(args[2]) > 0 { fill = args[2] }
-	padLen := width - visualLen(s)
-	for i := 0; i < padLen; i += len(fill) {
-		buf.WriteString(fill)
-	}
+	writePad(buf, width-visualLen(s), fill)
 	buf.WriteString(s)
+}
+
+// writePad writes exactly n characters of padding using the fill pattern,
+// truncating the last repeat if needed (C behavior for multi-char fill).
+func writePad(buf *strings.Builder, n int, fill string) {
+	if n <= 0 || fill == "" { return }
+	for n > 0 {
+		if len(fill) <= n {
+			buf.WriteString(fill)
+			n -= len(fill)
+		} else {
+			buf.WriteString(fill[:n])
+			n = 0
+		}
+	}
 }
 
 func fnCenter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -241,14 +262,9 @@ func fnCenter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 		return
 	}
 	leftPad := padTotal / 2
-	for i := 0; i < leftPad; i += len(fill) {
-		buf.WriteString(fill)
-	}
+	writePad(buf, leftPad, fill)
 	buf.WriteString(s)
-	rightPad := padTotal - leftPad
-	for i := 0; i < rightPad; i += len(fill) {
-		buf.WriteString(fill)
-	}
+	writePad(buf, padTotal-leftPad, fill)
 }
 
 func fnRepeat(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -262,7 +278,8 @@ func fnRepeat(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 func fnSpace(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	n := 1
 	if len(args) > 0 { n = toInt(args[0]) }
-	if n < 0 { n = 0 }
+	// Match C: space(0) returns "", but negative values return 1 space
+	if n < 0 { n = 1 }
 	if n > 10000 { n = 10000 }
 	buf.WriteString(strings.Repeat(" ", n))
 }
@@ -346,22 +363,27 @@ func fnBefore(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	if len(args) < 1 { return }
 	delim := " "
 	if len(args) > 1 && args[1] != "" { delim = args[1] }
-	idx := strings.Index(args[0], delim)
+	s := args[0]
+	// C's before() trims leading delimiters first (trim_space_sep)
+	s = strings.TrimLeft(s, delim)
+	idx := strings.Index(s, delim)
 	if idx < 0 {
-		// C TinyMUSH: when delimiter not found, return entire string
-		buf.WriteString(args[0])
+		buf.WriteString(s)
 		return
 	}
-	buf.WriteString(args[0][:idx])
+	buf.WriteString(s[:idx])
 }
 
 func fnAfter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	delim := " "
 	if len(args) > 1 && args[1] != "" { delim = args[1] }
-	idx := strings.Index(args[0], delim)
+	s := args[0]
+	// C's after() trims leading delimiters first (trim_space_sep)
+	s = strings.TrimLeft(s, delim)
+	idx := strings.Index(s, delim)
 	if idx < 0 { return }
-	buf.WriteString(args[0][idx+len(delim):])
+	buf.WriteString(s[idx+len(delim):])
 }
 
 func fnReverse(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -471,12 +493,16 @@ func fnIsdbref(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if len(args) < 1 { buf.WriteString("0"); return }
 	s := strings.TrimSpace(args[0])
 	if len(s) < 2 || s[0] != '#' { buf.WriteString("0"); return }
-	_, err := strconv.Atoi(s[1:])
-	buf.WriteString(boolToStr(err == nil))
+	n, err := strconv.Atoi(s[1:])
+	buf.WriteString(boolToStr(err == nil && n >= 0))
 }
 
 func fnIsword(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 1 { buf.WriteString("0"); return }
+	if len(args) < 1 || args[0] == "" {
+		// C returns 1 for empty/no-arg isword()
+		buf.WriteString("1")
+		return
+	}
 	s := strings.TrimSpace(args[0])
 	for _, ch := range s {
 		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
@@ -484,7 +510,7 @@ func fnIsword(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 			return
 		}
 	}
-	buf.WriteString(boolToStr(len(s) > 0))
+	buf.WriteString("1")
 }
 
 // --- Spellcheck functions ---
@@ -591,25 +617,54 @@ func fnIndex(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	buf.WriteString(strings.Join(words[first:end], delim))
 }
 
-// fnEncrypt performs simple ROT-based encryption.
+// fnEncrypt performs C TinyMUSH's encrypt() function.
 func fnEncrypt(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	cryptHelper(args[0], args[1], 1, buf)
+	cryptHelper(args[0], args[1], true, buf)
 }
 
-// fnDecrypt performs simple ROT-based decryption.
+// fnDecrypt performs C TinyMUSH's decrypt() function.
 func fnDecrypt(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	cryptHelper(args[0], args[1], -1, buf)
+	cryptHelper(args[0], args[1], false, buf)
 }
 
-// cryptHelper implements TinyMUSH's simple encryption (key-based character rotation).
-func cryptHelper(text, key string, dir int, buf *strings.Builder) {
-	if key == "" { buf.WriteString(text); return }
-	keyLen := len(key)
-	for i, ch := range text {
-		shift := int(key[i%keyLen]) * dir
-		buf.WriteRune(rune((int(ch)+shift)%256))
+// cryptHelper implements C TinyMUSH's crypt_code / encrypt_code / decrypt_code.
+// CRYPTCODE_LO=32, CRYPTCODE_HI=126, CRYPTCODE_MOD=95.
+// Key is first "crunched" (non-printable ASCII stripped), then each printable
+// character in text is shifted modularly within the 32-126 range.
+func cryptHelper(text, key string, encrypt bool, buf *strings.Builder) {
+	if key == "" {
+		buf.WriteString(text)
+		return
+	}
+	// crunch_code: keep only printable ASCII (32-126) from key
+	var crunched []byte
+	for i := 0; i < len(key); i++ {
+		if key[i] >= 32 && key[i] <= 126 {
+			crunched = append(crunched, key[i])
+		}
+	}
+	if len(crunched) == 0 {
+		buf.WriteString(text)
+		return
+	}
+
+	ki := 0
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		if ch >= 32 && ch <= 126 {
+			if encrypt {
+				ch = byte(((int(ch) - 32) + (int(crunched[ki]) - 32)) % 95 + 32)
+			} else {
+				ch = byte(((int(ch) - int(crunched[ki])) + 2*95) % 95 + 32)
+			}
+			ki++
+			if ki >= len(crunched) {
+				ki = 0
+			}
+		}
+		buf.WriteByte(ch)
 	}
 }
 
@@ -771,47 +826,64 @@ func borderHelper(args []string, buf *strings.Builder, align string) {
 	text := args[0]
 	width := toInt(args[1])
 	if width <= 0 { width = 78 }
-	fill := "="
-	if len(args) > 2 && args[2] != "" { fill = args[2] }
-	textLen := len(stripAnsiStr(text))
-	if textLen == 0 {
-		// Just a bar
-		for i := 0; i < width; i++ {
-			buf.WriteByte(fill[i%len(fill)])
-		}
-		return
+	// Optional prefix character (3rd arg) — C prepends a single char, not fill
+	if len(args) > 2 && args[2] != "" {
+		buf.WriteString(args[2])
 	}
-	// Text with padding: " text "
-	padText := " " + text + " "
-	padTextLen := textLen + 2
-	remaining := width - padTextLen
+	// C behavior: border = ljust, cborder = center, rborder = rjust with spaces
+	textLen := len(stripAnsiStr(text))
+	remaining := width - textLen
 	if remaining < 0 { remaining = 0 }
-	var leftPad, rightPad int
 	switch align {
 	case "center":
-		leftPad = remaining / 2
-		rightPad = remaining - leftPad
+		leftPad := (remaining + 1) / 2 // C puts extra space on left when odd
+		rightPad := remaining - leftPad
+		buf.WriteString(strings.Repeat(" ", leftPad))
+		buf.WriteString(text)
+		buf.WriteString(strings.Repeat(" ", rightPad))
 	case "right":
-		leftPad = remaining
-		rightPad = 0
+		buf.WriteString(strings.Repeat(" ", remaining))
+		buf.WriteString(text)
 	default: // left
-		leftPad = 0
-		rightPad = remaining
-	}
-	for i := 0; i < leftPad; i++ {
-		buf.WriteByte(fill[i%len(fill)])
-	}
-	buf.WriteString(padText)
-	for i := 0; i < rightPad; i++ {
-		buf.WriteByte(fill[i%len(fill)])
+		buf.WriteString(text)
+		buf.WriteString(strings.Repeat(" ", remaining))
 	}
 }
 
-// fnWildmatch performs wildcard matching, returning 1 for match, 0 for no match.
-// wildmatch(<pattern>, <string>)
-func fnWildmatch(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 2 { buf.WriteString("0"); return }
-	buf.WriteString(boolToStr(wildMatch(args[0], args[1])))
+// fnWildmatch performs wildcard matching with register capture.
+// wildmatch(<string>, <pattern>, <register list>)
+// C signature: wildmatch(string, pattern, registers) — note arg order differs from wildMatch helper.
+// Returns 1 for match, 0 for no match. Captures wildcards into named registers.
+func fnWildmatch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 3 { buf.WriteString("#-1 FUNCTION (WILDMATCH) EXPECTS 3 ARGUMENTS BUT GOT " + strconv.Itoa(len(args))); return }
+	str := args[0]
+	pattern := args[1]
+	regList := args[2]
+
+	captures := wildMatchCapture(pattern, str)
+	if captures == nil {
+		buf.WriteString("0")
+		return
+	}
+	buf.WriteString("1")
+
+	// Set captured values into named registers
+	if ctx.RData != nil {
+		regs := strings.Fields(regList)
+		for i, reg := range regs {
+			if i < len(captures) {
+				regName := strings.TrimSpace(reg)
+				if len(regName) == 1 {
+					idx := qidxChar(regName[0])
+					if idx >= 0 && idx < eval.MaxGlobalRegs {
+						ctx.RData.QRegs[idx] = captures[i]
+					}
+				} else {
+					ctx.RData.XRegs[strings.ToLower(regName)] = captures[i]
+				}
+			}
+		}
+	}
 }
 
 // wildMatch performs glob-style pattern matching (*, ?).
@@ -844,6 +916,8 @@ func matchHelper(pattern, str string) bool {
 	}
 	return len(str) == 0
 }
+
+// wildMatchCapture and captureHelper are defined in misc.go
 
 // --- New string functions from RhostMUSH audit ---
 
@@ -1035,11 +1109,10 @@ func fnDecode64(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 // fnDigest — hash a string using SHA256 (default) or specified algorithm.
 // digest(string[, algorithm]) — supports sha256, sha1, md5, sha512.
 func fnDigest(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 1 { return }
-	algo := "sha256"
-	if len(args) > 1 && args[1] != "" {
-		algo = strings.ToLower(strings.TrimSpace(args[1]))
-	}
+	if len(args) < 2 { return }
+	// digest(algorithm, text) — C TinyMUSH convention: algo first, text second
+	algo := strings.ToLower(strings.TrimSpace(args[0]))
+	text := args[1]
 	var h hash.Hash
 	switch algo {
 	case "sha256":
@@ -1054,7 +1127,7 @@ func fnDigest(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 		buf.WriteString("#-1 UNKNOWN ALGORITHM")
 		return
 	}
-	h.Write([]byte(args[0]))
+	h.Write([]byte(text))
 	buf.WriteString(fmt.Sprintf("%x", h.Sum(nil)))
 }
 

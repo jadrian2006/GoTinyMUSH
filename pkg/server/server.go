@@ -461,6 +461,9 @@ func (s *Server) handleConnect(d *Descriptor, user, password string, dark bool) 
 	// Set CONNECTED flag (C TinyMUSH sets this on login)
 	playerObj.Flags[1] |= gamedb.Flag2Connected
 
+	// Set A_LAST (30) — last login time (matching C's atr_add_raw(player, A_LAST, time_str))
+	s.Game.SetAttr(player, 30, time.Now().Format("Mon Jan 02 15:04:05 2006"))
+
 	// Connect dark: set DARK flag if wizard/god requested it
 	// Normal connect: clear DARK flag
 	if dark && (Wizard(s.Game, player) || player == gamedb.DBRef(1)) {

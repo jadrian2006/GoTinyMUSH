@@ -67,14 +67,15 @@ func fnDoingFn(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 }
 
 // fnPmatch matches a player name (partial) to a dbref.
+// Returns #-1 on failure (matches C's safe_nothing behavior).
 func fnPmatch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 {
-		buf.WriteString("#-1 NOT FOUND")
+		buf.WriteString("#-1")
 		return
 	}
 	name := strings.TrimSpace(args[0])
 	if name == "" {
-		buf.WriteString("#-1 NOT FOUND")
+		buf.WriteString("#-1")
 		return
 	}
 	// Handle #dbref
@@ -83,7 +84,7 @@ func fnPmatch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		if obj, ok := ctx.DB.Objects[ref]; ok && obj.ObjType() == gamedb.TypePlayer {
 			buf.WriteString(fmt.Sprintf("#%d", ref))
 		} else {
-			buf.WriteString("#-1 NOT FOUND")
+			buf.WriteString("#-1")
 		}
 		return
 	}
@@ -96,9 +97,9 @@ func fnPmatch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	if ctx.GameState != nil {
 		ref := ctx.GameState.LookupPlayer(name)
 		if ref == gamedb.Ambiguous {
-			buf.WriteString("#-2 AMBIGUOUS")
+			buf.WriteString("#-2")
 		} else if ref == gamedb.Nothing {
-			buf.WriteString("#-1 NOT FOUND")
+			buf.WriteString("#-1")
 		} else {
 			buf.WriteString(fmt.Sprintf("#%d", ref))
 		}
@@ -675,6 +676,8 @@ func fnColumns(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	if colWidth < 1 {
 		colWidth = 20
 	}
+	// C TinyMUSH uses field_width = arg2 + 1 to include separator space
+	colWidth++
 	lineWidth := 78
 	if len(args) > 3 {
 		lineWidth = toInt(args[3])
@@ -692,10 +695,16 @@ func fnColumns(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 		if i > 0 && i%colsPerRow == 0 {
 			buf.WriteString("\r\n")
 		}
-		// Left-justify within column
 		buf.WriteString(item)
-		padding := colWidth - len(item)
-		if padding > 0 && (i+1)%colsPerRow != 0 && i+1 < len(items) {
+		// C TinyMUSH pads all columns except the last column on each row:
+		// the last column gets (colWidth-1) padding (no separator space).
+		isLastCol := (i%colsPerRow == colsPerRow-1) || (i == len(items)-1)
+		padWidth := colWidth
+		if isLastCol {
+			padWidth = colWidth - 1 // no trailing separator space
+		}
+		padding := padWidth - len(item)
+		if padding > 0 {
 			buf.WriteString(strings.Repeat(" ", padding))
 		}
 	}

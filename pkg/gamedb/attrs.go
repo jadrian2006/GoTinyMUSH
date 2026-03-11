@@ -191,7 +191,7 @@ const A_USER_START = 256
 var WellKnownAttrFlags = map[int]int{
 	5:   AFDark | AFInternal,                       // A_PASS — password hash
 	25:  AFInternal,                                 // A_MONEY
-	30:  AFInternal,                                 // A_LAST — last login time
+	30:  AFVisual | AFWizard | AFNoCMD | AFNoProg | AFNoClone, // A_LAST — last login time
 	38:  AFInternal | AFGod,                         // A_RQUOTA
 	41:  AFInternal | AFGod,                         // A_ALLOWANCE
 	42:  AFInternal | AFNoProg | AFNoCMD | AFIsLock,  // A_LOCK — default lock (shown via Key: line)
@@ -208,7 +208,7 @@ var WellKnownAttrFlags = map[int]int{
 	85:  AFNoProg | AFNoCMD | AFIsLock,               // A_LTPORT — TportLock
 	86:  AFNoProg | AFNoCMD | AFIsLock,               // A_LDROP — DropLock
 	87:  AFNoProg | AFNoCMD | AFIsLock,               // A_LRECEIVE — ReceiveLock
-	88:  AFDark | AFNoCMD | AFInternal | AFGod,      // A_LASTSITE
+	88:  AFNoProg | AFNoCMD | AFNoClone | AFGod,      // A_LASTSITE
 	93:  AFNoProg | AFNoCMD | AFIsLock,               // A_LLINK — LinkLock
 	94:  AFNoProg | AFNoCMD | AFIsLock,               // A_LTELOUT — TeloutLock
 	96:  AFInternal,                                 // A_MAILFOLDERS
@@ -218,7 +218,7 @@ var WellKnownAttrFlags = map[int]int{
 	209: AFNoProg | AFNoCMD | AFIsLock,               // A_LSPEECH — SpeechLock
 	210: AFInternal | AFDark,                        // A_PROGCMD
 	217: AFNoProg | AFNoCMD | AFIsLock,               // A_LCHOWN — ChownLock
-	218: AFDark | AFNoCMD | AFInternal | AFGod,      // A_LASTIP
+	218: AFNoProg | AFNoCMD | AFNoClone | AFGod,      // A_LASTIP
 	219: AFNoProg | AFNoCMD | AFIsLock,               // A_LDARK — DarkLock
 	223: AFNoProg | AFNoCMD | AFIsLock,               // A_LKNOWN — KnownLock
 	224: AFNoProg | AFNoCMD | AFIsLock,               // A_LHEARD — HeardLock

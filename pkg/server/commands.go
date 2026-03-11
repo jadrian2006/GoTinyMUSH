@@ -136,6 +136,8 @@ func InitCommands() map[string]*Command {
 	// Attribute management (no guest)
 	registerNG("@attribute", cmdAttribute)
 	register("@attlist", cmdAttlist)
+	registerNG("@cpattr", cmdCpattr)
+	registerNG("@mvattr", cmdMvattr)
 
 	// SQL (no guest)
 	registerNG("@sql", cmdSQL)
@@ -344,7 +346,7 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	case '&':
 		if g.IsGuest(d.Player) {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		cmdSetVAttr(g, d, input[1:], nil)
@@ -383,7 +385,7 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 	// Helper to execute a matched command with hooks
 	execCmd := func(cmd *Command) {
 		if cmd.NoGuest && g.IsGuest(d.Player) {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		if g.Hooks != nil {
@@ -446,7 +448,7 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		attrName := lower[1:]
 		if strings.Contains(args, "=") {
 			if g.IsGuest(d.Player) {
-				d.Send("Permission denied.")
+				g.Notify(d.Player, "Permission denied.")
 				return
 			}
 			cmdSetVAttr(g, d, attrName+" "+args, nil)
@@ -472,13 +474,22 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	}
 
-	d.Send("Huh?  (Type \"help\" for help.)")
+	g.Notify(d.Player, "Huh?  (Type \"help\" for help.)")
 }
 
-// HasSwitch checks if a switch list contains a specific switch (case-insensitive).
+// Notify sends a message to all connections for a player, matching C's notify().
+func (g *Game) Notify(player gamedb.DBRef, msg string) {
+	g.Conns.SendToPlayer(player, msg)
+}
+
+// HasSwitch checks if a switch list contains a specific switch.
+// C TinyMUSH uses prefix matching on switches: "delim" matches "delimit".
+// The switch (from user input) must be a prefix of name (the canonical switch name).
 func HasSwitch(switches []string, name string) bool {
+	nameLower := strings.ToLower(name)
 	for _, s := range switches {
-		if strings.EqualFold(s, name) {
+		sLower := strings.ToLower(s)
+		if strings.HasPrefix(nameLower, sLower) {
 			return true
 		}
 	}
@@ -498,7 +509,7 @@ func evalExpr(g *Game, player gamedb.DBRef, text string) string {
 func cmdSay(g *Game, d *Descriptor, args string, _ []string) {
 	args = strings.TrimSpace(args)
 	if args == "" {
-		d.Send("Say what?")
+		g.Notify(d.Player, "Say what?")
 		return
 	}
 	args = evalExpr(g, d.Player, args)
@@ -559,7 +570,7 @@ func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Page whom?")
+		g.Notify(d.Player, "Page whom?")
 		return
 	}
 	// Format: page name=message or page name message
@@ -577,13 +588,13 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := LookupPlayer(g.DB, targetName)
 	if target == gamedb.Nothing {
-		d.Send("I don't recognize that player.")
+		g.Notify(d.Player, "I don't recognize that player.")
 		return
 	}
 
 	if !g.Conns.IsConnected(target) {
 		targetObj := g.DB.Objects[target]
-		d.Send(fmt.Sprintf("%s is not connected.", DisplayName(targetObj.Name)))
+		g.Notify(d.Player, fmt.Sprintf("%s is not connected.", DisplayName(targetObj.Name)))
 		return
 	}
 
@@ -655,27 +666,27 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdReply(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("No one to page.")
+		g.Notify(d.Player, "No one to page.")
 		return
 	}
 
 	// Read A_LASTPAGE (200) to find who we last paged / who last paged us
 	lastStr := g.GetAttrTextDirect(d.Player, 200)
 	if lastStr == "" {
-		d.Send("No one to page.")
+		g.Notify(d.Player, "No one to page.")
 		return
 	}
 
 	targetRef, err := strconv.Atoi(lastStr)
 	if err != nil {
-		d.Send("No one to page.")
+		g.Notify(d.Player, "No one to page.")
 		return
 	}
 	target := gamedb.DBRef(targetRef)
 
 	targetObj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No one to page.")
+		g.Notify(d.Player, "No one to page.")
 		return
 	}
 
@@ -692,7 +703,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 		// @emit/room target=message — emit to the room containing target
 		eqIdx := strings.IndexByte(args, '=')
 		if eqIdx < 0 {
-			d.Send("Usage: @emit/room target = message")
+			g.Notify(d.Player, "Usage: @emit/room target = message")
 			return
 		}
 		targetStr := strings.TrimSpace(args[:eqIdx])
@@ -704,7 +715,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 			target = g.MatchObject(d.Player, targetStr)
 		}
 		if target == gamedb.Nothing {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 		// Emit to the room of the target
@@ -740,12 +751,14 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 }
 
 func cmdThink(g *Game, d *Descriptor, args string, _ []string) {
-	// Evaluate the expression and show result only to the player
+	// Evaluate the expression and show result to all player sessions (matches C notify())
 	ctx := MakeEvalContextWithGame(g, d.Player, func(c *eval.EvalContext) {
 		functions.RegisterAll(c)
 	})
 	result := ctx.Exec(args, eval.EvFCheck|eval.EvEval, nil)
-	d.Send(result)
+	// Process side-effect notifications (pemit(), remit(), etc.) before sending result
+	g.deliverNotifications(ctx)
+	g.Conns.SendToPlayer(d.Player, result)
 }
 
 func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
@@ -754,7 +767,7 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 	// @pemit/list targets=message     (targets is space-separated dbrefs)
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("@pemit: I need a target and message separated by =.")
+		g.Notify(d.Player, "@pemit: I need a target and message separated by =.")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -773,11 +786,11 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 			target = g.MatchObject(d.Player, targetStr)
 		}
 		if target == gamedb.Nothing {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 		if _, ok := g.DB.Objects[target]; !ok {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 		for _, cur := range g.DB.SafeContents(target) {
@@ -815,7 +828,7 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		target = g.MatchObject(d.Player, targetStr)
 	}
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	g.SendMarkedToPlayer(target, "EMIT", message)
@@ -827,11 +840,11 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 
 func cmdGo(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Go where?")
+		g.Notify(d.Player, "Go where?")
 		return
 	}
 	if !tryMoveByExit(g, d, args) {
-		d.Send("You can't go that way.")
+		g.Notify(d.Player, "You can't go that way.")
 	}
 }
 
@@ -862,7 +875,7 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 			dest = playerObj.Link
 		}
 		if dest == gamedb.Nothing {
-			d.Send("That exit doesn't lead anywhere.")
+			g.Notify(d.Player, "That exit doesn't lead anywhere.")
 			return true
 		}
 		if !CouldDoIt(g, d.Player, exitRef, aLock) {
@@ -875,7 +888,7 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 			})
 			msg := ctx.Exec(succ, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 			if msg != "" {
-				d.Send(msg)
+				g.Notify(d.Player, msg)
 			}
 		}
 		if osucc := g.GetAttrText(exitRef, 1); osucc != "" {
@@ -987,10 +1000,10 @@ func cmdHome(g *Game, d *Descriptor, _ string, _ []string) {
 	}
 	home := playerObj.Link
 	if home == gamedb.Nothing {
-		d.Send("You have no home!")
+		g.Notify(d.Player, "You have no home!")
 		return
 	}
-	d.Send("There's no place like home...")
+	g.Notify(d.Player, "There's no place like home...")
 	g.MovePlayer(d, home)
 }
 
@@ -1009,11 +1022,11 @@ func cmdLook(g *Game, d *Descriptor, args string, _ []string) {
 	// Look at something specific
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Ambiguous {
-		d.Send("I don't know which one you mean!")
+		g.Notify(d.Player, "I don't know which one you mean!")
 		return
 	}
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	g.ShowObject(d, target)
@@ -1039,11 +1052,11 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, objName)
 	if target == gamedb.Ambiguous {
-		d.Send("I don't know which one you mean!")
+		g.Notify(d.Player, "I don't know which one you mean!")
 		return
 	}
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
@@ -1061,7 +1074,7 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 		pattern := strings.ToLower(strings.TrimSpace(attrName))
 		obj, ok := g.DB.Objects[target]
 		if !ok {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 		found := false
@@ -1094,14 +1107,14 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 				annotation = attrAnnotation(g, d.Player, target, examObjOwner, info, def)
 			}
 			if annotation != "" {
-				d.Send(fmt.Sprintf("  %s %s: %s", name, annotation, text))
+				g.Notify(d.Player, fmt.Sprintf("  %s %s: %s", name, annotation, text))
 			} else {
-				d.Send(fmt.Sprintf("  %s: %s", name, text))
+				g.Notify(d.Player, fmt.Sprintf("  %s: %s", name, text))
 			}
 			found = true
 		}
 		if !found {
-			d.Send("No matching attributes found.")
+			g.Notify(d.Player, "No matching attributes found.")
 		}
 		return
 	}
@@ -1115,13 +1128,13 @@ func cmdInventory(g *Game, d *Descriptor, _ string, _ []string) {
 	}
 	contents := g.DB.SafeContents(d.Player)
 	if len(contents) == 0 {
-		d.Send("You aren't carrying anything.")
+		g.Notify(d.Player, "You aren't carrying anything.")
 		return
 	}
-	d.Send("You are carrying:")
+	g.Notify(d.Player, "You are carrying:")
 	for _, next := range contents {
 		if _, ok := g.DB.Objects[next]; ok {
-			d.Send(g.unparseObject(d.Player, next))
+			g.Notify(d.Player, g.unparseObject(d.Player, next))
 		}
 	}
 }
@@ -1139,14 +1152,14 @@ func cmdScore(g *Game, d *Descriptor, _ string, _ []string) {
 	if !ok {
 		return
 	}
-	d.Send(fmt.Sprintf("You have %d %s.", playerObj.Pennies, g.MoneyName(playerObj.Pennies)))
+	g.Notify(d.Player, fmt.Sprintf("You have %d %s.", playerObj.Pennies, g.MoneyName(playerObj.Pennies)))
 }
 
 // --- Building Commands ---
 
 func cmdDig(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Dig what?")
+		g.Notify(d.Player, "Dig what?")
 		return
 	}
 	// @dig name[=exit_to[;alias],exit_from[;alias]]
@@ -1154,7 +1167,7 @@ func cmdDig(g *Game, d *Descriptor, args string, _ []string) {
 	roomName := strings.TrimSpace(parts[0])
 
 	newRef := g.CreateObject(roomName, gamedb.TypeRoom, d.Player)
-	d.Send(fmt.Sprintf("Room %s created as #%d.", roomName, newRef))
+	g.Notify(d.Player, fmt.Sprintf("Room %s created as #%d.", roomName, newRef))
 
 	// Handle exit creation if specified
 	if len(parts) > 1 {
@@ -1162,19 +1175,19 @@ func cmdDig(g *Game, d *Descriptor, args string, _ []string) {
 		if exitParts[0] != "" {
 			exitTo := strings.TrimSpace(exitParts[0])
 			exitRef := g.CreateExit(exitTo, g.PlayerLocation(d.Player), newRef, d.Player)
-			d.Send(fmt.Sprintf("Exit %s created as #%d.", exitTo, exitRef))
+			g.Notify(d.Player, fmt.Sprintf("Exit %s created as #%d.", exitTo, exitRef))
 		}
 		if len(exitParts) > 1 && exitParts[1] != "" {
 			exitFrom := strings.TrimSpace(exitParts[1])
 			exitRef := g.CreateExit(exitFrom, newRef, g.PlayerLocation(d.Player), d.Player)
-			d.Send(fmt.Sprintf("Exit %s created as #%d.", exitFrom, exitRef))
+			g.Notify(d.Player, fmt.Sprintf("Exit %s created as #%d.", exitFrom, exitRef))
 		}
 	}
 }
 
 func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Open what?")
+		g.Notify(d.Player, "Open what?")
 		return
 	}
 	// @open exit_name=destination
@@ -1186,7 +1199,7 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	loc := g.PlayerLocation(d.Player)
 	exitRef := g.CreateExit(exitName, loc, dest, d.Player)
-	d.Send(fmt.Sprintf("Exit %s created as #%d.", exitName, exitRef))
+	g.Notify(d.Player, fmt.Sprintf("Exit %s created as #%d.", exitName, exitRef))
 }
 
 func cmdDescribe(g *Game, d *Descriptor, args string, _ []string) {
@@ -1202,30 +1215,30 @@ func cmdDescribe(g *Game, d *Descriptor, args string, _ []string) {
 		desc = strings.TrimSpace(args[eqIdx+1:])
 	}
 	if targetStr == "" {
-		d.Send("@describe: Usage: @desc thing = description")
+		g.Notify(d.Player, "@describe: Usage: @desc thing = description")
 		return
 	}
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	g.SetAttr(target, 6, desc) // A_DESC = 6
-	d.Send("Set.")
+	g.Notify(d.Player, "Set.")
 }
 
 func cmdRename(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("@name: Usage: @name thing = new name")
+		g.Notify(d.Player, "@name: Usage: @name thing = new name")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	newName := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
@@ -1235,7 +1248,7 @@ func cmdRename(g *Game, d *Descriptor, args string, _ []string) {
 		if obj.ObjType() == gamedb.TypePlayer && g.Store != nil {
 			g.Store.UpdatePlayerIndex(obj, oldName)
 		}
-		d.Send("Name set.")
+		g.Notify(d.Player, "Name set.")
 	}
 }
 
@@ -1246,7 +1259,7 @@ func cmdEval(g *Game, d *Descriptor, args string, _ []string) {
 		functions.RegisterAll(c)
 	})
 	result := ctx.Exec(args, eval.EvFCheck|eval.EvEval, nil)
-	d.Send(result)
+	g.Conns.SendToPlayer(d.Player, result)
 }
 
 // --- Session ---
@@ -1256,10 +1269,10 @@ func cmdQuit(g *Game, d *Descriptor, _ string, _ []string) {
 		if txt := g.Texts.GetQuit(); txt != "" {
 			d.SendNoNewline(txt)
 		} else {
-			d.Send("Going home.")
+			g.Notify(d.Player, "Going home.")
 		}
 	} else {
-		d.Send("Going home.")
+		g.Notify(d.Player, "Going home.")
 	}
 	g.DisconnectPlayer(d)
 }
@@ -1273,20 +1286,20 @@ func cmdLogout(g *Game, d *Descriptor, _ string, _ []string) {
 func cmdReadCache(g *Game, d *Descriptor, _ string, _ []string) {
 	// Wizard-only command
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if g.TextDir == "" {
-		d.Send("No text directory configured (-textdir flag).")
+		g.Notify(d.Player, "No text directory configured (-textdir flag).")
 		return
 	}
 	count := g.ReloadTextFiles()
-	d.Send(fmt.Sprintf("Text file cache reloaded. %d file(s) loaded from %s.", count, g.TextDir))
+	g.Notify(d.Player, fmt.Sprintf("Text file cache reloaded. %d file(s) loaded from %s.", count, g.TextDir))
 }
 
 func cmdSetDoing(g *Game, d *Descriptor, args string, _ []string) {
 	d.DoingStr = args
-	d.Send("Set.")
+	g.Notify(d.Player, "Set.")
 }
 
 // --- Game Helper Methods ---
@@ -1738,7 +1751,7 @@ func (g *Game) visibleExits(room, looker gamedb.DBRef) []gamedb.DBRef {
 func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	roomObj, ok := g.DB.Objects[room]
 	if !ok {
-		d.Send("You see nothing special.")
+		g.Notify(d.Player, "You see nothing special.")
 		return
 	}
 
@@ -1778,7 +1791,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 				strings.Join(eStrs, " "),
 			})
 			if result != "" {
-				d.Send(result)
+				g.Notify(d.Player, result)
 			}
 			g.QueueAttrAction(room, d.Player, 36, nil) // A_ADESC
 			return
@@ -1795,9 +1808,9 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	nameFmt := g.GetAttrText(room, 222) // A_NAME_FMT
 	if nameFmt != "" {
 		ctx := makeCtx()
-		d.Send(ctx.Exec(nameFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
+		g.Notify(d.Player, ctx.Exec(nameFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
 	} else {
-		d.Send(g.unparseObject(d.Player, room))
+		g.Notify(d.Player, g.unparseObject(d.Player, room))
 	}
 
 	// Description — executor is the room (so v() resolves room attrs), enactor is the player
@@ -1814,7 +1827,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	if desc != "" {
 		ctx := makeCtx()
 		evaluated := ctx.Exec(desc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-		d.Send(evaluated)
+		g.Notify(d.Player, evaluated)
 	}
 
 	// C TinyMUSH's look_in shows SUCC/FAIL after DESC, conditional on A_LOCK.
@@ -1830,7 +1843,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 				ctx := makeCtx()
 				msg := ctx.Exec(succ, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 				if msg != "" {
-					d.Send(msg)
+					g.Notify(d.Player, msg)
 					succShown = true
 				}
 			}
@@ -1888,15 +1901,15 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		ctx := makeCtx()
 		result := ctx.Exec(conFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{strings.Join(refStrs, " ")})
 		if result != "" {
-			d.Send(result)
+			g.Notify(d.Player, result)
 			conFmtHandled = true
 		}
 	}
 	if !succShown && !conFmtHandled && len(contentRefs) > 0 {
-		d.Send("Contents:")
+		g.Notify(d.Player, "Contents:")
 		for _, ref := range contentRefs {
 			if _, ok := g.DB.Objects[ref]; ok {
-				d.Send(g.unparseObject(d.Player, ref))
+				g.Notify(d.Player, g.unparseObject(d.Player, ref))
 			}
 		}
 	}
@@ -1939,12 +1952,12 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 		ctx := makeCtx()
 		result := ctx.Exec(exitFmt, eval.EvFCheck|eval.EvEval|eval.EvStrip, []string{strings.Join(refStrs, " ")})
 		if result != "" {
-			d.Send(result)
+			g.Notify(d.Player, result)
 			exitFmtHandled = true
 		}
 	}
 	if !succShown && !exitFmtHandled && len(exitRefs) > 0 {
-		d.Send("Obvious exits:")
+		g.Notify(d.Player, "Obvious exits:")
 		var exitNames []string
 		for _, ref := range exitRefs {
 			if exitObj, ok := g.DB.Objects[ref]; ok {
@@ -1955,7 +1968,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 				exitNames = append(exitNames, name)
 			}
 		}
-		d.Send("  " + strings.Join(exitNames, "  "))
+		g.Notify(d.Player, "  " + strings.Join(exitNames, "  "))
 	}
 
 	// Instance transparency: if this room is inside an instance THING with
@@ -1966,7 +1979,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 				if g.GetAttrTextByName(roomObj.Location, "INSTANCE_TRANSPARENT") == "1" {
 					extLoc := vehicleObj.Location
 					if extLoc != gamedb.Nothing {
-						d.Send("--- Outside ---")
+						g.Notify(d.Player, "--- Outside ---")
 						extContents := g.visibleContents(extLoc, d.Player)
 						if len(extContents) > 0 {
 							var names []string
@@ -1975,7 +1988,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 									names = append(names, DisplayName(o.Name))
 								}
 							}
-							d.Send("Outside: " + strings.Join(names, ", "))
+							g.Notify(d.Player, "Outside: " + strings.Join(names, ", "))
 						}
 						extExits := g.visibleExits(extLoc, d.Player)
 						if len(extExits) > 0 {
@@ -1989,7 +2002,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 									names = append(names, name)
 								}
 							}
-							d.Send("Nearby exits: " + strings.Join(names, "  "))
+							g.Notify(d.Player, "Nearby exits: " + strings.Join(names, "  "))
 						}
 					}
 				}
@@ -2005,12 +2018,12 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 // Implements the C TinyMUSH did_it pattern: DESC to player, ODESC to room, ADESC action.
 func (g *Game) ShowObject(d *Descriptor, target gamedb.DBRef) {
 	if _, ok := g.DB.Objects[target]; !ok {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	// C TinyMUSH look_simple: show Name(#dbref flags) via unparse_object
 	// when the looker can examine the target; otherwise just the name.
-	d.Send(g.unparseObject(d.Player, target))
+	g.Notify(d.Player, g.unparseObject(d.Player, target))
 
 	// DESC (6) — description shown to the looker
 	desc := g.GetAttrText(target, 6) // A_DESC
@@ -2018,9 +2031,9 @@ func (g *Game) ShowObject(d *Descriptor, target gamedb.DBRef) {
 		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
 			functions.RegisterAll(c)
 		})
-		d.Send(ctx.Exec(desc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
+		g.Notify(d.Player, ctx.Exec(desc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
 	} else {
-		d.Send("You see nothing special.")
+		g.Notify(d.Player, "You see nothing special.")
 	}
 
 	// ODESC (37) — message shown to others in the room
@@ -2042,7 +2055,7 @@ func (g *Game) ShowObject(d *Descriptor, target gamedb.DBRef) {
 func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
@@ -2050,10 +2063,10 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 
 	if control {
 		// 1. Header: Name(#dbref flags)
-		d.Send(g.unparseObject(d.Player, target))
+		g.Notify(d.Player, g.unparseObject(d.Player, target))
 
 		// 2. Type/Flags line with full flag names (C: if mushconf.ex_flags)
-		d.Send(flagDescription(g, d.Player, obj))
+		g.Notify(d.Player, flagDescription(g, d.Player, obj))
 
 		// 3. Owner/Key/Pennies line
 		// C: "Owner: Name  Key: lockexpr  Pennies: N"
@@ -2077,7 +2090,7 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		if lockDisplay == "" {
 			lockDisplay = "*UNLOCKED*"
 		}
-		d.Send(fmt.Sprintf("Owner: %s  Key: %s %s: %d",
+		g.Notify(d.Player, fmt.Sprintf("Owner: %s  Key: %s %s: %d",
 			g.PlayerName(obj.Owner), lockDisplay, coinName, obj.Pennies))
 
 		// 4. Timestamps
@@ -2093,25 +2106,25 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 				modStr = obj.LastMod.Format("Mon Jan 02 15:04:05 2006")
 			}
 			if accessStr != "" && modStr != "" {
-				d.Send(fmt.Sprintf("Accessed: %s    Modified: %s", accessStr, modStr))
+				g.Notify(d.Player, fmt.Sprintf("Accessed: %s    Modified: %s", accessStr, modStr))
 			} else if accessStr != "" {
-				d.Send(fmt.Sprintf("Accessed: %s", accessStr))
+				g.Notify(d.Player, fmt.Sprintf("Accessed: %s", accessStr))
 			} else if modStr != "" {
-				d.Send(fmt.Sprintf("Modified: %s", modStr))
+				g.Notify(d.Player, fmt.Sprintf("Modified: %s", modStr))
 			}
 		}
 
 		// 5. Zone (always shown, even *NOTHING*)
-		d.Send(fmt.Sprintf("Zone: %s", g.unparseObject(d.Player, obj.Zone)))
+		g.Notify(d.Player, fmt.Sprintf("Zone: %s", g.unparseObject(d.Player, obj.Zone)))
 
 		// 6. Parent (only if set)
 		if obj.Parent != gamedb.Nothing {
-			d.Send(fmt.Sprintf("Parent: %s", g.unparseObject(d.Player, obj.Parent)))
+			g.Notify(d.Player, fmt.Sprintf("Parent: %s", g.unparseObject(d.Player, obj.Parent)))
 		}
 
 		// 7. Powers (only if any powers are set)
 		if pwrStr := powerDescription(obj); pwrStr != "" {
-			d.Send(pwrStr)
+			g.Notify(d.Player, pwrStr)
 		}
 	}
 
@@ -2154,9 +2167,9 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 			annotation = attrAnnotation(g, d.Player, target, objResolvedOwner, info, def)
 		}
 		if annotation != "" {
-			d.Send(fmt.Sprintf("  %s %s: %s", name, annotation, text))
+			g.Notify(d.Player, fmt.Sprintf("  %s %s: %s", name, annotation, text))
 		} else {
-			d.Send(fmt.Sprintf("  %s: %s", name, text))
+			g.Notify(d.Player, fmt.Sprintf("  %s: %s", name, text))
 		}
 	}
 
@@ -2164,9 +2177,9 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		// Contents section
 		examContents := g.DB.SafeContents(target)
 		if len(examContents) > 0 {
-			d.Send("Contents:")
+			g.Notify(d.Player, "Contents:")
 			for _, cRef := range examContents {
-				d.Send(g.unparseObject(d.Player, cRef))
+				g.Notify(d.Player, g.unparseObject(d.Player, cRef))
 			}
 		}
 
@@ -2175,64 +2188,64 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		case gamedb.TypeRoom:
 			// Exits
 			if obj.Exits != gamedb.Nothing {
-				d.Send("Exits:")
+				g.Notify(d.Player, "Exits:")
 				seenEx := make(map[gamedb.DBRef]bool)
 				exitRef := obj.Exits
 				for exitRef != gamedb.Nothing && !seenEx[exitRef] {
 					seenEx[exitRef] = true
 					if eObj, ok := g.DB.Objects[exitRef]; ok {
-						d.Send(g.unparseObject(d.Player, exitRef))
+						g.Notify(d.Player, g.unparseObject(d.Player, exitRef))
 						exitRef = eObj.Next
 					} else {
 						break
 					}
 				}
 			} else {
-				d.Send("No exits.")
+				g.Notify(d.Player, "No exits.")
 			}
 			// Dropto
 			if obj.Link != gamedb.Nothing {
-				d.Send(fmt.Sprintf("Dropped objects go to: %s", g.unparseObject(d.Player, obj.Link)))
+				g.Notify(d.Player, fmt.Sprintf("Dropped objects go to: %s", g.unparseObject(d.Player, obj.Link)))
 			}
 
 		case gamedb.TypeThing, gamedb.TypePlayer:
 			// Exits
 			if obj.Exits != gamedb.Nothing {
-				d.Send("Exits:")
+				g.Notify(d.Player, "Exits:")
 				seenEx := make(map[gamedb.DBRef]bool)
 				exitRef := obj.Exits
 				for exitRef != gamedb.Nothing && !seenEx[exitRef] {
 					seenEx[exitRef] = true
 					if eObj, ok := g.DB.Objects[exitRef]; ok {
-						d.Send(g.unparseObject(d.Player, exitRef))
+						g.Notify(d.Player, g.unparseObject(d.Player, exitRef))
 						exitRef = eObj.Next
 					} else {
 						break
 					}
 				}
 			} else {
-				d.Send("No exits.")
+				g.Notify(d.Player, "No exits.")
 			}
 			// Home
-			d.Send(fmt.Sprintf("Home: %s", g.unparseObject(d.Player, obj.Link)))
+			g.Notify(d.Player, fmt.Sprintf("Home: %s", g.unparseObject(d.Player, obj.Link)))
 			// Location
 			if obj.Location != gamedb.Nothing {
-				d.Send(fmt.Sprintf("Location: %s", g.unparseObject(d.Player, obj.Location)))
+				g.Notify(d.Player, fmt.Sprintf("Location: %s", g.unparseObject(d.Player, obj.Location)))
 			}
 
 		case gamedb.TypeExit:
 			// Source
-			d.Send(fmt.Sprintf("Source: %s", g.unparseObject(d.Player, obj.Exits)))
+			g.Notify(d.Player, fmt.Sprintf("Source: %s", g.unparseObject(d.Player, obj.Exits)))
 			// Destination
 			if obj.Location == gamedb.Nothing {
-				d.Send("Destination: *UNLINKED*")
+				g.Notify(d.Player, "Destination: *UNLINKED*")
 			} else {
-				d.Send(fmt.Sprintf("Destination: %s", g.unparseObject(d.Player, obj.Location)))
+				g.Notify(d.Player, fmt.Sprintf("Destination: %s", g.unparseObject(d.Player, obj.Location)))
 			}
 		}
 	} else {
 		// Non-controlling viewer: show "Owned by Name"
-		d.Send(fmt.Sprintf("Owned by %s", g.PlayerName(obj.Owner)))
+		g.Notify(d.Player, fmt.Sprintf("Owned by %s", g.PlayerName(obj.Owner)))
 	}
 }
 
@@ -2702,9 +2715,9 @@ func (g *Game) ShowWho(d *Descriptor) {
 
 	// Header — matches C TinyMUSH dump_users() format
 	if isWiz {
-		d.Send("Player Name        On For Idle   Room    Cmds   Host")
+		g.Notify(d.Player, "Player Name        On For Idle   Room    Cmds   Host")
 	} else {
-		d.Send(fmt.Sprintf("%-16s%9s %4s  %s", "Player Name", "On For", "Idle", "Doing"))
+		g.Notify(d.Player, fmt.Sprintf("%-16s%9s %4s  %s", "Player Name", "On For", "Idle", "Doing"))
 	}
 
 	type whoEntry struct {
@@ -2759,10 +2772,10 @@ func (g *Game) ShowWho(d *Descriptor) {
 	for _, e := range entries {
 		if isWiz {
 			// C format: "%-16s%9s %4s%-3s#%-6d%5d%3s%-25s"
-			d.Send(fmt.Sprintf("%-16s%9s %4s%-3s#%-6d%5d   %-25s",
+			g.Notify(d.Player, fmt.Sprintf("%-16s%9s %4s%-3s#%-6d%5d   %-25s",
 				e.name, e.onFor, e.idle, e.flags, e.loc, e.cmds, e.host))
 		} else {
-			d.Send(fmt.Sprintf("%-16s%9s %4s  %s", e.name, e.onFor, e.idle, e.doing))
+			g.Notify(d.Player, fmt.Sprintf("%-16s%9s %4s  %s", e.name, e.onFor, e.idle, e.doing))
 		}
 	}
 
@@ -2771,7 +2784,7 @@ func (g *Game) ShowWho(d *Descriptor) {
 	if count > peak {
 		peak = count
 	}
-	d.Send(fmt.Sprintf("%d Players logged in, %d record, no maximum.", count, peak))
+	g.Notify(d.Player, fmt.Sprintf("%d Players logged in, %d record, no maximum.", count, peak))
 }
 
 // MatchObject resolves a name to a dbref, searching contents and location.
@@ -3362,27 +3375,27 @@ func (g *Game) CreateExit(name string, source, dest, owner gamedb.DBRef) gamedb.
 func makeSensoryCommand(attr, oAttr, aAttr int, defaultMsg string) CommandHandler {
 	return func(g *Game, d *Descriptor, args string, _ []string) {
 		if g.Conf != nil && !g.Conf.SensoryEnabled {
-			d.Send("Huh?  (Type \"help\" for help.)")
+			g.Notify(d.Player, "Huh?  (Type \"help\" for help.)")
 			return
 		}
 		target := g.PlayerLocation(d.Player) // default: current room
 		if args != "" {
 			t := g.MatchObject(d.Player, args)
 			if t == gamedb.Nothing {
-				d.Send("I don't see that here.")
+				g.Notify(d.Player, "I don't see that here.")
 				return
 			}
 			target = t
 		}
 		text := g.GetAttrText(target, attr)
 		if text == "" {
-			d.Send(defaultMsg)
+			g.Notify(d.Player, defaultMsg)
 			return
 		}
 		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
 			functions.RegisterAll(c)
 		})
-		d.Send(ctx.Exec(text, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
+		g.Notify(d.Player, ctx.Exec(text, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
 
 		// O-text to room
 		oText := g.GetAttrText(target, oAttr)
@@ -3416,18 +3429,18 @@ func makeAttrSetter(attrNum int) CommandHandler {
 		}
 		target := g.MatchObject(d.Player, targetStr)
 		if target == gamedb.Nothing {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 		if !g.Controls(d.Player, target) {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		ok, errMsg := g.SetAttrChecked(d.Player, target, attrNum, value)
 		if !ok {
-			d.Send(errMsg)
+			g.Notify(d.Player, errMsg)
 		} else {
-			d.Send("Set.")
+			g.Notify(d.Player, "Set.")
 		}
 	}
 }
@@ -3436,26 +3449,26 @@ func makeAttrSetter(attrNum int) CommandHandler {
 
 func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Get what?")
+		g.Notify(d.Player, "Get what?")
 		return
 	}
 	target := g.MatchInRoom(d.Player, args)
 	if target == gamedb.Ambiguous {
-		d.Send("I don't know which one you mean!")
+		g.Notify(d.Player, "I don't know which one you mean!")
 		return
 	}
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	// Can only pick up THINGs
 	if obj.ObjType() != gamedb.TypeThing {
-		d.Send("You can't pick that up.")
+		g.Notify(d.Player, "You can't pick that up.")
 		return
 	}
 	loc := g.PlayerLocation(d.Player)
@@ -3476,7 +3489,7 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 	if g.GetAttrText(target, aSucc) != "" || g.GetAttrText(target, aOSucc) != "" {
 		g.DidIt(d.Player, target, aSucc, aOSucc, aASucc)
 	} else {
-		d.Send(fmt.Sprintf("You pick up %s.", DisplayName(obj.Name)))
+		g.Notify(d.Player, fmt.Sprintf("You pick up %s.", DisplayName(obj.Name)))
 		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
 			fmt.Sprintf("%s picks up %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
 		g.QueueAttrAction(target, d.Player, aASucc, nil)
@@ -3485,21 +3498,21 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Drop what?")
+		g.Notify(d.Player, "Drop what?")
 		return
 	}
 	target := g.MatchInInventory(d.Player, args)
 	if target == gamedb.Ambiguous {
-		d.Send("I don't know which one you mean!")
+		g.Notify(d.Player, "I don't know which one you mean!")
 		return
 	}
 	if target == gamedb.Nothing {
-		d.Send("You aren't carrying that.")
+		g.Notify(d.Player, "You aren't carrying that.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("You aren't carrying that.")
+		g.Notify(d.Player, "You aren't carrying that.")
 		return
 	}
 
@@ -3524,7 +3537,7 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 	if g.GetAttrText(target, aDrop) != "" || g.GetAttrText(target, aODrop) != "" {
 		g.DidIt(d.Player, target, aDrop, aODrop, aADrop)
 	} else {
-		d.Send(fmt.Sprintf("You drop %s.", DisplayName(obj.Name)))
+		g.Notify(d.Player, fmt.Sprintf("You drop %s.", DisplayName(obj.Name)))
 		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
 			fmt.Sprintf("%s drops %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
 		g.QueueAttrAction(target, d.Player, aADrop, nil)
@@ -3535,7 +3548,7 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 	// give recipient = amount or give recipient = object
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Give what to whom?")
+		g.Notify(d.Player, "Give what to whom?")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -3543,12 +3556,12 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
@@ -3558,13 +3571,13 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 		if amount > 0 {
 			playerObj := g.DB.Objects[d.Player]
 			if playerObj.Pennies < amount {
-				d.Send(fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
+				g.Notify(d.Player, fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
 				return
 			}
 			playerObj.Pennies -= amount
 			targetObj.Pennies += amount
 			g.PersistObjects(playerObj, targetObj)
-			d.Send(fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
+			g.Notify(d.Player, fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
 			g.Conns.SendToPlayer(target,
 				fmt.Sprintf("%s gives you %d %s.", g.PlayerName(d.Player), amount, g.MoneyName(amount)))
 			return
@@ -3574,29 +3587,29 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 	// Try as object — match in giver's inventory
 	thing := g.MatchInInventory(d.Player, whatStr)
 	if thing == gamedb.Ambiguous {
-		d.Send("I don't know which one you mean!")
+		g.Notify(d.Player, "I don't know which one you mean!")
 		return
 	}
 	if thing == gamedb.Nothing {
-		d.Send("You don't have that!")
+		g.Notify(d.Player, "You don't have that!")
 		return
 	}
 	thingObj, ok := g.DB.Objects[thing]
 	if !ok || thingObj.Location != d.Player {
-		d.Send("You aren't carrying that.")
+		g.Notify(d.Player, "You aren't carrying that.")
 		return
 	}
 
 	// Validate: can only give THINGs and PLAYERs
 	thingType := thingObj.ObjType()
 	if thingType != gamedb.TypeThing && thingType != gamedb.TypePlayer {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	// Recipient must be Enter_OK or controlled by giver
 	if !targetObj.HasFlag(gamedb.FlagEnterOK) && !g.Controls(d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -3621,7 +3634,7 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 	g.PersistObjects(thingObj, targetObj)
 
 	// Notify giver, recipient, and thing (matches C's give_thing)
-	d.Send("Given.")
+	g.Notify(d.Player, "Given.")
 	g.Conns.SendToPlayer(target,
 		fmt.Sprintf("%s gave you %s.", g.PlayerName(d.Player), DisplayName(thingObj.Name)))
 	g.Conns.SendToPlayer(thing,
@@ -3676,12 +3689,12 @@ func (g *Game) DidIt(cause, thing gamedb.DBRef, msgAttr, oMsgAttr, aMsgAttr int)
 // Usage: @poor <target>=<amount>
 func cmdPoor(g *Game, d *Descriptor, args string, _ []string) {
 	if !g.IsWizard(d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @poor <target>=<amount>")
+		g.Notify(d.Player, "Usage: @poor <target>=<amount>")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -3689,12 +3702,12 @@ func cmdPoor(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 	amount := toIntSimple(amountStr)
@@ -3703,12 +3716,12 @@ func cmdPoor(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	obj.Pennies = amount
 	g.PersistObject(obj)
-	d.Send(fmt.Sprintf("Set. %s now has %d %s.", DisplayName(obj.Name), amount, g.MoneyName(amount)))
+	g.Notify(d.Player, fmt.Sprintf("Set. %s now has %d %s.", DisplayName(obj.Name), amount, g.MoneyName(amount)))
 }
 
 func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Enter what?")
+		g.Notify(d.Player, "Enter what?")
 		return
 	}
 	// C TinyMUSH do_enter uses match_neighbor() — room contents only, NOT inventory.
@@ -3716,20 +3729,20 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 	// before room objects (e.g. "Nyki's Sled") when using "enter nyki's".
 	target := g.MatchInRoom(d.Player, args)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if obj.ObjType() != gamedb.TypeThing && obj.ObjType() != gamedb.TypeRoom {
-		d.Send("You can't enter that.")
+		g.Notify(d.Player, "You can't enter that.")
 		return
 	}
 	if !obj.HasFlag(gamedb.FlagEnterOK) && !g.Controls(d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	// Check enter lock
@@ -3766,7 +3779,7 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 		g.PersistObjects(playerObj, obj)
 	}
 
-	d.Send(fmt.Sprintf("You enter %s.", DisplayName(obj.Name)))
+	g.Notify(d.Player, fmt.Sprintf("You enter %s.", DisplayName(obj.Name)))
 	g.Conns.SendToRoomExcept(g.DB, enterDest, d.Player,
 		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 
@@ -3782,7 +3795,7 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 	loc := playerObj.Location
 	locObj, ok := g.DB.Objects[loc]
 	if !ok {
-		d.Send("You can't leave.")
+		g.Notify(d.Player, "You can't leave.")
 		return
 	}
 	// The container's location is where we go.
@@ -3790,7 +3803,7 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 	// leave goes to the instance's exterior location (skip the THING itself).
 	dest := locObj.Location
 	if dest == gamedb.Nothing {
-		d.Send("You can't leave.")
+		g.Notify(d.Player, "You can't leave.")
 		return
 	}
 	if destObj, ok := g.DB.Objects[dest]; ok {
@@ -3815,14 +3828,14 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 	// Move to container's location
 	destObj, ok := g.DB.Objects[dest]
 	if !ok {
-		d.Send("You can't leave.")
+		g.Notify(d.Player, "You can't leave.")
 		return
 	}
 	playerObj.Location = dest
 	g.AddToContents(dest, d.Player)
 	g.PersistObjects(playerObj, destObj)
 
-	d.Send("You leave.")
+	g.Notify(d.Player, "You leave.")
 	g.Conns.SendToRoomExcept(g.DB, dest, d.Player,
 		fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 
@@ -3834,7 +3847,7 @@ func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
 	// whisper player = message
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Whisper what to whom?")
+		g.Notify(d.Player, "Whisper what to whom?")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -3842,12 +3855,12 @@ func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]
 	if !ok || targetObj.ObjType() != gamedb.TypePlayer {
-		d.Send("I don't see that player here.")
+		g.Notify(d.Player, "I don't see that player here.")
 		return
 	}
 
@@ -3893,12 +3906,12 @@ func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdUse(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Use what?")
+		g.Notify(d.Player, "Use what?")
 		return
 	}
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	// Check use lock
@@ -3912,7 +3925,7 @@ func cmdUse(g *Game, d *Descriptor, args string, _ []string) {
 		ctx := MakeEvalContextForObj(g, target, d.Player, func(c *eval.EvalContext) {
 			functions.RegisterAll(c)
 		})
-		d.Send(ctx.Exec(useText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
+		g.Notify(d.Player, ctx.Exec(useText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil))
 	}
 	// Fire A_OUSE to room — evaluate before sending
 	ouText := g.GetAttrText(target, 46) // A_OUSE = 46
@@ -3933,7 +3946,7 @@ func cmdUse(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Kill whom?")
+		g.Notify(d.Player, "Kill whom?")
 		return
 	}
 	// kill player [= cost]
@@ -3944,7 +3957,7 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]
@@ -3953,7 +3966,7 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	senderName := g.PlayerName(d.Player)
-	d.Send(fmt.Sprintf("You killed %s!", DisplayName(targetObj.Name)))
+	g.Notify(d.Player, fmt.Sprintf("You killed %s!", DisplayName(targetObj.Name)))
 	g.Conns.SendToPlayer(target,
 		fmt.Sprintf("%s killed you!", senderName))
 
@@ -3981,22 +3994,22 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 func cmdDictionary(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("@dictionary: Usage: @dictionary <object> = <word1> [<word2> ...]")
+		g.Notify(d.Player, "@dictionary: Usage: @dictionary <object> = <word1> [<word2> ...]")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	value := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if !g.Controls(d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	g.SetAttrByName(target, "DICTIONARY", value, d.Player)
-	d.Send("Set.")
+	g.Notify(d.Player, "Set.")
 }
 
 // DisconnectPlayer handles a player disconnecting.
@@ -4055,10 +4068,10 @@ func (g *Game) LogoutPlayer(d *Descriptor) {
 		if txt := g.Texts.GetConnect(); txt != "" {
 			d.SendNoNewline(txt)
 		} else {
-			d.Send("Welcome to GoTinyMUSH. Commands: connect, create, WHO, QUIT")
+			g.Notify(d.Player, "Welcome to GoTinyMUSH. Commands: connect, create, WHO, QUIT")
 		}
 	} else {
-		d.Send("Welcome to GoTinyMUSH. Commands: connect, create, WHO, QUIT")
+		g.Notify(d.Player, "Welcome to GoTinyMUSH. Commands: connect, create, WHO, QUIT")
 	}
 }
 

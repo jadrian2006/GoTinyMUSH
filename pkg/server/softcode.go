@@ -460,6 +460,12 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 	}
 
 	// Handle any notifications from the eval context
+	g.deliverNotifications(ctx)
+}
+
+// deliverNotifications processes side-effect notifications (pemit, remit, oemit)
+// queued during function evaluation.
+func (g *Game) deliverNotifications(ctx *eval.EvalContext) {
 	for _, n := range ctx.Notifications {
 		switch n.Type {
 		case eval.NotifyRemit:
@@ -1331,6 +1337,7 @@ func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
 		Args:    trigArgs,
 	}
 	g.Queue.Add(entry)
+	g.WakeQueue()
 }
 
 // DoTriggerNow triggers an attribute and executes it immediately (not queued).
@@ -1650,6 +1657,7 @@ func (g *Game) QueueAttrAction(obj, cause gamedb.DBRef, attrNum int, args []stri
 		Args:    args,
 	}
 	g.Queue.Add(entry)
+	g.WakeQueue()
 }
 
 // stripDoubleEscapeSpecials reduces \\X to \X for special characters X in

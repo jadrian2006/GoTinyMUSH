@@ -182,6 +182,10 @@ type GameState interface {
 	// Returns "" if no header lock is set. Used as fallback when attr 42 is empty.
 	GetObjLockStr(obj gamedb.DBRef) string
 
+	// UnparseLockStr parses a serialized lock string and returns a human-readable
+	// representation: players shown as *Name, things as #dbref (matching C's F_FUNCTION format).
+	UnparseLockStr(player gamedb.DBRef, lockStr string) string
+
 	// SendOOB sends a GMCP message to a connected player's client(s).
 	// Returns true if at least one GMCP-capable descriptor received it.
 	SendOOB(player gamedb.DBRef, pkg string, data string) bool
@@ -326,6 +330,8 @@ type Function struct {
 	Name    string
 	Handler FnHandler
 	NArgs   int // Expected args (-N means join rest, 0 with VarArgs means any)
+	MinArgs int // Minimum args for VarArgs functions (0 = no minimum)
+	MaxArgs int // Maximum args for VarArgs functions (0 = no maximum)
 	Flags   int
 }
 
@@ -463,6 +469,19 @@ func (ctx *EvalContext) RegisterFunction(name string, handler FnHandler, nargs i
 		Handler: handler,
 		NArgs:   nargs,
 		Flags:   flags,
+	}
+}
+
+// RegisterFunctionV adds a VarArgs function with min/max arg validation.
+// maxArgs=0 means no upper limit.
+func (ctx *EvalContext) RegisterFunctionV(name string, handler FnHandler, minArgs, maxArgs int, flags int) {
+	ctx.Functions[name] = &Function{
+		Name:    name,
+		Handler: handler,
+		NArgs:   0,
+		MinArgs: minArgs,
+		MaxArgs: maxArgs,
+		Flags:   flags | FnVarArgs,
 	}
 }
 

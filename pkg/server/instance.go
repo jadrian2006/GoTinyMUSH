@@ -21,7 +21,7 @@ import (
 //   instance THING itself.
 func cmdInstance(g *Game, d *Descriptor, args string, switches []string) {
 	if g.Conf != nil && !g.Conf.InstancesEnabled {
-		d.Send("The instance system is not enabled.")
+		g.Notify(d.Player, "The instance system is not enabled.")
 		return
 	}
 	if HasSwitch(switches, "create") {
@@ -29,14 +29,14 @@ func cmdInstance(g *Game, d *Descriptor, args string, switches []string) {
 	} else if HasSwitch(switches, "destroy") {
 		instanceDestroy(g, d, args)
 	} else {
-		d.Send("Usage: @instance/create <template> [= <name>]  or  @instance/destroy <instance>")
+		g.Notify(d.Player, "Usage: @instance/create <template> [= <name>]  or  @instance/destroy <instance>")
 	}
 }
 
 // instanceCreate clones a template THING and its interior rooms/exits.
 func instanceCreate(g *Game, d *Descriptor, args string) {
 	if args == "" {
-		d.Send("Create an instance of what?")
+		g.Notify(d.Player, "Create an instance of what?")
 		return
 	}
 
@@ -49,20 +49,20 @@ func instanceCreate(g *Game, d *Descriptor, args string) {
 
 	template := g.MatchObject(d.Player, templateStr)
 	if template == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	tmplObj, ok := g.DB.Objects[template]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 	if tmplObj.ObjType() != gamedb.TypeThing {
-		d.Send("You can only create instances of THINGs.")
+		g.Notify(d.Player, "You can only create instances of THINGs.")
 		return
 	}
 	if !Controls(g, d.Player, template) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -166,33 +166,33 @@ func instanceCreate(g *Game, d *Descriptor, args string) {
 		g.PersistObject(instanceObj)
 	}
 
-	d.Send(fmt.Sprintf("Instance created: %s(#%d) from template %s(#%d) with %d interior room(s).",
+	g.Notify(d.Player, fmt.Sprintf("Instance created: %s(#%d) from template %s(#%d) with %d interior room(s).",
 		newName, instanceRef, tmplObj.Name, template, len(templateRooms)))
 }
 
 // instanceDestroy destroys an instance and all its interior rooms/exits.
 func instanceDestroy(g *Game, d *Descriptor, args string) {
 	if args == "" {
-		d.Send("Destroy which instance?")
+		g.Notify(d.Player, "Destroy which instance?")
 		return
 	}
 
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 	if !obj.HasFlag3(gamedb.Flag3Instance) {
-		d.Send("That is not an instance.")
+		g.Notify(d.Player, "That is not an instance.")
 		return
 	}
 	if !Controls(g, d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -266,7 +266,7 @@ func instanceDestroy(g *Game, d *Descriptor, args string) {
 	obj.Contents = gamedb.Nothing
 	g.PersistObject(obj)
 
-	d.Send(fmt.Sprintf("Instance %s(#%d) destroyed with %d interior room(s).",
+	g.Notify(d.Player, fmt.Sprintf("Instance %s(#%d) destroyed with %d interior room(s).",
 		obj.Name, target, len(interiorRooms)))
 }
 

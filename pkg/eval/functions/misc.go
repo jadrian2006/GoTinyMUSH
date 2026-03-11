@@ -137,6 +137,30 @@ func fnSet(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 			return
 		}
 		ctx.GameState.SetAttrByName(ref, attrName, second, ctx.Player)
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target:  ctx.Player,
+			Message: "Set.",
+		})
+		return
+	}
+
+	// Check for ATTR:value form in second arg (C TinyMUSH format)
+	// set(obj, ATTR:value) — colon separates attr name from value
+	if colonIdx := strings.IndexByte(second, ':'); colonIdx >= 0 {
+		attrName := strings.TrimSpace(second[:colonIdx])
+		attrVal := second[colonIdx+1:]
+		ref := resolveDBRef(ctx, first)
+		if ref == gamedb.Nothing {
+			return
+		}
+		if !ctx.GameState.Controls(ctx.Player, ref) {
+			return
+		}
+		ctx.GameState.SetAttrByName(ref, attrName, attrVal, ctx.Player)
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target:  ctx.Player,
+			Message: "Set.",
+		})
 		return
 	}
 
@@ -248,11 +272,13 @@ func fnLit(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	buf.WriteString(args[0])
 }
 
+// fnSubeval — like s(), but don't do function evaluations.
+// C uses EV_NOFCHECK|EV_FIGNORE — only % substitutions, no [brackets] or bare functions.
 func fnSubeval(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 {
 		return
 	}
-	result := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
+	result := ctx.Exec(args[0], eval.EvEval|eval.EvNoCompress|eval.EvNoFCheck, nil)
 	buf.WriteString(result)
 }
 
@@ -566,13 +592,12 @@ func fnXvars(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	}
 }
 
-// fnClearvars — clear all registers.
-func fnClearvars(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if ctx.RData == nil { return }
-	for i := range ctx.RData.QRegs {
-		ctx.RData.QRegs[i] = ""
-	}
-	ctx.RData.XRegs = make(map[string]string)
+// fnClearvars — clear xvars (persistent named variables on the object).
+// In C TinyMUSH, this clears xvars via xvars_clr(player), NOT the global
+// q-registers (%q0-%q9). Q-registers are unaffected.
+// Xvars are not yet implemented in Go, so this is a no-op.
+func fnClearvars(_ *eval.EvalContext, _ []string, _ *strings.Builder, _, _ gamedb.DBRef) {
+	// No-op: xvars not implemented
 }
 
 // fnLet — set registers then evaluate expression, restoring after.
@@ -662,18 +687,28 @@ func regmatchHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, 
 	buf.WriteString("1")
 }
 
-// fnRegedit — regex-based search and replace.
+// fnRegedit — regex-based search and replace (first match only, matches C).
 // regedit(string, pattern, replacement[, pattern, replacement, ...])
 func fnRegedit(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	regeditHelper(args, buf, false)
+	regeditHelper(args, buf, false, false)
 }
 
-// fnRegediti — case-insensitive regedit.
+// fnRegediti — case-insensitive regedit (first match only).
 func fnRegediti(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	regeditHelper(args, buf, true)
+	regeditHelper(args, buf, true, false)
 }
 
-func regeditHelper(args []string, buf *strings.Builder, caseInsensitive bool) {
+// fnRegeditall — regex-based search and replace (all occurrences).
+func fnRegeditall(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	regeditHelper(args, buf, false, true)
+}
+
+// fnRegeditalli — case-insensitive regeditall (all occurrences).
+func fnRegeditalli(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	regeditHelper(args, buf, true, true)
+}
+
+func regeditHelper(args []string, buf *strings.Builder, caseInsensitive, replaceAll bool) {
 	if len(args) < 3 { return }
 	result := args[0]
 	for i := 1; i+1 < len(args); i += 2 {
@@ -681,19 +716,19 @@ func regeditHelper(args []string, buf *strings.Builder, caseInsensitive bool) {
 		if caseInsensitive { pattern = "(?i)" + pattern }
 		re, err := regexp.Compile(pattern)
 		if err != nil { continue }
-		result = re.ReplaceAllString(result, args[i+1])
+		if replaceAll {
+			result = re.ReplaceAllString(result, args[i+1])
+		} else {
+			// Replace only the first match (C behavior for regedit)
+			loc := re.FindStringIndex(result)
+			if loc != nil {
+				matched := result[loc[0]:loc[1]]
+				replacement := re.ReplaceAllString(matched, args[i+1])
+				result = result[:loc[0]] + replacement + result[loc[1]:]
+			}
+		}
 	}
 	buf.WriteString(result)
-}
-
-// fnRegeditall — regex-based search and replace (all occurrences, same as regedit in Go).
-func fnRegeditall(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	regeditHelper(args, buf, false)
-}
-
-// fnRegeditalli — case-insensitive regeditall.
-func fnRegeditalli(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	regeditHelper(args, buf, true)
 }
 
 // fnRegrab — grab first list element matching regex.

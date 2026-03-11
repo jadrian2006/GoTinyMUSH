@@ -210,7 +210,7 @@ func TestFnName(t *testing.T) {
 		"[name(#0)]":  "Room Zero",
 		"[name(#7)]":  "North", // exit returns first alias
 		"[name(me)]":  "Wizard",
-		"[name(#99)]": "#-1 NOT FOUND",
+		"[name(#99)]": "#-1 NO MATCH",
 	}
 	for expr, want := range tests {
 		got := e.eval(expr)
@@ -625,8 +625,8 @@ func TestFnItextInum(t *testing.T) {
 	e := newEvalTestEnv(t)
 	// iter with itext(0) and inum(0)
 	got := e.eval("[iter(x y z,[itext(0)]-[inum(0)])]")
-	if got != "x-0 y-1 z-2" {
-		t.Errorf("itext/inum = %q, want 'x-0 y-1 z-2'", got)
+	if got != "x-1 y-2 z-3" {
+		t.Errorf("itext/inum = %q, want 'x-1 y-2 z-3'", got)
 	}
 }
 
@@ -945,8 +945,11 @@ func TestFnLnum(t *testing.T) {
 	e := newEvalTestEnv(t)
 	tests := map[string]string{
 		"[lnum(5)]":   "0 1 2 3 4",
-		"[lnum(2,6)]": "2 3 4 5",
-		"[lnum(5,2)]": "5 4 3",
+		"[lnum(2,6)]": "2 3 4 5 6",
+		"[lnum(5,2)]": "5 4 3 2",
+		"[lnum(1)]":   "0",
+		"[lnum(0)]":   "",
+		"[lnum(20,1)]": "20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1",
 	}
 	for expr, want := range tests {
 		got := e.eval(expr)

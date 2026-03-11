@@ -26,7 +26,7 @@ import (
 
 func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Create what?")
+		g.Notify(d.Player, "Create what?")
 		return
 	}
 	// @create name [= cost]
@@ -40,31 +40,31 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 	g.AddToContents(d.Player, ref)
 	obj.Link = g.PlayerLocation(d.Player) // home = current room
 	g.PersistObjects(obj, playerObj)
-	d.Send(fmt.Sprintf("Created: %s(#%d)", name, ref))
+	g.Notify(d.Player, fmt.Sprintf("Created: %s(#%d)", name, ref))
 }
 
 func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
-		d.Send("Destroy what?")
+		g.Notify(d.Player, "Destroy what?")
 		return
 	}
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 	// Check control
 	if !g.Controls(d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if obj.HasFlag(gamedb.FlagSafe) && !HasSwitch(switches, "override") {
-		d.Send("That object is SAFE. Use @set to remove the SAFE flag first, or use @destroy/override.")
+		g.Notify(d.Player, "That object is SAFE. Use @set to remove the SAFE flag first, or use @destroy/override.")
 		return
 	}
 	// Mark as GOING
@@ -94,25 +94,25 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 		obj.Location = gamedb.Nothing
 	}
 	g.PersistObject(obj)
-	d.Send(fmt.Sprintf("Destroyed: %s(#%d)", obj.Name, target))
+	g.Notify(d.Player, fmt.Sprintf("Destroyed: %s(#%d)", obj.Name, target))
 }
 
 func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @link object = destination")
+		g.Notify(d.Player, "Usage: @link object = destination")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	destStr := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	dest := g.ResolveRef(d.Player, destStr)
 	if dest == gamedb.Nothing {
-		d.Send("I don't see that destination.")
+		g.Notify(d.Player, "I don't see that destination.")
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
@@ -124,14 +124,14 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 			obj.Link = dest
 		}
 		g.PersistObject(obj)
-		d.Send(fmt.Sprintf("Linked %s(#%d) to %s(#%d).", obj.Name, target, g.ObjName(dest), dest))
+		g.Notify(d.Player, fmt.Sprintf("Linked %s(#%d) to %s(#%d).", obj.Name, target, g.ObjName(dest), dest))
 	}
 }
 
 func cmdUnlink(g *Game, d *Descriptor, args string, _ []string) {
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
@@ -141,28 +141,28 @@ func cmdUnlink(g *Game, d *Descriptor, args string, _ []string) {
 			obj.Link = gamedb.Nothing
 		}
 		g.PersistObject(obj)
-		d.Send(fmt.Sprintf("Unlinked %s(#%d).", obj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("Unlinked %s(#%d).", obj.Name, target))
 	}
 }
 
 func cmdParent(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @parent object = parent")
+		g.Notify(d.Player, "Usage: @parent object = parent")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	parentStr := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	parent := gamedb.Nothing
 	if parentStr != "" {
 		parent = g.ResolveRef(d.Player, parentStr)
 		if parent == gamedb.Nothing {
-			d.Send("I don't see that parent.")
+			g.Notify(d.Player, "I don't see that parent.")
 			return
 		}
 	}
@@ -170,9 +170,9 @@ func cmdParent(g *Game, d *Descriptor, args string, _ []string) {
 		obj.Parent = parent
 		g.PersistObject(obj)
 		if parent == gamedb.Nothing {
-			d.Send(fmt.Sprintf("Parent of %s(#%d) cleared.", obj.Name, target))
+			g.Notify(d.Player, fmt.Sprintf("Parent of %s(#%d) cleared.", obj.Name, target))
 		} else {
-			d.Send(fmt.Sprintf("Parent of %s(#%d) set to %s(#%d).", obj.Name, target, g.ObjName(parent), parent))
+			g.Notify(d.Player, fmt.Sprintf("Parent of %s(#%d) set to %s(#%d).", obj.Name, target, g.ObjName(parent), parent))
 		}
 	}
 }
@@ -224,43 +224,43 @@ func (g *Game) PropagateParentAttrs(parent, child gamedb.DBRef) int {
 func cmdChown(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @chown object = player")
+		g.Notify(d.Player, "Usage: @chown object = player")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	ownerStr := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	owner := g.ResolveRef(d.Player, ownerStr)
 	if owner == gamedb.Nothing {
-		d.Send("I don't see that player.")
+		g.Notify(d.Player, "I don't see that player.")
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
 		obj.Owner = owner
 		g.PersistObject(obj)
-		d.Send(fmt.Sprintf("Owner of %s(#%d) changed to %s(#%d).", obj.Name, target, g.ObjName(owner), owner))
+		g.Notify(d.Player, fmt.Sprintf("Owner of %s(#%d) changed to %s(#%d).", obj.Name, target, g.ObjName(owner), owner))
 	}
 }
 
 func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
-		d.Send("Clone what?")
+		g.Notify(d.Player, "Clone what?")
 		return
 	}
 	// @clone[/parent][/inventory] obj [= newname]
 	parts := strings.SplitN(args, "=", 2)
 	target := g.MatchObject(d.Player, strings.TrimSpace(parts[0]))
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	srcObj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 	newName := srcObj.Name
@@ -298,12 +298,12 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	g.AddToContents(d.Player, ref)
 
 	g.PersistObjects(newObj, playerObj)
-	d.Send(fmt.Sprintf("Cloned %s(#%d) to %s(#%d).", srcObj.Name, target, newName, ref))
+	g.Notify(d.Player, fmt.Sprintf("Cloned %s(#%d) to %s(#%d).", srcObj.Name, target, newName, ref))
 }
 
 func cmdWipe(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Wipe what?")
+		g.Notify(d.Player, "Wipe what?")
 		return
 	}
 	// @wipe obj[/pattern]
@@ -315,7 +315,7 @@ func cmdWipe(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
@@ -324,25 +324,126 @@ func cmdWipe(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	if pattern == "*" {
-		count := len(obj.Attrs)
 		obj.Attrs = nil
 		g.PersistObject(obj)
-		d.Send(fmt.Sprintf("Wiped %d attributes from %s(#%d).", count, obj.Name, target))
+		g.Notify(d.Player, "Wiped.")
 	} else {
 		var remaining []gamedb.Attribute
-		count := 0
 		for _, attr := range obj.Attrs {
 			name := g.DB.GetAttrName(attr.Number)
-			if name != "" && wildMatchSimple(pattern, strings.ToUpper(name)) {
-				count++
-			} else {
+			if name == "" || !wildMatchSimple(pattern, strings.ToUpper(name)) {
 				remaining = append(remaining, attr)
 			}
 		}
 		obj.Attrs = remaining
 		g.PersistObject(obj)
-		d.Send(fmt.Sprintf("Wiped %d attributes matching %s from %s(#%d).", count, pattern, obj.Name, target))
+		g.Notify(d.Player, "Wiped.")
 	}
+}
+
+// --- @cpattr command ---
+// @cpattr obj/attr = obj/attr[,obj/attr,...]
+// Copies source attribute to one or more destination object/attrs.
+// If dest has no /attr, uses source attr name.
+// If source has no /, assumes me/attr.
+func cmdCpattr(g *Game, d *Descriptor, args string, _ []string) {
+	eqIdx := strings.IndexByte(args, '=')
+	if eqIdx < 0 {
+		g.Notify(d.Player, "Nothing to copy.")
+		return
+	}
+
+	src := strings.TrimSpace(args[:eqIdx])
+	dstList := strings.TrimSpace(args[eqIdx+1:])
+
+	// Parse source: obj/attr (default obj = me)
+	srcObj := d.Player
+	srcAttr := src
+	if slashIdx := strings.IndexByte(src, '/'); slashIdx >= 0 {
+		srcObj = g.MatchObject(d.Player, src[:slashIdx])
+		srcAttr = strings.TrimSpace(src[slashIdx+1:])
+	}
+	if srcObj == gamedb.Nothing {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+
+	// Get source value
+	val := g.GetAttrTextByName(srcObj, strings.ToUpper(srcAttr))
+
+	// Parse destinations (comma-separated)
+	dests := strings.Split(dstList, ",")
+	for _, dst := range dests {
+		dst = strings.TrimSpace(dst)
+		if dst == "" {
+			continue
+		}
+		dstObj := d.Player
+		dstAttr := srcAttr
+		if slashIdx := strings.IndexByte(dst, '/'); slashIdx >= 0 {
+			dstObj = g.MatchObject(d.Player, dst[:slashIdx])
+			dstAttr = strings.TrimSpace(dst[slashIdx+1:])
+		} else {
+			// No slash: dest is object name, use source attr name
+			dstObj = g.MatchObject(d.Player, dst)
+		}
+		if dstObj == gamedb.Nothing {
+			g.Notify(d.Player, "I don't see that here.")
+			continue
+		}
+		if !g.Controls(d.Player, dstObj) {
+			g.Notify(d.Player, "Permission denied.")
+			continue
+		}
+		g.SetAttrByName(dstObj, strings.ToUpper(dstAttr), val, d.Player)
+		g.Notify(d.Player, "Set.")
+	}
+}
+
+// --- @mvattr command ---
+// @mvattr obj = SRC_ATTR,DST_ATTR[,DST_ATTR2,...]
+// Copies source attr to each dest attr on the same object, then clears source.
+func cmdMvattr(g *Game, d *Descriptor, args string, _ []string) {
+	eqIdx := strings.IndexByte(args, '=')
+	if eqIdx < 0 {
+		g.Notify(d.Player, "Nothing to do.")
+		return
+	}
+
+	objStr := strings.TrimSpace(args[:eqIdx])
+	attrList := strings.TrimSpace(args[eqIdx+1:])
+
+	target := g.MatchObject(d.Player, objStr)
+	if target == gamedb.Nothing {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	if !g.Controls(d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
+	attrs := strings.Split(attrList, ",")
+	if len(attrs) < 2 {
+		g.Notify(d.Player, "Nothing to do.")
+		return
+	}
+
+	srcAttr := strings.TrimSpace(attrs[0])
+	val := g.GetAttrTextByName(target, strings.ToUpper(srcAttr))
+
+	for _, dst := range attrs[1:] {
+		dst = strings.TrimSpace(dst)
+		if dst == "" {
+			continue
+		}
+		g.SetAttrByName(target, strings.ToUpper(dst), val, d.Player)
+		g.Notify(d.Player, fmt.Sprintf("%s: Set.", strings.ToUpper(dst)))
+	}
+
+	// Clear source
+	g.SetAttrByName(target, strings.ToUpper(srcAttr), "", d.Player)
+	g.Notify(d.Player, fmt.Sprintf("%s: Cleared.", strings.ToUpper(srcAttr)))
 }
 
 func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
@@ -355,14 +456,14 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 	// @lock obj = lockkey (simplified - just store as text)
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @lock object = key")
+		g.Notify(d.Player, "Usage: @lock object = key")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	lockStr := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	lockAttrNum := aLock // A_LOCK = 42
@@ -384,7 +485,7 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		lockStr = SerializeBoolExp(parsed)
 	}
 	g.SetAttr(target, lockAttrNum, lockStr)
-	d.Send("Locked.")
+	g.Notify(d.Player, "Locked.")
 }
 
 func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
@@ -396,7 +497,7 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	lockAttrNum := aLock // A_LOCK = 42
@@ -412,7 +513,7 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLRecv // A_LRECEIVE = 87
 	}
 	g.SetAttr(target, lockAttrNum, "")
-	d.Send("Unlocked.")
+	g.Notify(d.Player, "Unlocked.")
 }
 
 // lockAttrInstance sets or clears AF_LOCK on an individual attribute instance.
@@ -420,7 +521,7 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 	slashIdx := strings.IndexByte(args, '/')
 	if slashIdx < 0 {
-		d.Send("Usage: @lock/attr obj/attrname")
+		g.Notify(d.Player, "Usage: @lock/attr obj/attrname")
 		return
 	}
 	objName := strings.TrimSpace(args[:slashIdx])
@@ -428,17 +529,17 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 
 	target := g.MatchObject(d.Player, objName)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if !Controls(g, d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 
@@ -455,7 +556,7 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 		}
 	}
 	if attrNum < 0 {
-		d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+		g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
 		return
 	}
 
@@ -475,14 +576,14 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 			obj.Attrs[i].Value = fmt.Sprintf("\x01%d:%d:%s", owner, info.Flags, text)
 			g.PersistObject(obj)
 			if lock {
-				d.Send("Attribute locked.")
+				g.Notify(d.Player, "Attribute locked.")
 			} else {
-				d.Send("Attribute unlocked.")
+				g.Notify(d.Player, "Attribute unlocked.")
 			}
 			return
 		}
 	}
-	d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+	g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
 }
 
 // --- Admin/Wizard Commands ---
@@ -494,7 +595,7 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 func cmdVerb(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @verb obj = actor, what, whatdef, owhat, owhatdef, awhat, {args}")
+		g.Notify(d.Player, "Usage: @verb obj = actor, what, whatdef, owhat, owhatdef, awhat, {args}")
 		return
 	}
 
@@ -510,7 +611,7 @@ func cmdVerb(g *Game, d *Descriptor, args string, _ []string) {
 		obj = g.MatchObject(d.Player, objStr)
 	}
 	if obj == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
@@ -518,7 +619,7 @@ func cmdVerb(g *Game, d *Descriptor, args string, _ []string) {
 	parts := splitCommaRespectingBraces(rhs)
 
 	if len(parts) < 1 {
-		d.Send("Usage: @verb obj = actor, what, whatdef, owhat, owhatdef, awhat, {args}")
+		g.Notify(d.Player, "Usage: @verb obj = actor, what, whatdef, owhat, owhatdef, awhat, {args}")
 		return
 	}
 
@@ -623,7 +724,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 		destStr = ctx.Exec(strings.TrimSpace(args[eqIdx+1:]), eval.EvFCheck|eval.EvEval, nil)
 		victim = g.MatchObject(d.Player, victimStr)
 		if victim == gamedb.Nothing {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 	} else {
@@ -639,8 +740,29 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 
 	dest := g.ResolveRef(d.Player, destStr)
 	if dest == gamedb.Nothing {
-		d.Send("I don't see that destination.")
+		g.Notify(d.Player, "I don't see that destination.")
 		return
+	}
+
+	// Permission checks (matching C TinyMUSH do_teleport):
+	// 1. Must control the victim OR be wizard
+	if !Controls(g, d.Player, victim) && !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	// 2. Destination must be JUMP_OK or player must control dest or be wizard
+	if destObj, ok := g.DB.Objects[dest]; ok {
+		if !Wizard(g, d.Player) && !Controls(g, d.Player, dest) {
+			if !destObj.HasFlag(gamedb.FlagJumpOK) {
+				g.Notify(d.Player, "You can't teleport there!")
+				return
+			}
+			// Check teleport lock on destination
+			if !CouldDoIt(g, victim, dest, 97) { // A_TLOCK = 97
+				g.Notify(d.Player, "You can't teleport there!")
+				return
+			}
+		}
 	}
 
 	// If dest is an EXIT, follow it to its destination room.
@@ -649,7 +771,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	if destObj, ok := g.DB.Objects[dest]; ok && destObj.ObjType() == gamedb.TypeExit {
 		exitDest := destObj.Location
 		if exitDest == gamedb.Nothing {
-			d.Send("That exit doesn't lead anywhere.")
+			g.Notify(d.Player, "That exit doesn't lead anywhere.")
 			return
 		}
 		dest = exitDest
@@ -749,7 +871,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	if victim == d.Player {
 		g.ShowRoom(d, dest)
 	} else {
-		d.Send(fmt.Sprintf("Teleported %s to %s(#%d).", g.ObjName(victim), g.ObjName(dest), dest))
+		g.Notify(d.Player, fmt.Sprintf("Teleported %s to %s(#%d).", g.ObjName(victim), g.ObjName(dest), dest))
 		if len(descs) > 0 {
 			g.ShowRoom(descs[0], dest)
 		}
@@ -766,18 +888,18 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 func cmdForce(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @force object = command")
+		g.Notify(d.Player, "Usage: @force object = command")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	command := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if !g.Controls(d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	g.DoForce(d.Player, target, command)
@@ -789,12 +911,11 @@ func cmdTriggerCmd(g *Game, d *Descriptor, args string, switches []string) {
 	} else {
 		g.DoTrigger(d.Player, d.Player, args)
 	}
-	d.Send("Triggered.")
+	g.Notify(d.Player, "Triggered.")
 }
 
 func cmdWaitCmd(g *Game, d *Descriptor, args string, _ []string) {
 	g.DoWait(d.Player, d.Player, args)
-	d.Send("Queued.")
 }
 
 func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
@@ -810,7 +931,7 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 	parts := strings.SplitN(objAttr, "/", 2)
 	target := g.MatchObject(d.Player, parts[0])
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
@@ -835,14 +956,14 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 	if HasSwitch(switches, "all") {
 		// @halt/all - halt all objects' queue entries
 		removed := g.Queue.HaltAll()
-		d.Send(fmt.Sprintf("All halted. %d command(s) removed from queue.", removed))
+		g.Notify(d.Player, fmt.Sprintf("All halted. %d command(s) removed from queue.", removed))
 		return
 	}
 	target := d.Player
 	if args != "" {
 		target = g.MatchObject(d.Player, args)
 		if target == gamedb.Nothing {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 	}
@@ -851,25 +972,25 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 	// the HALT flag. The HALT flag is only set via @set obj=HALT. This is
 	// important because STARTUP patterns like "@halt me; @wait 60=@tr me/loop"
 	// rely on the object still being able to queue new commands after @halt.
-	d.Send(fmt.Sprintf("Halted. %d command(s) removed from queue.", removed))
+	g.Notify(d.Player, fmt.Sprintf("Halted. %d command(s) removed from queue.", removed))
 }
 
 func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
 	target := LookupPlayer(g.DB, strings.TrimSpace(args))
 	if target == gamedb.Nothing {
-		d.Send("No such player.")
+		g.Notify(d.Player, "No such player.")
 		return
 	}
 	descs := g.Conns.GetByPlayer(target)
 	if len(descs) == 0 {
-		d.Send("That player is not connected.")
+		g.Notify(d.Player, "That player is not connected.")
 		return
 	}
 	for _, dd := range descs {
 		dd.Send("You have been booted.")
 		g.DisconnectPlayer(dd)
 	}
-	d.Send(fmt.Sprintf("Booted %s.", g.ObjName(target)))
+	g.Notify(d.Player, fmt.Sprintf("Booted %s.", g.ObjName(target)))
 }
 
 func cmdWall(g *Game, d *Descriptor, args string, _ []string) {
@@ -890,39 +1011,39 @@ func cmdWall(g *Game, d *Descriptor, args string, _ []string) {
 // Usage: @fixdb #<dbref>
 func cmdFixDB(g *Game, d *Descriptor, args string, _ []string) {
 	if !IsGod(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	target := g.ResolveRef(d.Player, strings.TrimSpace(args))
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if _, ok := g.DB.Objects[target]; !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 	// Run full chain rebuild (affects all containers, not just this one,
 	// but that's fine — it's idempotent and fast)
 	containers, objects := g.RepairAllChains()
-	d.Send(fmt.Sprintf("Database check complete: %d containers, %d objects updated.", containers, objects))
+	g.Notify(d.Player, fmt.Sprintf("Database check complete: %d containers, %d objects updated.", containers, objects))
 }
 
 // @fixall — rebuild all content/exit chains across the entire database.
 // Usage: @fixall
 func cmdFixAll(g *Game, d *Descriptor, args string, _ []string) {
 	if !IsGod(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	containers, objects := g.RepairAllChains()
-	d.Send(fmt.Sprintf("Database check complete: %d containers, %d objects updated.", containers, objects))
+	g.Notify(d.Player, fmt.Sprintf("Database check complete: %d containers, %d objects updated.", containers, objects))
 }
 
 func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @newpassword player = password")
+		g.Notify(d.Player, "Usage: @newpassword player = password")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -930,60 +1051,60 @@ func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {
 	// Use MatchObject to handle #dbref, *player, and name syntax
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("No such player.")
+		g.Notify(d.Player, "No such player.")
 		return
 	}
 	// Verify target is a player
 	if obj, ok := g.DB.Objects[target]; !ok || obj.ObjType() != gamedb.TypePlayer {
-		d.Send("No such player.")
+		g.Notify(d.Player, "No such player.")
 		return
 	}
 	// God protection: only God can change God's password
 	if IsGod(g, target) && !IsGod(g, d.Player) {
-		d.Send("Only God can change God's password. Use the -godpass flag to reset it externally.")
+		g.Notify(d.Player, "Only God can change God's password. Use the -godpass flag to reset it externally.")
 		return
 	}
 	// Encrypt and store
 	hash := mushcrypt.Crypt(newPass, "XX")
 	g.SetAttr(target, aPass, hash)
-	d.Send(fmt.Sprintf("Password for %s changed.", g.ObjName(target)))
+	g.Notify(d.Player, fmt.Sprintf("Password for %s changed.", g.ObjName(target)))
 }
 
 // cmdPcreate implements @pcreate name=password — wizard creates a player
 // without logging them in. Matches C TinyMUSH create.c:do_pcreate.
 func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 || args == "" {
-		d.Send("Usage: @pcreate name = password")
+		g.Notify(d.Player, "Usage: @pcreate name = password")
 		return
 	}
 	name := strings.TrimSpace(args[:eqIdx])
 	pass := strings.TrimSpace(args[eqIdx+1:])
 	if name == "" || pass == "" {
-		d.Send("Usage: @pcreate name = password")
+		g.Notify(d.Player, "Usage: @pcreate name = password")
 		return
 	}
 	// Check if name already exists
 	if LookupPlayer(g.DB, name) != gamedb.Nothing {
-		d.Send("That name is already taken.")
+		g.Notify(d.Player, "That name is already taken.")
 		return
 	}
 	if len(name) < 2 {
-		d.Send("That name is too short.")
+		g.Notify(d.Player, "That name is too short.")
 		return
 	}
 	for _, ch := range name {
 		if ch == '"' || ch == ';' {
-			d.Send("That name contains illegal characters.")
+			g.Notify(d.Player, "That name contains illegal characters.")
 			return
 		}
 	}
 	if g.IsBadName(name) {
-		d.Send("That name is not allowed.")
+		g.Notify(d.Player, "That name is not allowed.")
 		return
 	}
 	// Create the player
@@ -1007,7 +1128,7 @@ func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
 		g.Store.UpdatePlayerIndex(playerObj, "")
 	}
 	log.Printf("PCREATE: %s(#%d) created player %s(#%d)", g.PlayerName(d.Player), d.Player, name, ref)
-	d.Send(fmt.Sprintf("Player %s created as #%d.", name, ref))
+	g.Notify(d.Player, fmt.Sprintf("Player %s created as #%d.", name, ref))
 }
 
 // cmdBotcreate implements @botcreate name — wizard creates a bot player.
@@ -1015,31 +1136,31 @@ func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
 // The bot authenticates only via API key, never interactively.
 func cmdBotcreate(g *Game, d *Descriptor, args string, _ []string) {
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	name := strings.TrimSpace(args)
 	if name == "" {
-		d.Send("Usage: @botcreate name")
+		g.Notify(d.Player, "Usage: @botcreate name")
 		return
 	}
 	// Check if name already exists
 	if LookupPlayer(g.DB, name) != gamedb.Nothing {
-		d.Send("That name is already taken.")
+		g.Notify(d.Player, "That name is already taken.")
 		return
 	}
 	if len(name) < 2 {
-		d.Send("That name is too short.")
+		g.Notify(d.Player, "That name is too short.")
 		return
 	}
 	for _, ch := range name {
 		if ch == '"' || ch == ';' {
-			d.Send("That name contains illegal characters.")
+			g.Notify(d.Player, "That name contains illegal characters.")
 			return
 		}
 	}
 	if g.IsBadName(name) {
-		d.Send("That name is not allowed.")
+		g.Notify(d.Player, "That name is not allowed.")
 		return
 	}
 	// Create the player
@@ -1070,21 +1191,21 @@ func cmdBotcreate(g *Game, d *Descriptor, args string, _ []string) {
 		h := sha256.Sum256([]byte(rawKey))
 		keyHash := hex.EncodeToString(h[:])
 		if err := g.Store.PutAPIKey(ref, keyHash); err != nil {
-			d.Send(fmt.Sprintf("Warning: API key generation failed: %s", err))
+			g.Notify(d.Player, fmt.Sprintf("Warning: API key generation failed: %s", err))
 		}
 	}
 	log.Printf("BOTCREATE: %s(#%d) created bot %s(#%d)", g.PlayerName(d.Player), d.Player, name, ref)
-	d.Send(fmt.Sprintf("Bot player %s created as #%d with ROBOT flag.", name, ref))
+	g.Notify(d.Player, fmt.Sprintf("Bot player %s created as #%d with ROBOT flag.", name, ref))
 	if rawKey != "" {
-		d.Send(fmt.Sprintf("API Key: %s", rawKey))
-		d.Send("Store this key securely - it will not be shown again.")
-		d.Send(fmt.Sprintf("Authenticate via: POST /api/v1/auth/apikey with {\"key\":\"%s\",\"dbref\":\"#%d\"}", rawKey, ref))
+		g.Notify(d.Player, fmt.Sprintf("API Key: %s", rawKey))
+		g.Notify(d.Player, "Store this key securely - it will not be shown again.")
+		g.Notify(d.Player, fmt.Sprintf("Authenticate via: POST /api/v1/auth/apikey with {\"key\":\"%s\",\"dbref\":\"#%d\"}", rawKey, ref))
 	}
 }
 
 func cmdFind(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Find what?")
+		g.Notify(d.Player, "Find what?")
 		return
 	}
 	pattern := strings.ToLower(strings.TrimSpace(args))
@@ -1094,17 +1215,17 @@ func cmdFind(g *Game, d *Descriptor, args string, _ []string) {
 			continue
 		}
 		if wildMatchSimple(pattern, strings.ToLower(obj.Name)) {
-			d.Send(fmt.Sprintf("  %s(#%d%s) Owner: %s(#%d)",
+			g.Notify(d.Player, fmt.Sprintf("  %s(#%d%s) Owner: %s(#%d)",
 				obj.Name, obj.DBRef, typeChar(obj.ObjType()),
 				g.ObjName(obj.Owner), obj.Owner))
 			count++
 			if count >= 200 {
-				d.Send("*** Too many results, truncated ***")
+				g.Notify(d.Player, "*** Too many results, truncated ***")
 				break
 			}
 		}
 	}
-	d.Send(fmt.Sprintf("%d object(s) found.", count))
+	g.Notify(d.Player, fmt.Sprintf("%d object(s) found.", count))
 }
 
 func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
@@ -1133,25 +1254,25 @@ func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
 			}
 		}
 	}
-	d.Send(fmt.Sprintf("Database statistics:"))
-	d.Send(fmt.Sprintf("  %d rooms, %d things, %d exits, %d players, %d garbage",
+	g.Notify(d.Player, fmt.Sprintf("Database statistics:"))
+	g.Notify(d.Player, fmt.Sprintf("  %d rooms, %d things, %d exits, %d players, %d garbage",
 		rooms, things, exits, players, garbage))
-	d.Send(fmt.Sprintf("  %d total objects", len(g.DB.Objects)))
-	d.Send(fmt.Sprintf("  %d attribute definitions", len(g.DB.AttrNames)))
+	g.Notify(d.Player, fmt.Sprintf("  %d total objects", len(g.DB.Objects)))
+	g.Notify(d.Player, fmt.Sprintf("  %d attribute definitions", len(g.DB.AttrNames)))
 	imm, wait, sem := g.Queue.Stats()
-	d.Send(fmt.Sprintf("  Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
-	d.Send(fmt.Sprintf("  %d active connections", g.Conns.Count()))
+	g.Notify(d.Player, fmt.Sprintf("  Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
+	g.Notify(d.Player, fmt.Sprintf("  %d active connections", g.Conns.Count()))
 }
 
 func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
 	imm, wait, sem := g.Queue.Stats()
-	d.Send(fmt.Sprintf("Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
-	d.Send(fmt.Sprintf("Total: %d entries", imm+wait+sem))
+	g.Notify(d.Player, fmt.Sprintf("Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
+	g.Notify(d.Player, fmt.Sprintf("Total: %d entries", imm+wait+sem))
 
 	if HasSwitch(switches, "all") {
 		entries := g.Queue.Peek(50)
 		if len(entries) == 0 {
-			d.Send("(no entries)")
+			g.Notify(d.Player, "(no entries)")
 			return
 		}
 		for i, e := range entries {
@@ -1167,18 +1288,19 @@ func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
 			if e.SemObj >= 0 {
 				qtype = "sem"
 			}
-			d.Send(fmt.Sprintf("  [%d] %s player=%s(#%d) cmd=%s", i+1, qtype, name, e.Player, cmd))
+			g.Notify(d.Player, fmt.Sprintf("  [%d] %s player=%s(#%d) cmd=%s", i+1, qtype, name, e.Player, cmd))
 		}
 	}
 }
 
 // --- Softcode Commands ---
 
-func cmdSwitch(g *Game, d *Descriptor, args string, _ []string) {
+func cmdSwitch(g *Game, d *Descriptor, args string, switches []string) {
 	// @switch expr = pattern1, action1 [, pattern2, action2, ...] [, default]
+	// @switch/all fires ALL matching cases (not just first)
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @switch expression = pattern1, action1, ...")
+		g.Notify(d.Player, "Usage: @switch expression = pattern1, action1, ...")
 		return
 	}
 
@@ -1192,6 +1314,9 @@ func cmdSwitch(g *Game, d *Descriptor, args string, _ []string) {
 	rest := strings.TrimSpace(args[eqIdx+1:])
 	parts := splitCommaRespectingBraces(rest)
 
+	matchAll := HasSwitch(switches, "all")
+	matched := false
+
 	// Walk pattern/action pairs
 	for i := 0; i+1 < len(parts); i += 2 {
 		pattern := ctx.Exec(strings.TrimSpace(parts[i]), eval.EvFCheck|eval.EvEval, nil)
@@ -1202,11 +1327,14 @@ func cmdSwitch(g *Game, d *Descriptor, args string, _ []string) {
 			raw := stripOuterBraces(strings.TrimSpace(parts[i+1]))
 			raw = strings.ReplaceAll(raw, "#$", expr)
 			dispatchSwitchActionDesc(g, d, raw)
-			return
+			matched = true
+			if !matchAll {
+				return
+			}
 		}
 	}
-	// Default (odd trailing entry)
-	if len(parts)%2 == 1 {
+	// Default (odd trailing entry, only if no match)
+	if len(parts)%2 == 1 && !matched {
 		raw := stripOuterBraces(strings.TrimSpace(parts[len(parts)-1]))
 		raw = strings.ReplaceAll(raw, "#$", expr)
 		dispatchSwitchActionDesc(g, d, raw)
@@ -1253,7 +1381,7 @@ func cmdSetVAttr(g *Game, d *Descriptor, args string, _ []string) {
 	// Split into attr name and "obj=value"
 	spaceIdx := strings.IndexByte(args, ' ')
 	if spaceIdx < 0 {
-		d.Send("Usage: &ATTR object=value")
+		g.Notify(d.Player, "Usage: &ATTR object=value")
 		return
 	}
 	attrName := strings.ToUpper(strings.TrimSpace(args[:spaceIdx]))
@@ -1271,29 +1399,25 @@ func cmdSetVAttr(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	if attrName == "" {
-		d.Send("Usage: &ATTR object=value")
+		g.Notify(d.Player, "Usage: &ATTR object=value")
 		return
 	}
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if !Controls(g, d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	ok, errMsg := g.SetAttrByNameChecked(d.Player, target, attrName, value)
 	if !ok {
-		d.Send(errMsg)
+		g.Notify(d.Player, errMsg)
 	} else {
-		if value == "" {
-			d.Send(fmt.Sprintf("%s - Cleared.", attrName))
-		} else {
-			d.Send("Set.")
-		}
+		g.Notify(d.Player, "Set.")
 	}
 }
 
@@ -1304,7 +1428,7 @@ func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
 	// Parse obj/attr = search,replace
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @edit obj/attr = search, replace")
+		g.Notify(d.Player, "Usage: @edit obj/attr = search, replace")
 		return
 	}
 	objAttr := strings.TrimSpace(args[:eqIdx])
@@ -1312,7 +1436,7 @@ func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
 
 	slashIdx := strings.IndexByte(objAttr, '/')
 	if slashIdx < 0 {
-		d.Send("Usage: @edit obj/attr = search, replace")
+		g.Notify(d.Player, "Usage: @edit obj/attr = search, replace")
 		return
 	}
 	objStr := strings.TrimSpace(objAttr[:slashIdx])
@@ -1320,11 +1444,11 @@ func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if !Controls(g, d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -1341,7 +1465,7 @@ func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
 	// Resolve attr
 	attrNum := g.LookupAttrNum(strings.ToUpper(attrName))
 	if attrNum < 0 {
-		d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+		g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
 		return
 	}
 
@@ -1362,7 +1486,7 @@ func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
 	g.SetAttr(target, attrNum, result)
 
 	obj := g.DB.Objects[target]
-	d.Send(fmt.Sprintf("Set - %s/%s: %s", obj.Name, strings.ToUpper(attrName), result))
+	g.Notify(d.Player, fmt.Sprintf("Set - %s/%s: %s", obj.Name, strings.ToUpper(attrName), result))
 }
 
 // parseEditArgs splits "search,replace" respecting brace quoting.
@@ -1410,7 +1534,7 @@ func stripBraces(s string) string {
 func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @set thing = attribute:value  or  @set thing = [!]flag")
+		g.Notify(d.Player, "Usage: @set thing = attribute:value  or  @set thing = [!]flag")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -1422,11 +1546,11 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 		attrName := strings.ToUpper(strings.TrimSpace(targetStr[slashIdx+1:]))
 		target := g.MatchObject(d.Player, objName)
 		if target == gamedb.Nothing {
-			d.Send("I don't see that here.")
+			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
 		if !Controls(g, d.Player, target) {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		g.setAttrFlag(d, target, attrName, value)
@@ -1435,7 +1559,7 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
@@ -1444,32 +1568,32 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 		attrName := strings.ToUpper(strings.TrimSpace(value[:colonIdx]))
 		attrValue := strings.TrimSpace(value[colonIdx+1:])
 		if !Controls(g, d.Player, target) {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		ok, errMsg := g.SetAttrByNameChecked(d.Player, target, attrName, attrValue)
 		if !ok {
-			d.Send(errMsg)
+			g.Notify(d.Player, errMsg)
 		} else {
-			d.Send("Set.")
+			g.Notify(d.Player, "Set.")
 		}
 		return
 	}
 
 	// Flag setting
 	if !Controls(g, d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	switch g.SetFlag(target, value, d.Player) {
 	case SetFlagOK:
-		d.Send("Set.")
+		g.Notify(d.Player, "Set.")
 	case SetFlagDenied:
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 	case SetFlagAmbiguous:
-		d.Send("Ambiguous flag name.")
+		g.Notify(d.Player, "Ambiguous flag name.")
 	default:
-		d.Send("I don't know that flag.")
+		g.Notify(d.Player, "I don't know that flag.")
 	}
 }
 
@@ -1477,7 +1601,7 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 func (g *Game) setAttrFlag(d *Descriptor, target gamedb.DBRef, attrName string, flagStr string) {
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 
@@ -1494,7 +1618,7 @@ func (g *Game) setAttrFlag(d *Descriptor, target gamedb.DBRef, attrName string, 
 		}
 	}
 	if attrNum < 0 {
-		d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+		g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
 		return
 	}
 
@@ -1519,21 +1643,21 @@ func (g *Game) setAttrFlag(d *Descriptor, target gamedb.DBRef, attrName string, 
 		if len(matches) == 1 {
 			bit = attrFlagNames[matches[0]]
 		} else if len(matches) > 1 {
-			d.Send(fmt.Sprintf("Ambiguous attribute flag: %s", fname))
+			g.Notify(d.Player, fmt.Sprintf("Ambiguous attribute flag: %s", fname))
 			return
 		} else {
-			d.Send(fmt.Sprintf("Unknown attribute flag: %s", fname))
+			g.Notify(d.Player, fmt.Sprintf("Unknown attribute flag: %s", fname))
 			return
 		}
 	}
 
 	// AF_GOD and AF_WIZARD flags require special permissions
 	if bit == gamedb.AFGod && !IsGod(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if bit == gamedb.AFWizard && !SetsWizAttrs(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -1553,11 +1677,11 @@ func (g *Game) setAttrFlag(d *Descriptor, target gamedb.DBRef, attrName string, 
 			}
 			obj.Attrs[i].Value = fmt.Sprintf("\x01%d:%d:%s", owner, info.Flags, text)
 			g.PersistObject(obj)
-			d.Send("Set.")
+			g.Notify(d.Player, "Set.")
 			return
 		}
 	}
-	d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+	g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
 }
 
 // SetAttrByNameChecked sets an attribute by name with permission enforcement.
@@ -1701,12 +1825,12 @@ func cmdDump(g *Game, d *Descriptor, args string, switches []string) {
 func cmdBackup(g *Game, d *Descriptor, args string, _ []string) {
 	// Only wizards can backup
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	if g.Store == nil {
-		d.Send("No bolt database configured. Use -bolt flag to enable.")
+		g.Notify(d.Player, "No bolt database configured. Use -bolt flag to enable.")
 		return
 	}
 
@@ -1715,7 +1839,7 @@ func cmdBackup(g *Game, d *Descriptor, args string, _ []string) {
 		path = fmt.Sprintf("game-backup-%s.bolt", time.Now().Format("20060102-150405"))
 	}
 
-	d.Send(fmt.Sprintf("Backing up database to %s...", path))
+	g.Notify(d.Player, fmt.Sprintf("Backing up database to %s...", path))
 	go func() {
 		if err := g.Store.Backup(path); err != nil {
 			log.Printf("ERROR: Backup failed: %v", err)
@@ -1747,7 +1871,7 @@ func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @dolist <list> = <command>")
+		g.Notify(d.Player, "Usage: @dolist <list> = <command>")
 		return
 	}
 
@@ -1755,7 +1879,7 @@ func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 	command := strings.TrimSpace(args[eqIdx+1:])
 
 	if listStr == "" || command == "" {
-		d.Send("Usage: @dolist <list> = <command>")
+		g.Notify(d.Player, "Usage: @dolist <list> = <command>")
 		return
 	}
 
@@ -1802,7 +1926,7 @@ func cmdOemit(g *Game, d *Descriptor, args string, _ []string) {
 	// @oemit target = message — emits to target's room, excluding target
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @oemit target = message")
+		g.Notify(d.Player, "Usage: @oemit target = message")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -1810,7 +1934,7 @@ func cmdOemit(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
@@ -1826,7 +1950,7 @@ func cmdRemit(g *Game, d *Descriptor, args string, _ []string) {
 	// @remit room = message
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @remit room = message")
+		g.Notify(d.Player, "Usage: @remit room = message")
 		return
 	}
 	roomStr := strings.TrimSpace(args[:eqIdx])
@@ -1834,7 +1958,7 @@ func cmdRemit(g *Game, d *Descriptor, args string, _ []string) {
 
 	room := g.ResolveRef(d.Player, roomStr)
 	if room == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	message = evalExpr(g, d.Player, message)
@@ -1847,40 +1971,40 @@ func cmdPassword(g *Game, d *Descriptor, args string, _ []string) {
 	// @password old = new
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @password old = new")
+		g.Notify(d.Player, "Usage: @password old = new")
 		return
 	}
 	oldPass := strings.TrimSpace(args[:eqIdx])
 	newPass := strings.TrimSpace(args[eqIdx+1:])
 
 	if oldPass == "" || newPass == "" {
-		d.Send("You must specify both old and new passwords.")
+		g.Notify(d.Player, "You must specify both old and new passwords.")
 		return
 	}
 
 	// Verify old password
 	currentHash := g.GetAttrText(d.Player, aPass)
 	if currentHash == "" {
-		d.Send("You don't have a password set.")
+		g.Notify(d.Player, "You don't have a password set.")
 		return
 	}
 	check := mushcrypt.Crypt(oldPass, currentHash[:2])
 	if check != currentHash {
-		d.Send("Sorry.")
+		g.Notify(d.Player, "Sorry.")
 		return
 	}
 
 	// Set new password
 	hash := mushcrypt.Crypt(newPass, "XX")
 	g.SetAttr(d.Player, aPass, hash)
-	d.Send("Password changed.")
+	g.Notify(d.Player, "Password changed.")
 }
 
 func cmdVersion(g *Game, d *Descriptor, _ string, _ []string) {
-	d.Send(VersionString())
+	g.Notify(d.Player, VersionString())
 	// Show uptime
 	if !g.StartTime.IsZero() {
-		d.Send(formatUptime(g.StartTime))
+		g.Notify(d.Player, formatUptime(g.StartTime))
 	}
 	// Show enabled features
 	var features []string
@@ -1904,16 +2028,16 @@ func cmdVersion(g *Game, d *Descriptor, _ string, _ []string) {
 	}
 	features = append(features, "MSSP")
 	if len(features) > 0 {
-		d.Send("Features: " + strings.Join(features, ", "))
+		g.Notify(d.Player, "Features: " + strings.Join(features, ", "))
 	}
 }
 
 func cmdUptime(g *Game, d *Descriptor, _ string, _ []string) {
 	if g.StartTime.IsZero() {
-		d.Send("Server start time not available.")
+		g.Notify(d.Player, "Server start time not available.")
 		return
 	}
-	d.Send(formatUptime(g.StartTime))
+	g.Notify(d.Player, formatUptime(g.StartTime))
 }
 
 // formatUptime returns a human-readable uptime string.
@@ -1931,32 +2055,32 @@ func formatUptime(start time.Time) string {
 
 func cmdMotd(g *Game, d *Descriptor, args string, switches []string) {
 	if HasSwitch(switches, "wizard") {
-		if !Wizard(g, d.Player) { d.Send("Permission denied."); return }
+		if !Wizard(g, d.Player) { g.Notify(d.Player, "Permission denied."); return }
 		if args == "" {
-			if g.WizMOTD != "" { d.Send(g.WizMOTD) } else { d.Send("No wizard MOTD set.") }
+			if g.WizMOTD != "" { g.Notify(d.Player, g.WizMOTD) } else { g.Notify(d.Player, "No wizard MOTD set.") }
 		} else {
 			g.WizMOTD = args
-			d.Send("Wizard MOTD set.")
+			g.Notify(d.Player, "Wizard MOTD set.")
 		}
 		return
 	}
 	if HasSwitch(switches, "down") {
-		if !Wizard(g, d.Player) { d.Send("Permission denied."); return }
+		if !Wizard(g, d.Player) { g.Notify(d.Player, "Permission denied."); return }
 		if args == "" {
-			if g.DownMOTD != "" { d.Send(g.DownMOTD) } else { d.Send("No down MOTD set.") }
+			if g.DownMOTD != "" { g.Notify(d.Player, g.DownMOTD) } else { g.Notify(d.Player, "No down MOTD set.") }
 		} else {
 			g.DownMOTD = args
-			d.Send("Down MOTD set.")
+			g.Notify(d.Player, "Down MOTD set.")
 		}
 		return
 	}
 	if HasSwitch(switches, "full") {
-		if !Wizard(g, d.Player) { d.Send("Permission denied."); return }
+		if !Wizard(g, d.Player) { g.Notify(d.Player, "Permission denied."); return }
 		if args == "" {
-			if g.FullMOTD != "" { d.Send(g.FullMOTD) } else { d.Send("No full MOTD set.") }
+			if g.FullMOTD != "" { g.Notify(d.Player, g.FullMOTD) } else { g.Notify(d.Player, "No full MOTD set.") }
 		} else {
 			g.FullMOTD = args
-			d.Send("Full MOTD set.")
+			g.Notify(d.Player, "Full MOTD set.")
 		}
 		return
 	}
@@ -1964,33 +2088,33 @@ func cmdMotd(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		// Show current MOTD
 		if g.MOTD != "" {
-			d.Send(g.MOTD)
+			g.Notify(d.Player, g.MOTD)
 		} else if g.Texts != nil {
 			motd := g.Texts.GetMotd()
 			if motd != "" {
-				d.Send(motd)
+				g.Notify(d.Player, motd)
 			} else {
-				d.Send("No message of the day.")
+				g.Notify(d.Player, "No message of the day.")
 			}
 		} else {
-			d.Send("No message of the day.")
+			g.Notify(d.Player, "No message of the day.")
 		}
 		return
 	}
 	// Wizard-only: set MOTD
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	g.MOTD = args
-	d.Send("MOTD set.")
+	g.Notify(d.Player, "MOTD set.")
 }
 
 func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 	// @chzone obj = zone
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @chzone object = zone")
+		g.Notify(d.Player, "Usage: @chzone object = zone")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -1998,12 +2122,12 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 
@@ -2011,25 +2135,25 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 	if zoneStr != "" && !strings.EqualFold(zoneStr, "none") {
 		zone = g.ResolveRef(d.Player, zoneStr)
 		if zone == gamedb.Nothing {
-			d.Send("I don't see that zone.")
+			g.Notify(d.Player, "I don't see that zone.")
 			return
 		}
 
 		// Validate zone type: must be THING or ROOM
 		zoneObj, zOk := g.DB.Objects[zone]
 		if !zOk {
-			d.Send("No such zone object.")
+			g.Notify(d.Player, "No such zone object.")
 			return
 		}
 		zoneType := zoneObj.ObjType()
 		if zoneType != gamedb.TypeThing && zoneType != gamedb.TypeRoom {
-			d.Send("Invalid zone object type.")
+			g.Notify(d.Player, "Invalid zone object type.")
 			return
 		}
 
 		// Room-to-room restriction: only rooms may be zoned to rooms
 		if zoneType == gamedb.TypeRoom && targetObj.ObjType() != gamedb.TypeRoom {
-			d.Send("Only rooms may be zoned to parent rooms.")
+			g.Notify(d.Player, "Only rooms may be zoned to parent rooms.")
 			return
 		}
 	}
@@ -2040,7 +2164,7 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 		!Controls(g, d.Player, target) &&
 		!CheckZoneForPlayer(g, d.Player, target, 0) &&
 		targetObj.Owner != d.Player {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -2050,7 +2174,7 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 		if !Wizard(g, d.Player) &&
 			!Controls(g, d.Player, zone) &&
 			zoneObj.Owner != d.Player {
-			d.Send("Permission denied.")
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 	}
@@ -2058,37 +2182,37 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 	// Handle /add and /remove switches for multi-zone
 	if HasSwitch(switches, "add") {
 		if g.Conf != nil && !g.Conf.MultizoneEnabled {
-			d.Send("The multi-zone system is not enabled.")
+			g.Notify(d.Player, "The multi-zone system is not enabled.")
 			return
 		}
 		if zone == gamedb.Nothing {
-			d.Send("You must specify a zone to add.")
+			g.Notify(d.Player, "You must specify a zone to add.")
 			return
 		}
 		// Check not already in zones list
 		for _, z := range targetObj.Zones {
 			if z == zone {
-				d.Send(fmt.Sprintf("%s(#%d) is already in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
+				g.Notify(d.Player, fmt.Sprintf("%s(#%d) is already in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
 				return
 			}
 		}
 		if targetObj.Zone == zone {
-			d.Send(fmt.Sprintf("%s(#%d) is already in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
+			g.Notify(d.Player, fmt.Sprintf("%s(#%d) is already in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
 			return
 		}
 		targetObj.Zones = append(targetObj.Zones, zone)
 		g.PersistObject(targetObj)
-		d.Send(fmt.Sprintf("Zone %s(#%d) added to %s(#%d).", g.ObjName(zone), zone, targetObj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("Zone %s(#%d) added to %s(#%d).", g.ObjName(zone), zone, targetObj.Name, target))
 		return
 	}
 
 	if HasSwitch(switches, "remove") {
 		if g.Conf != nil && !g.Conf.MultizoneEnabled {
-			d.Send("The multi-zone system is not enabled.")
+			g.Notify(d.Player, "The multi-zone system is not enabled.")
 			return
 		}
 		if zone == gamedb.Nothing {
-			d.Send("You must specify a zone to remove.")
+			g.Notify(d.Player, "You must specify a zone to remove.")
 			return
 		}
 		removed := false
@@ -2106,11 +2230,11 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 			}
 		}
 		if !removed {
-			d.Send(fmt.Sprintf("%s(#%d) is not in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
+			g.Notify(d.Player, fmt.Sprintf("%s(#%d) is not in zone %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
 			return
 		}
 		g.PersistObject(targetObj)
-		d.Send(fmt.Sprintf("Zone %s(#%d) removed from %s(#%d).", g.ObjName(zone), zone, targetObj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("Zone %s(#%d) removed from %s(#%d).", g.ObjName(zone), zone, targetObj.Name, target))
 		return
 	}
 
@@ -2130,9 +2254,9 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	if zone == gamedb.Nothing {
-		d.Send(fmt.Sprintf("Zone of %s(#%d) cleared.", targetObj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("Zone of %s(#%d) cleared.", targetObj.Name, target))
 	} else {
-		d.Send(fmt.Sprintf("Zone of %s(#%d) set to %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
+		g.Notify(d.Player, fmt.Sprintf("Zone of %s(#%d) set to %s(#%d).", targetObj.Name, target, g.ObjName(zone), zone))
 	}
 }
 
@@ -2180,14 +2304,14 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 		if !g.Controls(d.Player, obj.DBRef) {
 			continue
 		}
-		d.Send(fmt.Sprintf("  %s(#%d%s)", obj.Name, obj.DBRef, typeChar(obj.ObjType())))
+		g.Notify(d.Player, fmt.Sprintf("  %s(#%d%s)", obj.Name, obj.DBRef, typeChar(obj.ObjType())))
 		count++
 		if count >= 200 {
-			d.Send("*** Too many results, truncated ***")
+			g.Notify(d.Player, "*** Too many results, truncated ***")
 			break
 		}
 	}
-	d.Send(fmt.Sprintf("%d object(s) found.", count))
+	g.Notify(d.Player, fmt.Sprintf("%d object(s) found.", count))
 }
 
 // decompileAttrCmd maps well-known attribute numbers to their @-command names.
@@ -2285,7 +2409,7 @@ var decompileAttrCmd = map[int]string{
 
 func cmdDecompile(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		d.Send("Decompile what?")
+		g.Notify(d.Player, "Decompile what?")
 		return
 	}
 
@@ -2299,12 +2423,12 @@ func cmdDecompile(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 
@@ -2403,13 +2527,13 @@ func cmdDecompile(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	if openMarker != "" {
-		d.Send(openMarker)
+		g.Notify(d.Player, openMarker)
 	}
 	for _, line := range lines {
-		d.Send(line)
+		g.Notify(d.Player, line)
 	}
 	if closeMarker != "" {
-		d.Send(closeMarker)
+		g.Notify(d.Player, closeMarker)
 	}
 }
 
@@ -2494,7 +2618,7 @@ var powerTable = map[string]powerEntry{
 func cmdApikey(g *Game, d *Descriptor, args string, _ []string) {
 	parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 	if len(parts) < 2 || args == "" {
-		d.Send("Usage: @apikey generate|revoke <object>")
+		g.Notify(d.Player, "Usage: @apikey generate|revoke <object>")
 		return
 	}
 	action := strings.ToLower(strings.TrimSpace(parts[0]))
@@ -2502,18 +2626,18 @@ func cmdApikey(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 
 	// Only Player and Thing types can have API keys
 	if obj.ObjType() != gamedb.TypePlayer && obj.ObjType() != gamedb.TypeThing {
-		d.Send("Only players and things can have API keys.")
+		g.Notify(d.Player, "Only players and things can have API keys.")
 		return
 	}
 
@@ -2524,12 +2648,12 @@ func cmdApikey(g *Game, d *Descriptor, args string, _ []string) {
 	ownsTarget := cOK && (obj.Owner == d.Player || d.Player == target)
 
 	if !isWiz && !(hasBotPower && ownsTarget) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	if g.Store == nil {
-		d.Send("Storage not available.")
+		g.Notify(d.Player, "Storage not available.")
 		return
 	}
 
@@ -2545,33 +2669,33 @@ func cmdApikey(g *Game, d *Descriptor, args string, _ []string) {
 		hash := hex.EncodeToString(h[:])
 
 		if err := g.Store.PutAPIKey(target, hash); err != nil {
-			d.Send(fmt.Sprintf("Error storing API key: %s", err))
+			g.Notify(d.Player, fmt.Sprintf("Error storing API key: %s", err))
 			return
 		}
 
 		// Warn if player doesn't have ROBOT flag
 		if obj.ObjType() == gamedb.TypePlayer && !obj.HasFlag(gamedb.FlagRobot) {
-			d.Send(fmt.Sprintf("Warning: %s(#%d) does not have the ROBOT flag set.", obj.Name, target))
+			g.Notify(d.Player, fmt.Sprintf("Warning: %s(#%d) does not have the ROBOT flag set.", obj.Name, target))
 		}
 
-		d.Send(fmt.Sprintf("API key generated for %s(#%d).", obj.Name, target))
-		d.Send(fmt.Sprintf("Key: %s", rawKey))
-		d.Send("Store this key securely - it will not be shown again.")
-		d.Send(fmt.Sprintf("Authenticate via: POST /api/v1/auth/apikey with {\"key\":\"%s\",\"dbref\":\"#%d\"}", rawKey, target))
+		g.Notify(d.Player, fmt.Sprintf("API key generated for %s(#%d).", obj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("Key: %s", rawKey))
+		g.Notify(d.Player, "Store this key securely - it will not be shown again.")
+		g.Notify(d.Player, fmt.Sprintf("Authenticate via: POST /api/v1/auth/apikey with {\"key\":\"%s\",\"dbref\":\"#%d\"}", rawKey, target))
 
 	case "revoke":
 		if !g.Store.HasAPIKey(target) {
-			d.Send(fmt.Sprintf("%s(#%d) does not have an API key.", obj.Name, target))
+			g.Notify(d.Player, fmt.Sprintf("%s(#%d) does not have an API key.", obj.Name, target))
 			return
 		}
 		if err := g.Store.DeleteAPIKey(target); err != nil {
-			d.Send(fmt.Sprintf("Error revoking API key: %s", err))
+			g.Notify(d.Player, fmt.Sprintf("Error revoking API key: %s", err))
 			return
 		}
-		d.Send(fmt.Sprintf("API key revoked for %s(#%d).", obj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("API key revoked for %s(#%d).", obj.Name, target))
 
 	default:
-		d.Send("Usage: @apikey generate|revoke <object>")
+		g.Notify(d.Player, "Usage: @apikey generate|revoke <object>")
 	}
 }
 
@@ -2580,15 +2704,15 @@ func cmdApikey(g *Game, d *Descriptor, args string, _ []string) {
 func cmdSQL(g *Game, d *Descriptor, args string, _ []string) {
 	// @sql <query> — Wizard-only interactive query tool
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if args == "" {
-		d.Send("Usage: @sql <query>")
+		g.Notify(d.Player, "Usage: @sql <query>")
 		return
 	}
 	if g.SQLDB == nil {
-		d.Send("SQL is not configured.")
+		g.Notify(d.Player, "SQL is not configured.")
 		return
 	}
 
@@ -2599,77 +2723,77 @@ func cmdSQL(g *Game, d *Descriptor, args string, _ []string) {
 		// SELECT: show row-by-row field display
 		result, err := g.SQLDB.Query(trimmed, "\n", "\x01")
 		if err != nil {
-			d.Send(fmt.Sprintf("SQL error: %s", err))
+			g.Notify(d.Player, fmt.Sprintf("SQL error: %s", err))
 			return
 		}
 		if result == "" {
-			d.Send("No rows returned.")
+			g.Notify(d.Player, "No rows returned.")
 			return
 		}
 		rows := strings.Split(result, "\n")
 		for i, row := range rows {
 			fields := strings.Split(row, "\x01")
 			for j, field := range fields {
-				d.Send(fmt.Sprintf("Row %d, Field %d: %s", i+1, j+1, field))
+				g.Notify(d.Player, fmt.Sprintf("Row %d, Field %d: %s", i+1, j+1, field))
 			}
 		}
-		d.Send(fmt.Sprintf("%d row(s) returned.", len(rows)))
+		g.Notify(d.Player, fmt.Sprintf("%d row(s) returned.", len(rows)))
 	} else {
 		// Non-SELECT
 		result, err := g.SQLDB.Query(trimmed, " ", " ")
 		if err != nil {
-			d.Send(fmt.Sprintf("SQL error: %s", err))
+			g.Notify(d.Player, fmt.Sprintf("SQL error: %s", err))
 			return
 		}
-		d.Send(fmt.Sprintf("SQL query touched %s row(s).", result))
+		g.Notify(d.Player, fmt.Sprintf("SQL query touched %s row(s).", result))
 	}
 }
 
 func cmdSQLInit(g *Game, d *Descriptor, _ string, _ []string) {
 	// @sqlinit — God-only, re-opens SQL connection
 	if !IsGod(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if g.SQLDB == nil {
-		d.Send("SQL is not configured.")
+		g.Notify(d.Player, "SQL is not configured.")
 		return
 	}
 	if err := g.SQLDB.Reconnect(); err != nil {
-		d.Send(fmt.Sprintf("SQL reconnect failed: %s", err))
+		g.Notify(d.Player, fmt.Sprintf("SQL reconnect failed: %s", err))
 		return
 	}
-	d.Send("SQL connection re-initialized.")
+	g.Notify(d.Player, "SQL connection re-initialized.")
 }
 
 func cmdSQLDisconnect(g *Game, d *Descriptor, _ string, _ []string) {
 	// @sqldisconnect — God-only, closes SQL connection
 	if !IsGod(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if g.SQLDB == nil {
-		d.Send("SQL is not configured.")
+		g.Notify(d.Player, "SQL is not configured.")
 		return
 	}
 	if err := g.SQLDB.Close(); err != nil {
-		d.Send(fmt.Sprintf("SQL disconnect failed: %s", err))
+		g.Notify(d.Player, fmt.Sprintf("SQL disconnect failed: %s", err))
 		return
 	}
 	g.SQLDB = nil
-	d.Send("SQL connection closed.")
+	g.Notify(d.Player, "SQL connection closed.")
 }
 
 func cmdPower(g *Game, d *Descriptor, args string, _ []string) {
 	// @power obj = [!]powername
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		d.Send("Usage: @power object = [!]power")
+		g.Notify(d.Player, "Usage: @power object = [!]power")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -2677,18 +2801,18 @@ func cmdPower(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		d.Send("No such object.")
+		g.Notify(d.Player, "No such object.")
 		return
 	}
 
 	// God protection
 	if IsGod(g, target) && !IsGod(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -2702,16 +2826,16 @@ func cmdPower(g *Game, d *Descriptor, args string, _ []string) {
 
 	pe, ok := powerTable[powName]
 	if !ok {
-		d.Send("I don't know that power.")
+		g.Notify(d.Player, "I don't know that power.")
 		return
 	}
 
 	obj.SetPower(pe.Word, pe.Bit, !negate)
 	g.PersistObject(obj)
 	if negate {
-		d.Send(fmt.Sprintf("Power %s removed from %s(#%d).", powStr, obj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("Power %s removed from %s(#%d).", powStr, obj.Name, target))
 	} else {
-		d.Send(fmt.Sprintf("Power %s granted to %s(#%d).", powStr, obj.Name, target))
+		g.Notify(d.Player, fmt.Sprintf("Power %s granted to %s(#%d).", powStr, obj.Name, target))
 	}
 }
 
@@ -2719,7 +2843,7 @@ func cmdPower(g *Game, d *Descriptor, args string, _ []string) {
 // Registers a global softcode-defined function.
 func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -2744,20 +2868,20 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 			// @function/delete name
 			funcName := strings.ToUpper(strings.TrimSpace(args))
 			if funcName == "" {
-				d.Send("Usage: @function/delete <name>")
+				g.Notify(d.Player, "Usage: @function/delete <name>")
 				return
 			}
 			if _, ok := g.GameFuncs[funcName]; ok {
 				delete(g.GameFuncs, funcName)
-				d.Send(fmt.Sprintf("Function %s deleted.", funcName))
+				g.Notify(d.Player, fmt.Sprintf("Function %s deleted.", funcName))
 			} else {
-				d.Send(fmt.Sprintf("No @function named %s.", funcName))
+				g.Notify(d.Player, fmt.Sprintf("No @function named %s.", funcName))
 			}
 			return
 		}
 		// List all @functions
 		if len(g.GameFuncs) == 0 {
-			d.Send("No @functions defined.")
+			g.Notify(d.Player, "No @functions defined.")
 			return
 		}
 		for name, uf := range g.GameFuncs {
@@ -2768,7 +2892,7 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 			if uf.Flags&eval.UfPres != 0 {
 				flags += " preserve"
 			}
-			d.Send(fmt.Sprintf("  %s = #%d/%d%s", name, uf.Obj, uf.Attr, flags))
+			g.Notify(d.Player, fmt.Sprintf("  %s = #%d/%d%s", name, uf.Obj, uf.Attr, flags))
 		}
 		return
 	}
@@ -2777,7 +2901,7 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 	objAttr := strings.TrimSpace(args[eqIdx+1:])
 
 	if funcName == "" {
-		d.Send("Usage: @function[/privileged] <name> = <obj>/<attr>")
+		g.Notify(d.Player, "Usage: @function[/privileged] <name> = <obj>/<attr>")
 		return
 	}
 
@@ -2785,9 +2909,9 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 	if objAttr == "" {
 		if _, ok := g.GameFuncs[funcName]; ok {
 			delete(g.GameFuncs, funcName)
-			d.Send(fmt.Sprintf("Function %s deleted.", funcName))
+			g.Notify(d.Player, fmt.Sprintf("Function %s deleted.", funcName))
 		} else {
-			d.Send(fmt.Sprintf("No @function named %s.", funcName))
+			g.Notify(d.Player, fmt.Sprintf("No @function named %s.", funcName))
 		}
 		return
 	}
@@ -2795,7 +2919,7 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 	// Parse obj/attr
 	slashIdx := strings.IndexByte(objAttr, '/')
 	if slashIdx < 0 {
-		d.Send("Usage: @function[/privileged] <name> = <obj>/<attr>")
+		g.Notify(d.Player, "Usage: @function[/privileged] <name> = <obj>/<attr>")
 		return
 	}
 	objStr := strings.TrimSpace(objAttr[:slashIdx])
@@ -2803,14 +2927,14 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 
 	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 
 	// Resolve attr number
 	attrNum := g.LookupAttrNum(attrName)
 	if attrNum < 0 {
-		d.Send(fmt.Sprintf("No such attribute: %s", attrName))
+		g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
 		return
 	}
 
@@ -2830,7 +2954,7 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 	}
 	g.GameFuncs[funcName] = uf
 	log.Printf("@function %s = #%d/%s (flags=%d)", funcName, target, attrName, flags)
-	d.Send(fmt.Sprintf("Function %s defined.", funcName))
+	g.Notify(d.Player, fmt.Sprintf("Function %s defined.", funcName))
 }
 
 // cmdDrain implements @drain <obj>[/<attr>]
@@ -2838,7 +2962,7 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 	args = strings.TrimSpace(args)
 	if args == "" {
-		d.Send("Usage: @drain <object>")
+		g.Notify(d.Player, "Usage: @drain <object>")
 		return
 	}
 
@@ -2853,11 +2977,11 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
-		d.Send("I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	if !Controls(g, d.Player, target) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -2875,7 +2999,7 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 	// Reset the semaphore count on the object (clear attr)
 	g.SetAttr(target, semAttr, "")
 
-	d.Send(fmt.Sprintf("Drained %d entries from %s.", count, objStr))
+	g.Notify(d.Player, fmt.Sprintf("Drained %d entries from %s.", count, objStr))
 }
 
 // --- Archive Commands ---
@@ -2883,7 +3007,7 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 // cmdArchive implements @archive and @archive/list.
 func cmdArchive(g *Game, d *Descriptor, args string, switches []string) {
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -2927,7 +3051,7 @@ func cmdArchive(g *Game, d *Descriptor, args string, switches []string) {
 		}
 	}
 
-	d.Send("Creating archive...")
+	g.Notify(d.Player, "Creating archive...")
 	go func() {
 		archivePath, err := archive.CreateArchive(params)
 		if err != nil {
@@ -2963,24 +3087,24 @@ func cmdArchiveList(g *Game, d *Descriptor) {
 
 	archives, err := archive.ListArchives(archiveDir)
 	if err != nil {
-		d.Send(fmt.Sprintf("Error listing archives: %v", err))
+		g.Notify(d.Player, fmt.Sprintf("Error listing archives: %v", err))
 		return
 	}
 	if len(archives) == 0 {
-		d.Send(fmt.Sprintf("No archives found in %s.", archiveDir))
+		g.Notify(d.Player, fmt.Sprintf("No archives found in %s.", archiveDir))
 		return
 	}
 
-	d.Send(fmt.Sprintf("Archives in %s:", archiveDir))
+	g.Notify(d.Player, fmt.Sprintf("Archives in %s:", archiveDir))
 	for _, ai := range archives {
 		sizeMB := float64(ai.Size) / (1024 * 1024)
 		if ai.Objects > 0 {
-			d.Send(fmt.Sprintf("  %s  %.1f MB  %d objects  %s", ai.Filename, sizeMB, ai.Objects, ai.Timestamp))
+			g.Notify(d.Player, fmt.Sprintf("  %s  %.1f MB  %d objects  %s", ai.Filename, sizeMB, ai.Objects, ai.Timestamp))
 		} else {
-			d.Send(fmt.Sprintf("  %s  %.1f MB  %s", ai.Filename, sizeMB, ai.Timestamp))
+			g.Notify(d.Player, fmt.Sprintf("  %s  %.1f MB  %s", ai.Filename, sizeMB, ai.Timestamp))
 		}
 	}
-	d.Send(fmt.Sprintf("%d archive(s).", len(archives)))
+	g.Notify(d.Player, fmt.Sprintf("%d archive(s).", len(archives)))
 }
 
 // StartAutoArchive starts a periodic archive goroutine.
@@ -3092,11 +3216,11 @@ func runArchiveHook(command, archivePath string) {
 // Wizard-only. Maps TinyMUSH config param names to GameConf fields.
 func cmdAdmin(g *Game, d *Descriptor, args string, _ []string) {
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if g.Conf == nil {
-		d.Send("No game configuration loaded.")
+		g.Notify(d.Player, "No game configuration loaded.")
 		return
 	}
 
@@ -3105,15 +3229,15 @@ func cmdAdmin(g *Game, d *Descriptor, args string, _ []string) {
 		// Show a param value
 		param := strings.TrimSpace(args)
 		if param == "" {
-			d.Send("Usage: @admin param=value")
+			g.Notify(d.Player, "Usage: @admin param=value")
 			return
 		}
 		val, ok := getAdminParam(g.Conf, param)
 		if !ok {
-			d.Send(fmt.Sprintf("Unknown parameter: %s", param))
+			g.Notify(d.Player, fmt.Sprintf("Unknown parameter: %s", param))
 			return
 		}
-		d.Send(fmt.Sprintf("%s = %s", param, val))
+		g.Notify(d.Player, fmt.Sprintf("%s = %s", param, val))
 		return
 	}
 
@@ -3122,10 +3246,10 @@ func cmdAdmin(g *Game, d *Descriptor, args string, _ []string) {
 
 	ok := setAdminParam(g.Conf, param, value)
 	if !ok {
-		d.Send(fmt.Sprintf("Unknown parameter: %s", param))
+		g.Notify(d.Player, fmt.Sprintf("Unknown parameter: %s", param))
 		return
 	}
-	d.Send(fmt.Sprintf("Set: %s = %s", param, value))
+	g.Notify(d.Player, fmt.Sprintf("Set: %s = %s", param, value))
 	log.Printf("@admin: %s set %s = %s", g.DB.Objects[d.Player].Name, param, value)
 }
 
@@ -3352,12 +3476,12 @@ func parseAttrAccessFlags(value string) (set, clear int, errs []string) {
 // Wizard-only. Matches C TinyMUSH's do_attribute.
 func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 	if !Wizard(g, d.Player) {
-		d.Send("Permission denied.")
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
 	if len(switches) == 0 {
-		d.Send("Usage: @attribute/access <attr>=<flags>")
+		g.Notify(d.Player, "Usage: @attribute/access <attr>=<flags>")
 		return
 	}
 
@@ -3368,14 +3492,14 @@ func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 		// @attribute/access <name>=<flags>
 		parts := strings.SplitN(args, "=", 2)
 		if len(parts) != 2 {
-			d.Send("Usage: @attribute/access <attr>=<flags>")
+			g.Notify(d.Player, "Usage: @attribute/access <attr>=<flags>")
 			return
 		}
 		attrName := strings.TrimSpace(strings.ToUpper(parts[0]))
 		flagStr := strings.TrimSpace(parts[1])
 
 		if attrName == "" {
-			d.Send("Specify an attribute name.")
+			g.Notify(d.Player, "Specify an attribute name.")
 			return
 		}
 
@@ -3385,17 +3509,17 @@ func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 			// Also check well-known attrs (can't modify their flags)
 			for _, wkName := range gamedb.WellKnownAttrs {
 				if strings.EqualFold(wkName, attrName) {
-					d.Send("Cannot modify access on built-in attributes.")
+					g.Notify(d.Player, "Cannot modify access on built-in attributes.")
 					return
 				}
 			}
-			d.Send("No such user-named attribute.")
+			g.Notify(d.Player, "No such user-named attribute.")
 			return
 		}
 
 		setFlags, clearFlags, errs := parseAttrAccessFlags(flagStr)
 		for _, e := range errs {
-			d.Send(fmt.Sprintf("Unknown permission: %s.", e))
+			g.Notify(d.Player, fmt.Sprintf("Unknown permission: %s.", e))
 		}
 
 		if setFlags != 0 || clearFlags != 0 {
@@ -3404,14 +3528,14 @@ func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 			if g.Store != nil {
 				g.Store.PutMeta()
 			}
-			d.Send("Attribute access changed.")
+			g.Notify(d.Player, "Attribute access changed.")
 		}
 
 	case "rename":
 		// @attribute/rename <old>=<new>
 		parts := strings.SplitN(args, "=", 2)
 		if len(parts) != 2 {
-			d.Send("Usage: @attribute/rename <old>=<new>")
+			g.Notify(d.Player, "Usage: @attribute/rename <old>=<new>")
 			return
 		}
 		oldName := strings.TrimSpace(strings.ToUpper(parts[0]))
@@ -3419,11 +3543,11 @@ func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 
 		def, ok := g.DB.AttrByName[oldName]
 		if !ok {
-			d.Send("No such user-named attribute.")
+			g.Notify(d.Player, "No such user-named attribute.")
 			return
 		}
 		if _, exists := g.DB.AttrByName[newName]; exists {
-			d.Send("An attribute with that name already exists.")
+			g.Notify(d.Player, "An attribute with that name already exists.")
 			return
 		}
 
@@ -3433,17 +3557,17 @@ func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 		if g.Store != nil {
 			g.Store.PutMeta()
 		}
-		d.Send("Attribute renamed.")
+		g.Notify(d.Player, "Attribute renamed.")
 
 	case "delete":
 		attrName := strings.TrimSpace(strings.ToUpper(args))
 		if attrName == "" {
-			d.Send("Usage: @attribute/delete <attr>")
+			g.Notify(d.Player, "Usage: @attribute/delete <attr>")
 			return
 		}
 		def, ok := g.DB.AttrByName[attrName]
 		if !ok {
-			d.Send("No such user-named attribute.")
+			g.Notify(d.Player, "No such user-named attribute.")
 			return
 		}
 		delete(g.DB.AttrByName, attrName)
@@ -3451,13 +3575,13 @@ func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 		if g.Store != nil {
 			g.Store.PutMeta()
 		}
-		d.Send("Attribute deleted.")
+		g.Notify(d.Player, "Attribute deleted.")
 
 	case "propagate":
 		cmdAttributePropagate(g, d, args)
 
 	default:
-		d.Send("Unknown switch. Use: @attribute/access, @attribute/rename, @attribute/delete, @attribute/propagate")
+		g.Notify(d.Player, "Unknown switch. Use: @attribute/access, @attribute/rename, @attribute/delete, @attribute/propagate")
 	}
 }
 
@@ -3636,13 +3760,13 @@ func cmdAttlist(g *Game, d *Descriptor, args string, switches []string) {
 	// Detail mode: show objects with a specific attribute
 	if isDetail {
 		if pattern == "" {
-			d.Send("Usage: @attlist/detail <attrname> [type=<player|thing|room|exit>]")
+			g.Notify(d.Player, "Usage: @attlist/detail <attrname> [type=<player|thing|room|exit>]")
 			return
 		}
 		attrName := strings.ToUpper(pattern)
 		def, ok := g.DB.AttrByName[attrName]
 		if !ok {
-			d.Send("No such attribute definition.")
+			g.Notify(d.Player, "No such attribute definition.")
 			return
 		}
 		results := findObjectsWithAttr(g, d.Player, def.Number, typeFilter, isWiz, 100)
@@ -3650,18 +3774,18 @@ func cmdAttlist(g *Game, d *Descriptor, args string, switches []string) {
 		if typeFilter >= 0 {
 			typeName = " (" + gamedb.ObjectType(typeFilter).String() + " only)"
 		}
-		d.Send(fmt.Sprintf("--- Objects with %s%s ---", attrName, typeName))
+		g.Notify(d.Player, fmt.Sprintf("--- Objects with %s%s ---", attrName, typeName))
 		for _, ref := range results {
 			obj := g.DB.Objects[ref]
 			if obj != nil {
-				d.Send(fmt.Sprintf("  #%d  %s (%s)", ref, DisplayName(obj.Name), obj.ObjType().String()))
+				g.Notify(d.Player, fmt.Sprintf("  #%d  %s (%s)", ref, DisplayName(obj.Name), obj.ObjType().String()))
 			}
 		}
 		total := len(results)
 		if total >= 100 {
-			d.Send(fmt.Sprintf("--- Showing first 100 of possibly more ---"))
+			g.Notify(d.Player, fmt.Sprintf("--- Showing first 100 of possibly more ---"))
 		} else {
-			d.Send(fmt.Sprintf("--- %d object(s) ---", total))
+			g.Notify(d.Player, fmt.Sprintf("--- %d object(s) ---", total))
 		}
 		return
 	}
@@ -3709,9 +3833,9 @@ func cmdAttlist(g *Game, d *Descriptor, args string, switches []string) {
 
 	if len(results) == 0 {
 		if pattern != "" || typeFilter >= 0 {
-			d.Send("No matching configured attributes found.")
+			g.Notify(d.Player, "No matching configured attributes found.")
 		} else {
-			d.Send("No configured attributes defined.")
+			g.Notify(d.Player, "No configured attributes defined.")
 		}
 		return
 	}
@@ -3722,9 +3846,9 @@ func cmdAttlist(g *Game, d *Descriptor, args string, switches []string) {
 		typeName = " on " + gamedb.ObjectType(typeFilter).String() + " objects"
 	}
 	if pattern == "" && typeFilter < 0 {
-		d.Send(fmt.Sprintf("--- Configured Attributes (%d) ---", len(results)))
+		g.Notify(d.Player, fmt.Sprintf("--- Configured Attributes (%d) ---", len(results)))
 	} else {
-		d.Send(fmt.Sprintf("--- Configured Attributes%s (%d) ---", typeName, len(results)))
+		g.Notify(d.Player, fmt.Sprintf("--- Configured Attributes%s (%d) ---", typeName, len(results)))
 	}
 	for _, e := range results {
 		flagStr := attrFlagString(e.flags)
@@ -3733,9 +3857,9 @@ func cmdAttlist(g *Game, d *Descriptor, args string, switches []string) {
 		} else {
 			flagStr = "[-]"
 		}
-		d.Send(fmt.Sprintf("  %-30s %-8s %d", e.name, flagStr, e.count))
+		g.Notify(d.Player, fmt.Sprintf("  %-30s %-8s %d", e.name, flagStr, e.count))
 	}
-	d.Send(fmt.Sprintf("--- %d attribute(s) listed ---", len(results)))
+	g.Notify(d.Player, fmt.Sprintf("--- %d attribute(s) listed ---", len(results)))
 }
 
 // --- @attribute/propagate command ---
@@ -3756,7 +3880,7 @@ func cmdAttlist(g *Game, d *Descriptor, args string, switches []string) {
 func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
 	parts := strings.SplitN(args, "=", 2)
 	if len(parts) != 2 {
-		d.Send("Usage: @attribute/propagate <attr>=<target>[/<default value>]")
+		g.Notify(d.Player, "Usage: @attribute/propagate <attr>=<target>[/<default value>]")
 		return
 	}
 
@@ -3766,7 +3890,7 @@ func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
 	// Resolve attribute number
 	attrNum := g.ResolveAttrNum(attrName)
 	if attrNum < 0 {
-		d.Send(fmt.Sprintf("Unknown attribute: %s", attrName))
+		g.Notify(d.Player, fmt.Sprintf("Unknown attribute: %s", attrName))
 		return
 	}
 
@@ -3809,11 +3933,11 @@ func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
 		// Must be a #dbref — propagate to children of that parent
 		parentRef, err := parseDBRef(targetStr)
 		if err != nil {
-			d.Send("Target must be a #dbref, PLAYER, THING, ROOM, EXIT, or ALL.")
+			g.Notify(d.Player, "Target must be a #dbref, PLAYER, THING, ROOM, EXIT, or ALL.")
 			return
 		}
 		if _, ok := g.DB.Objects[parentRef]; !ok {
-			d.Send(fmt.Sprintf("Parent object #%d not found.", parentRef))
+			g.Notify(d.Player, fmt.Sprintf("Parent object #%d not found.", parentRef))
 			return
 		}
 		for ref, obj := range g.DB.Objects {
@@ -3824,7 +3948,7 @@ func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
 	}
 
 	if len(targets) == 0 {
-		d.Send("No matching objects found.")
+		g.Notify(d.Player, "No matching objects found.")
 		return
 	}
 
@@ -3853,6 +3977,6 @@ func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
 		set++
 	}
 
-	d.Send(fmt.Sprintf("Propagated %s to %d object(s) (%d already had it, %d total checked).",
+	g.Notify(d.Player, fmt.Sprintf("Propagated %s to %d object(s) (%d already had it, %d total checked).",
 		attrName, set, skipped, len(targets)))
 }

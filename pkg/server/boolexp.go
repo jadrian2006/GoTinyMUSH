@@ -465,6 +465,58 @@ func UnparseBoolExp(g *Game, b *gamedb.BoolExp) string {
 	return "?"
 }
 
+// UnparseBoolExpFunction converts a BoolExp tree to a lock() function output string.
+// Matches C TinyMUSH's F_FUNCTION format: players shown as *Name, everything else as #dbref.
+func UnparseBoolExpFunction(g *Game, b *gamedb.BoolExp) string {
+	if b == nil {
+		return ""
+	}
+	switch b.Type {
+	case gamedb.BoolAnd:
+		left := UnparseBoolExpFunction(g, b.Sub1)
+		if b.Sub1 != nil && b.Sub1.Type == gamedb.BoolOr {
+			left = "(" + left + ")"
+		}
+		return left + "&" + UnparseBoolExpFunction(g, b.Sub2)
+	case gamedb.BoolOr:
+		left := UnparseBoolExpFunction(g, b.Sub1)
+		if b.Sub1 != nil && (b.Sub1.Type == gamedb.BoolAnd || b.Sub1.Type == gamedb.BoolNot) {
+			left = "(" + left + ")"
+		}
+		return left + "|" + UnparseBoolExpFunction(g, b.Sub2)
+	case gamedb.BoolNot:
+		return "!" + UnparseBoolExpFunction(g, b.Sub1)
+	case gamedb.BoolConst:
+		ref := gamedb.DBRef(b.Thing)
+		obj, ok := g.DB.Objects[ref]
+		if ok && obj.ObjType() == gamedb.TypePlayer {
+			return "*" + obj.Name
+		}
+		return "#" + strconv.Itoa(b.Thing)
+	case gamedb.BoolAttr:
+		name := g.DB.GetAttrName(b.Thing)
+		if name == "" {
+			name = strconv.Itoa(b.Thing)
+		}
+		return name + ":" + b.StrVal
+	case gamedb.BoolEval:
+		name := g.DB.GetAttrName(b.Thing)
+		if name == "" {
+			name = strconv.Itoa(b.Thing)
+		}
+		return name + "/" + b.StrVal
+	case gamedb.BoolIndir:
+		return "@" + UnparseBoolExpFunction(g, b.Sub1)
+	case gamedb.BoolCarry:
+		return "+" + UnparseBoolExpFunction(g, b.Sub1)
+	case gamedb.BoolIs:
+		return "=" + UnparseBoolExpFunction(g, b.Sub1)
+	case gamedb.BoolOwner:
+		return "$" + UnparseBoolExpFunction(g, b.Sub1)
+	}
+	return "?"
+}
+
 // SerializeBoolExp converts a parsed BoolExp to a storable string using #dbref notation.
 // Unlike UnparseBoolExp which displays names, this produces a form suitable for re-parsing.
 func SerializeBoolExp(b *gamedb.BoolExp) string {
