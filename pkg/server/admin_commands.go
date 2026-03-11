@@ -32,10 +32,33 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 	// @create name [= cost]
 	parts := strings.SplitN(args, "=", 2)
 	name := strings.TrimSpace(parts[0])
+
+	// Determine cost — clamp to createmin..createmax
+	cost := 0
+	if len(parts) > 1 {
+		cost, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+	}
+	if cost < g.Conf.CreateMinCost {
+		cost = g.Conf.CreateMinCost
+	}
+	if cost > g.Conf.CreateMaxCost {
+		cost = g.Conf.CreateMaxCost
+	}
+
+	// Check if player can afford it
+	playerObj := g.DB.Objects[d.Player]
+	if playerObj.Pennies < cost {
+		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
+		return
+	}
+
 	ref := g.CreateObject(name, gamedb.TypeThing, d.Player)
 	obj := g.DB.Objects[ref]
+	// Charge the player
+	playerObj.Pennies -= cost
+	// Set object value (endowment)
+	obj.Pennies = g.Conf.ObjectEndowment(cost)
 	// Place in player's inventory
-	playerObj := g.DB.Objects[d.Player]
 	obj.Location = d.Player
 	g.AddToContents(d.Player, ref)
 	obj.Link = g.PlayerLocation(d.Player) // home = current room
@@ -67,31 +90,29 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "That object is SAFE. Use @set to remove the SAFE flag first, or use @destroy/override.")
 		return
 	}
-	// Mark as GOING
-	obj.Flags[0] |= gamedb.FlagGoing
+	instant := HasSwitch(switches, "instant")
 
-	if obj.ObjType() == gamedb.TypeExit {
-		// Exits store source room in Exits field — remove from source room's exit chain
-		if obj.Exits != gamedb.Nothing {
-			srcRoom := obj.Exits
-			g.RemoveFromExits(srcRoom, target)
-			if srcObj, ok := g.DB.Objects[srcRoom]; ok {
-				g.PersistObject(srcObj)
-			}
+	// Already going?
+	if obj.IsGoing() {
+		if instant && obj.ObjType() != gamedb.TypeGarbage {
+			// @destroy/instant on GOING object — destroy immediately
+			g.destroyImmediate(d.Player, target)
+			return
 		}
-		obj.Exits = gamedb.Nothing
-		obj.Location = gamedb.Nothing
-		obj.Next = gamedb.Nothing
-	} else {
-		// Non-exits: remove from location's contents chain
-		// C TinyMUSH does NOT send departure messages on @destroy
-		if obj.Location != gamedb.Nothing {
-			g.RemoveFromContents(obj.Location, target)
+		typeName := "thing"
+		switch obj.ObjType() {
+		case gamedb.TypeRoom:
+			typeName = "room"
+		case gamedb.TypeExit:
+			typeName = "exit"
+		case gamedb.TypePlayer:
+			typeName = "player"
 		}
-		obj.Location = gamedb.Nothing
+		g.Notify(d.Player, fmt.Sprintf("That %s has already been destroyed.", typeName))
+		return
 	}
-	g.PersistObject(obj)
-	// C TinyMUSH @destroy output for non-room things owned by player
+
+	// C TinyMUSH @destroy output
 	typeName := "thing"
 	switch obj.ObjType() {
 	case gamedb.TypeRoom:
@@ -101,10 +122,198 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 	case gamedb.TypePlayer:
 		typeName = "player"
 	}
+
+	// @destroy/instant — bypass the GOING delay, destroy now
+	if instant {
+		if obj.ObjType() != gamedb.TypeRoom {
+			g.Notify(d.Player, fmt.Sprintf("The %s shakes and begins to crumble.", typeName))
+		} else {
+			g.Conns.SendToRoomExcept(g.DB, target, d.Player, "The room shakes and begins to crumble.")
+		}
+		g.destroyImmediate(d.Player, target)
+		return
+	}
+
+	// Deferred destroy — mark as GOING, reaper handles cleanup
+	obj.Flags[0] |= gamedb.FlagGoing
+	g.PersistObject(obj)
+
 	if obj.ObjType() != gamedb.TypeRoom {
 		g.Notify(d.Player, fmt.Sprintf("The %s shakes and begins to crumble.", typeName))
+	} else {
+		// C: notify_all — tell everyone in the room
+		g.Conns.SendToRoomExcept(g.DB, target, d.Player, "The room shakes and begins to crumble.")
 	}
 	g.Notify(d.Player, fmt.Sprintf("You will be rewarded shortly for %s(#%d).", DisplayName(obj.Name), target))
+}
+
+// PurgeGoing reaps objects marked GOING by @destroy.
+// Matches C TinyMUSH's purge_going() in object.c — runs on the dbck interval (10 min).
+// Removes objects from location/exit chains, halts queued commands, refunds build credits,
+// and converts the object to TYPE_GARBAGE for future reuse.
+func (g *Game) PurgeGoing() {
+	reaped := 0
+	for ref, obj := range g.DB.Objects {
+		if !obj.IsGoing() {
+			continue
+		}
+		if obj.ObjType() == gamedb.TypeGarbage {
+			continue
+		}
+
+		owner := obj.Owner
+		ownerObj, ownerOK := g.DB.Objects[owner]
+
+		// Halt any queued commands for this object
+		g.Queue.HaltPlayer(ref)
+
+		// Type-specific cleanup
+		switch obj.ObjType() {
+		case gamedb.TypeExit:
+			// Remove from source room's exit chain
+			if obj.Exits != gamedb.Nothing {
+				g.RemoveFromExits(obj.Exits, ref)
+				if srcObj, ok := g.DB.Objects[obj.Exits]; ok {
+					g.PersistObject(srcObj)
+				}
+			}
+			obj.Exits = gamedb.Nothing
+			obj.Location = gamedb.Nothing
+			obj.Next = gamedb.Nothing
+		case gamedb.TypeRoom:
+			// Evacuate contents to their homes
+			g.evacuateRoom(ref)
+		case gamedb.TypeThing:
+			// Remove from location's contents chain
+			if obj.Location != gamedb.Nothing {
+				g.RemoveFromContents(obj.Location, ref)
+			}
+			obj.Location = gamedb.Nothing
+		case gamedb.TypePlayer:
+			// Remove from location's contents chain
+			if obj.Location != gamedb.Nothing {
+				g.RemoveFromContents(obj.Location, ref)
+			}
+			obj.Location = gamedb.Nothing
+		}
+
+		// Refund build credits to owner and notify them
+		// C: val = OBJECT_DEPOSIT(Pennies(obj)) = (pennies - sacadjust) * sacfactor
+		val := g.Conf.ObjectDeposit(obj.Pennies)
+		if ownerOK && owner != ref {
+			ownerObj.Pennies += val
+			g.PersistObject(ownerObj)
+			g.Notify(owner, fmt.Sprintf("You get back your %d %s deposit for %s(#%d).", val, g.MoneyName(val), DisplayName(obj.Name), ref))
+		}
+
+		// Convert to garbage
+		obj.Name = fmt.Sprintf("Garbage(#%d)", ref)
+		obj.Flags = [3]int{int(gamedb.TypeGarbage)} // TYPE_GARBAGE in word 0
+		obj.Contents = gamedb.Nothing
+		obj.Exits = gamedb.Nothing
+		obj.Link = gamedb.Nothing
+		obj.Next = gamedb.Nothing
+		obj.Parent = gamedb.Nothing
+		obj.Owner = gamedb.DBRef(1) // GOD
+		obj.Attrs = nil
+		g.PersistObject(obj)
+		reaped++
+	}
+	if reaped > 0 {
+		log.Printf("PurgeGoing: reaped %d object(s)", reaped)
+	}
+}
+
+// evacuateRoom sends contents of a GOING room to their homes.
+func (g *Game) evacuateRoom(room gamedb.DBRef) {
+	roomObj, ok := g.DB.Objects[room]
+	if !ok {
+		return
+	}
+	current := roomObj.Contents
+	for current != gamedb.Nothing {
+		obj, ok := g.DB.Objects[current]
+		if !ok {
+			break
+		}
+		next := obj.Next
+		if obj.ObjType() == gamedb.TypePlayer || obj.ObjType() == gamedb.TypeThing {
+			home := obj.Link
+			if home == gamedb.Nothing || home == room {
+				home = gamedb.DBRef(0) // Limbo
+			}
+			g.RemoveFromContents(room, current)
+			obj.Location = home
+			if homeObj, ok := g.DB.Objects[home]; ok {
+				obj.Next = homeObj.Contents
+				homeObj.Contents = current
+				g.PersistObject(homeObj)
+			}
+			g.PersistObject(obj)
+		}
+		current = next
+	}
+}
+
+// destroyImmediate performs instant destruction of an object (like C's @destroy/instant).
+// Removes from chains, refunds credits, converts to garbage.
+func (g *Game) destroyImmediate(player, ref gamedb.DBRef) {
+	obj, ok := g.DB.Objects[ref]
+	if !ok {
+		return
+	}
+
+	owner := obj.Owner
+	ownerObj, ownerOK := g.DB.Objects[owner]
+
+	// Halt queued commands
+	g.Queue.HaltPlayer(ref)
+
+	// Type-specific cleanup
+	switch obj.ObjType() {
+	case gamedb.TypeExit:
+		if obj.Exits != gamedb.Nothing {
+			g.RemoveFromExits(obj.Exits, ref)
+			if srcObj, ok := g.DB.Objects[obj.Exits]; ok {
+				g.PersistObject(srcObj)
+			}
+		}
+		obj.Exits = gamedb.Nothing
+		obj.Location = gamedb.Nothing
+		obj.Next = gamedb.Nothing
+	case gamedb.TypeRoom:
+		g.evacuateRoom(ref)
+	case gamedb.TypeThing, gamedb.TypePlayer:
+		if obj.Location != gamedb.Nothing {
+			g.RemoveFromContents(obj.Location, ref)
+		}
+		obj.Location = gamedb.Nothing
+	}
+
+	// Refund build credits and notify owner
+	val := g.Conf.ObjectDeposit(obj.Pennies)
+	if ownerOK && owner != ref {
+		ownerObj.Pennies += val
+		g.PersistObject(ownerObj)
+		g.Notify(owner, fmt.Sprintf("You get back your %d %s deposit for %s(#%d).", val, g.MoneyName(val), DisplayName(obj.Name), ref))
+	}
+
+	// Notify the destroying player (if different from owner, C shows "Destroyed. Owner's Name(#N)")
+	if player != gamedb.Nothing {
+		g.Notify(player, "Destroyed.")
+	}
+
+	// Convert to garbage
+	obj.Name = fmt.Sprintf("Garbage(#%d)", ref)
+	obj.Flags = [3]int{int(gamedb.TypeGarbage)}
+	obj.Contents = gamedb.Nothing
+	obj.Exits = gamedb.Nothing
+	obj.Link = gamedb.Nothing
+	obj.Next = gamedb.Nothing
+	obj.Parent = gamedb.Nothing
+	obj.Owner = gamedb.DBRef(1)
+	obj.Attrs = nil
+	g.PersistObject(obj)
 }
 
 func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
@@ -128,32 +337,49 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
-		if obj.ObjType() == gamedb.TypeExit {
+		switch obj.ObjType() {
+		case gamedb.TypeExit:
 			// For exits, destination is stored in Location
 			obj.Location = dest
-		} else {
-			// For players/things, @link sets Home (Link field)
+			g.PersistObject(obj)
+			g.Notify(d.Player, "Linked.")
+		case gamedb.TypeRoom:
+			// For rooms, @link sets dropto
 			obj.Link = dest
+			g.PersistObject(obj)
+			g.Notify(d.Player, "Dropto set.")
+		default:
+			// For players/things, @link sets Home
+			obj.Link = dest
+			g.PersistObject(obj)
+			g.Notify(d.Player, "Home set.")
 		}
-		g.PersistObject(obj)
-		g.Notify(d.Player, fmt.Sprintf("Linked %s(#%d) to %s(#%d).", obj.Name, target, g.ObjName(dest), dest))
 	}
 }
 
 func cmdUnlink(g *Game, d *Descriptor, args string, _ []string) {
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "Unlink what?")
+		return
+	}
+	if !Controls(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
-		if obj.ObjType() == gamedb.TypeExit {
+		switch obj.ObjType() {
+		case gamedb.TypeExit:
 			obj.Location = gamedb.Nothing
-		} else {
+			g.PersistObject(obj)
+			g.Notify(d.Player, "Unlinked.")
+		case gamedb.TypeRoom:
 			obj.Link = gamedb.Nothing
+			g.PersistObject(obj)
+			g.Notify(d.Player, "Dropto removed.")
+		default:
+			g.Notify(d.Player, "You can't unlink that!")
 		}
-		g.PersistObject(obj)
-		g.Notify(d.Player, fmt.Sprintf("Unlinked %s(#%d).", obj.Name, target))
 	}
 }
 
@@ -1611,7 +1837,11 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	switch g.SetFlag(target, value, d.Player) {
 	case SetFlagOK:
-		g.Notify(d.Player, "Set.")
+		if strings.HasPrefix(value, "!") {
+			g.Notify(d.Player, "Cleared.")
+		} else {
+			g.Notify(d.Player, "Set.")
+		}
 	case SetFlagDenied:
 		g.Notify(d.Player, "Permission denied.")
 	case SetFlagAmbiguous:
@@ -2304,6 +2534,8 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 					typeFilter = gamedb.TypeExit
 				case "player", "players":
 					typeFilter = gamedb.TypePlayer
+				case "garbage":
+					typeFilter = gamedb.TypeGarbage
 				}
 			case "name":
 				namePattern = strings.ToLower(val)
@@ -2313,29 +2545,205 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 		}
 	}
 
-	count := 0
-	for _, obj := range g.DB.Objects {
-		if obj.IsGoing() {
-			continue
-		}
+	// Collect matching objects sorted by dbref
+	var matches []gamedb.DBRef
+	for ref, obj := range g.DB.Objects {
 		if typeFilter >= 0 && obj.ObjType() != typeFilter {
 			continue
 		}
 		if namePattern != "" && !wildMatchSimple(namePattern, strings.ToLower(obj.Name)) {
 			continue
 		}
-		// Only show objects the player owns (or all if wizard)
-		if !g.Controls(d.Player, obj.DBRef) {
+		if !g.Controls(d.Player, ref) {
 			continue
 		}
-		g.Notify(d.Player, fmt.Sprintf("  %s(#%d%s)", obj.Name, obj.DBRef, typeChar(obj.ObjType())))
-		count++
-		if count >= 200 {
-			g.Notify(d.Player, "*** Too many results, truncated ***")
-			break
+		matches = append(matches, ref)
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i] < matches[j] })
+
+	// C TinyMUSH groups by type: ROOMS, EXITS, OBJECTS, PLAYERS, GARBAGE
+	rcount, ecount, tcount, pcount, gcount := 0, 0, 0, 0, 0
+
+	// Rooms
+	if typeFilter == gamedb.TypeRoom || typeFilter < 0 {
+		first := true
+		for _, ref := range matches {
+			obj := g.DB.Objects[ref]
+			if obj.ObjType() != gamedb.TypeRoom {
+				continue
+			}
+			if first {
+				g.Notify(d.Player, "\nROOMS:")
+				first = false
+			}
+			g.Notify(d.Player, g.unparseObject(d.Player, ref))
+			rcount++
 		}
 	}
-	g.Notify(d.Player, fmt.Sprintf("%d object(s) found.", count))
+
+	// Exits
+	if typeFilter == gamedb.TypeExit || typeFilter < 0 {
+		first := true
+		for _, ref := range matches {
+			obj := g.DB.Objects[ref]
+			if obj.ObjType() != gamedb.TypeExit {
+				continue
+			}
+			if first {
+				g.Notify(d.Player, "\nEXITS:")
+				first = false
+			}
+			from := obj.Exits // exit's "from" is stored in Exits field (source room)
+			to := obj.Location
+			fromStr := "NOWHERE"
+			if from != gamedb.Nothing {
+				fromStr = g.unparseObject(d.Player, from)
+			}
+			toStr := "NOWHERE"
+			if to != gamedb.Nothing {
+				toStr = g.unparseObject(d.Player, to)
+			}
+			g.Notify(d.Player, fmt.Sprintf("%s [from %s to %s]",
+				g.unparseObject(d.Player, ref), fromStr, toStr))
+			ecount++
+		}
+	}
+
+	// Objects (things)
+	if typeFilter == gamedb.TypeThing || typeFilter < 0 {
+		first := true
+		for _, ref := range matches {
+			obj := g.DB.Objects[ref]
+			if obj.ObjType() != gamedb.TypeThing {
+				continue
+			}
+			if first {
+				g.Notify(d.Player, "\nOBJECTS:")
+				first = false
+			}
+			ownerStr := g.unparseObject(d.Player, obj.Owner)
+			g.Notify(d.Player, fmt.Sprintf("%s [owner: %s]",
+				g.unparseObject(d.Player, ref), ownerStr))
+			tcount++
+		}
+	}
+
+	// Players
+	if typeFilter == gamedb.TypePlayer || typeFilter < 0 {
+		first := true
+		for _, ref := range matches {
+			obj := g.DB.Objects[ref]
+			if obj.ObjType() != gamedb.TypePlayer {
+				continue
+			}
+			if first {
+				g.Notify(d.Player, "\nPLAYERS:")
+				first = false
+			}
+			g.Notify(d.Player, g.unparseObject(d.Player, ref))
+			pcount++
+		}
+	}
+
+	// Garbage
+	if typeFilter == gamedb.TypeGarbage || typeFilter < 0 {
+		for _, ref := range matches {
+			obj := g.DB.Objects[ref]
+			if obj.ObjType() != gamedb.TypeGarbage {
+				continue
+			}
+			gcount++
+		}
+	}
+
+	total := rcount + ecount + tcount + pcount + gcount
+	if total == 0 {
+		g.Notify(d.Player, "Nothing found.")
+	} else {
+		g.Notify(d.Player, fmt.Sprintf("\nFound:  Rooms...%d  Exits...%d  Objects...%d  Players...%d  Garbage...%d",
+			rcount, ecount, tcount, pcount, gcount))
+	}
+}
+
+// --- @entrances command ---
+// Lists all objects that link/home/dropto/parent to the target.
+// C TinyMUSH format: exits show "SourceRoom(#N) (exitname)", things/players show "Name(#N) [home]",
+// rooms show "Name(#N) [dropto]", parents show "Name(#N) [parent]".
+func cmdEntrances(g *Game, d *Descriptor, args string, _ []string) {
+	var thing gamedb.DBRef
+	if args == "" {
+		// Default: current location
+		if pObj, ok := g.DB.Objects[d.Player]; ok {
+			thing = pObj.Location
+		}
+	} else {
+		thing = g.MatchObject(d.Player, args)
+	}
+	if thing == gamedb.Nothing {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+
+	// Collect all dbrefs sorted (C iterates by dbref order)
+	var refs []gamedb.DBRef
+	for ref := range g.DB.Objects {
+		refs = append(refs, ref)
+	}
+	sort.Slice(refs, func(i, j int) bool { return refs[i] < refs[j] })
+
+	count := 0
+	for _, ref := range refs {
+		obj := g.DB.Objects[ref]
+		if obj.IsGoing() {
+			continue
+		}
+		// Must be examinable by player or target examinable
+		if !Examinable(g, d.Player, thing) && !Examinable(g, d.Player, ref) {
+			continue
+		}
+
+		switch obj.ObjType() {
+		case gamedb.TypeExit:
+			// Exit destination (Location) == thing
+			if obj.Location == thing {
+				source := obj.Exits // exit source room
+				srcStr := g.unparseObject(d.Player, source)
+				g.Notify(d.Player, fmt.Sprintf("%s (%s)", srcStr, DisplayName(obj.Name)))
+				count++
+			}
+		case gamedb.TypeRoom:
+			// Room dropto (Link) == thing
+			if obj.Link == thing {
+				g.Notify(d.Player, fmt.Sprintf("%s [dropto]", g.unparseObject(d.Player, ref)))
+				count++
+			}
+		case gamedb.TypeThing, gamedb.TypePlayer:
+			// Home (Link) == thing
+			if obj.Link == thing {
+				g.Notify(d.Player, fmt.Sprintf("%s [home]", g.unparseObject(d.Player, ref)))
+				count++
+			}
+		}
+
+		// Check parent
+		if obj.Parent == thing {
+			g.Notify(d.Player, fmt.Sprintf("%s [parent]", g.unparseObject(d.Player, ref)))
+			count++
+		}
+	}
+
+	if count == 1 {
+		g.Notify(d.Player, "1 entrance found.")
+	} else {
+		g.Notify(d.Player, fmt.Sprintf("%d entrances found.", count))
+	}
+}
+
+// --- @quota command ---
+// C TinyMUSH: if quotas are not enabled, says "Quotas are not enabled."
+// We don't implement quota enforcement, so match C's disabled behavior.
+func cmdQuota(g *Game, d *Descriptor, args string, _ []string) {
+	g.Notify(d.Player, "Quotas are not enabled.")
 }
 
 // decompileAttrCmd maps well-known attribute numbers to their @-command names.
@@ -3297,6 +3705,20 @@ func getAdminParam(c *GameConf, param string) (string, bool) {
 		return strconv.Itoa(c.WaitCost), true
 	case "link_cost":
 		return strconv.Itoa(c.LinkCost), true
+	case "create_min_cost":
+		return strconv.Itoa(c.CreateMinCost), true
+	case "create_max_cost":
+		return strconv.Itoa(c.CreateMaxCost), true
+	case "dig_cost":
+		return strconv.Itoa(c.DigCost), true
+	case "open_cost":
+		return strconv.Itoa(c.OpenCost), true
+	case "robot_cost":
+		return strconv.Itoa(c.RobotCost), true
+	case "sacrifice_adjust":
+		return strconv.Itoa(c.SacrificeAdjust), true
+	case "sacrifice_factor":
+		return strconv.Itoa(c.SacrificeFactor), true
 	case "machine_command_cost":
 		return strconv.Itoa(c.MachineCommandCost), true
 	case "trace_topdown":
@@ -3376,6 +3798,20 @@ func setAdminParam(c *GameConf, param, value string) bool {
 		c.WaitCost, _ = strconv.Atoi(value); return true
 	case "link_cost":
 		c.LinkCost, _ = strconv.Atoi(value); return true
+	case "create_min_cost":
+		c.CreateMinCost, _ = strconv.Atoi(value); return true
+	case "create_max_cost":
+		c.CreateMaxCost, _ = strconv.Atoi(value); return true
+	case "dig_cost":
+		c.DigCost, _ = strconv.Atoi(value); return true
+	case "open_cost":
+		c.OpenCost, _ = strconv.Atoi(value); return true
+	case "robot_cost":
+		c.RobotCost, _ = strconv.Atoi(value); return true
+	case "sacrifice_adjust":
+		c.SacrificeAdjust, _ = strconv.Atoi(value); return true
+	case "sacrifice_factor":
+		c.SacrificeFactor, _ = strconv.Atoi(value); return true
 	case "machine_command_cost":
 		c.MachineCommandCost, _ = strconv.Atoi(value); return true
 	case "trace_topdown":

@@ -351,6 +351,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("GET_EVAL", fnGetEval, 1, 0)
 	ctx.RegisterFunction("EDEFAULT", fnEdefault, 2, eval.FnNoEval)
 	ctx.RegisterFunction("MONEY", fnMoney, 1, 0)
+	ctx.RegisterFunction("PENNIES", fnMoney, 1, 0)
 	ctx.RegisterFunction("GREP", fnGrep, 3, 0)
 	ctx.RegisterFunction("GREPI", fnGrepi, 3, 0)
 	ctx.RegisterFunction("PGREP", fnPgrep, 3, 0)

@@ -1698,8 +1698,9 @@ func TestTeleport_DarkThingSilent(t *testing.T) {
 // Fix: added "has left." message to room when non-dark object is destroyed.
 // ============================================================================
 
-func TestDestroy_NoDepartureMessage(t *testing.T) {
-	// C TinyMUSH does NOT send departure messages on @destroy.
+func TestDestroy_DeferredGoing(t *testing.T) {
+	// C TinyMUSH: @destroy marks GOING but does not immediately remove from room.
+	// Actual cleanup happens in PurgeGoing (reaper).
 	env := newTestEnv(t)
 
 	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
@@ -1709,11 +1710,42 @@ func TestDestroy_NoDepartureMessage(t *testing.T) {
 	// Destroy TestObject #2
 	DispatchCommand(env.game, env.player, "@dest #2")
 
-	bobOut := getOutput(bobDesc)
+	out := getOutput(env.player)
 
-	// Bob should NOT see "TestObject has left." — C doesn't send departure on @destroy
+	// Should see "The thing shakes and begins to crumble."
+	if !strings.Contains(out, "shakes and begins to crumble") {
+		t.Errorf("@dest: expected crumble message, got:\n%s", out)
+	}
+
+	// Object should be GOING but still exist
+	obj := env.game.DB.Objects[2]
+	if !obj.IsGoing() {
+		t.Error("@dest: object should be marked GOING")
+	}
+	// Object should still be in location (deferred cleanup)
+	if obj.Location == gamedb.Nothing {
+		t.Error("@dest: object should still have location (deferred cleanup)")
+	}
+
+	// Bob should NOT see departure message
+	bobOut := getOutput(bobDesc)
 	if strings.Contains(bobOut, "has left") {
-		t.Errorf("@dest THING: Bob should NOT see departure message (C compat), got:\n%s", bobOut)
+		t.Errorf("@dest: Bob should NOT see departure message, got:\n%s", bobOut)
+	}
+
+	// Destroying again should say "already been destroyed"
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "@dest #2")
+	out2 := getOutput(env.player)
+	if !strings.Contains(out2, "already been destroyed") {
+		t.Errorf("@dest again: expected 'already been destroyed', got:\n%s", out2)
+	}
+
+	// Run reaper — should actually remove the object
+	env.game.PurgeGoing()
+	obj = env.game.DB.Objects[2]
+	if obj.ObjType() != gamedb.TypeGarbage {
+		t.Errorf("PurgeGoing: expected TypeGarbage, got type %d", obj.ObjType())
 	}
 }
 

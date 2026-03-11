@@ -187,6 +187,8 @@ func InitCommands() map[string]*Command {
 	register("@motd", cmdMotd)
 	registerNG("@chzone", cmdChzone)
 	registerNG("@search", cmdSearch)
+	registerNG("@entrances", cmdEntrances)
+	registerNG("@quota", cmdQuota)
 	registerNG("@decompile", cmdDecompile)
 	registerNG("@power", cmdPower)
 	registerNG("@apikey", cmdApikey)
@@ -1159,7 +1161,7 @@ func cmdScore(g *Game, d *Descriptor, _ string, _ []string) {
 
 // --- Building Commands ---
 
-func cmdDig(g *Game, d *Descriptor, args string, _ []string) {
+func cmdDig(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		g.Notify(d.Player, "Dig what?")
 		return
@@ -1168,8 +1170,18 @@ func cmdDig(g *Game, d *Descriptor, args string, _ []string) {
 	parts := strings.SplitN(args, "=", 2)
 	roomName := strings.TrimSpace(parts[0])
 
+	// Charge dig cost
+	cost := g.Conf.DigCost
+	playerObj := g.DB.Objects[d.Player]
+	if playerObj.Pennies < cost {
+		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
+		return
+	}
+	playerObj.Pennies -= cost
+	g.PersistObject(playerObj)
+
 	newRef := g.CreateObject(roomName, gamedb.TypeRoom, d.Player)
-	g.Notify(d.Player, fmt.Sprintf("Room %s created as #%d.", roomName, newRef))
+	g.Notify(d.Player, fmt.Sprintf("%s created with room number %d.", roomName, newRef))
 
 	// Handle exit creation if specified
 	if len(parts) > 1 {
@@ -1185,6 +1197,11 @@ func cmdDig(g *Game, d *Descriptor, args string, _ []string) {
 			g.Notify(d.Player, fmt.Sprintf("Exit %s created as #%d.", exitFrom, exitRef))
 		}
 	}
+
+	// @dig/teleport — teleport the player to the new room
+	if HasSwitch(switches, "teleport") {
+		cmdTeleport(g, d, fmt.Sprintf("#%d", newRef), nil)
+	}
 }
 
 func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
@@ -1195,6 +1212,17 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 	// @open exit_name=destination
 	parts := strings.SplitN(args, "=", 2)
 	exitName := strings.TrimSpace(parts[0])
+
+	// Charge open cost
+	cost := g.Conf.OpenCost
+	playerObj := g.DB.Objects[d.Player]
+	if playerObj.Pennies < cost {
+		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
+		return
+	}
+	playerObj.Pennies -= cost
+	g.PersistObject(playerObj)
+
 	dest := gamedb.Nothing
 	if len(parts) > 1 {
 		dest = g.ResolveRef(d.Player, strings.TrimSpace(parts[1]))

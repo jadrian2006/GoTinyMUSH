@@ -161,6 +161,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Queue:    NewCommandQueue(),
 		NextRef:  6,
 		EventBus: bus,
+		Conf:     DefaultGameConf(),
 	}
 
 	// Create a piped descriptor for the wizard player

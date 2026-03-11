@@ -35,6 +35,13 @@ type GameConf struct {
 	PageCost          int    `yaml:"page_cost"`
 	WaitCost          int    `yaml:"wait_cost"`
 	LinkCost          int    `yaml:"link_cost"`
+	CreateMinCost     int    `yaml:"create_min_cost"`
+	CreateMaxCost     int    `yaml:"create_max_cost"`
+	DigCost           int    `yaml:"dig_cost"`
+	OpenCost          int    `yaml:"open_cost"`
+	RobotCost         int    `yaml:"robot_cost"`
+	SacrificeAdjust   int    `yaml:"sacrifice_adjust"`
+	SacrificeFactor   int    `yaml:"sacrifice_factor"`
 
 	// --- Idle/timeout ---
 	IdleTimeout       int  `yaml:"idle_timeout"`
@@ -167,6 +174,13 @@ func DefaultGameConf() *GameConf {
 		PageCost:                0,
 		WaitCost:                10,
 		LinkCost:                1,
+		CreateMinCost:           10,
+		CreateMaxCost:           505,
+		DigCost:                 10,
+		OpenCost:                1,
+		RobotCost:               1000,
+		SacrificeAdjust:         -1,
+		SacrificeFactor:         5,
 		IdleTimeout:             3600,
 		IdleWizDark:             false,
 		KeepaliveInterval:      60,
@@ -359,6 +373,20 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.WaitCost = atoi(val, gc.WaitCost)
 		case "link_cost":
 			gc.LinkCost = atoi(val, gc.LinkCost)
+		case "create_min_cost":
+			gc.CreateMinCost = atoi(val, gc.CreateMinCost)
+		case "create_max_cost":
+			gc.CreateMaxCost = atoi(val, gc.CreateMaxCost)
+		case "dig_cost":
+			gc.DigCost = atoi(val, gc.DigCost)
+		case "open_cost":
+			gc.OpenCost = atoi(val, gc.OpenCost)
+		case "robot_cost":
+			gc.RobotCost = atoi(val, gc.RobotCost)
+		case "sacrifice_adjust":
+			gc.SacrificeAdjust = atoi(val, gc.SacrificeAdjust)
+		case "sacrifice_factor":
+			gc.SacrificeFactor = atoi(val, gc.SacrificeFactor)
 
 		// --- Idle/timeout ---
 		case "idle_timeout":
@@ -612,6 +640,29 @@ func (g *Game) MoneyName(amount int) string {
 		return "penny"
 	}
 	return "pennies"
+}
+
+// ObjectEndowment calculates the stored value of an object from its creation cost.
+// C: OBJECT_ENDOWMENT(cost) = (cost / sacfactor) + sacadjust
+func (gc *GameConf) ObjectEndowment(cost int) int {
+	if gc.SacrificeFactor == 0 {
+		return 0
+	}
+	v := (cost / gc.SacrificeFactor) + gc.SacrificeAdjust
+	if v < 0 {
+		v = 0
+	}
+	return v
+}
+
+// ObjectDeposit calculates the refund value from an object's stored pennies.
+// C: OBJECT_DEPOSIT(pennies) = (pennies - sacadjust) * sacfactor
+func (gc *GameConf) ObjectDeposit(pennies int) int {
+	v := (pennies - gc.SacrificeAdjust) * gc.SacrificeFactor
+	if v < 1 {
+		v = 1
+	}
+	return v
 }
 
 // IsCleartext returns whether the cleartext listener is enabled.

@@ -1579,6 +1579,10 @@ func (g *Game) StartQueueProcessor() {
 		defer ticker.Stop()
 		heartbeat := time.NewTicker(60 * time.Second)
 		defer heartbeat.Stop()
+		// dbck/reaper timer — matches C TinyMUSH check_interval (default 600s / 10 min)
+		// Gives players time to @set obj=!GOING to reverse a @destroy
+		dbckTimer := time.NewTicker(10 * time.Minute)
+		defer dbckTimer.Stop()
 		idle := true
 		for {
 			select {
@@ -1637,6 +1641,9 @@ func (g *Game) StartQueueProcessor() {
 				if imm > 0 || wait > 0 || sem > 0 {
 					log.Printf("Queue heartbeat: %d immediate, %d waiting, %d semaphore", imm, wait, sem)
 				}
+			case <-dbckTimer.C:
+				// Reap GOING objects — deferred @destroy cleanup (C's purge_going)
+				g.PurgeGoing()
 			}
 		}
 	}()
