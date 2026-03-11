@@ -1004,6 +1004,8 @@ func cmdHome(g *Game, d *Descriptor, _ string, _ []string) {
 		return
 	}
 	g.Notify(d.Player, "There's no place like home...")
+	g.Notify(d.Player, "There's no place like home...")
+	g.Notify(d.Player, "There's no place like home...")
 	g.MovePlayer(d, home)
 }
 

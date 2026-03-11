@@ -40,7 +40,7 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 	g.AddToContents(d.Player, ref)
 	obj.Link = g.PlayerLocation(d.Player) // home = current room
 	g.PersistObjects(obj, playerObj)
-	g.Notify(d.Player, fmt.Sprintf("Created: %s(#%d)", name, ref))
+	g.Notify(d.Player, fmt.Sprintf("%s created as object #%d", name, ref))
 }
 
 func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
@@ -84,20 +84,32 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 		obj.Next = gamedb.Nothing
 	} else {
 		// Non-exits: remove from location's contents chain
+		// C TinyMUSH does NOT send departure messages on @destroy
 		if obj.Location != gamedb.Nothing {
-			if !obj.HasFlag(gamedb.FlagDark) {
-				g.Conns.SendToRoomExcept(g.DB, obj.Location, target,
-					fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
-			}
 			g.RemoveFromContents(obj.Location, target)
 		}
 		obj.Location = gamedb.Nothing
 	}
 	g.PersistObject(obj)
-	g.Notify(d.Player, fmt.Sprintf("Destroyed: %s(#%d)", obj.Name, target))
+	// C TinyMUSH @destroy output for non-room things owned by player
+	typeName := "thing"
+	switch obj.ObjType() {
+	case gamedb.TypeRoom:
+		typeName = "room"
+	case gamedb.TypeExit:
+		typeName = "exit"
+	case gamedb.TypePlayer:
+		typeName = "player"
+	}
+	if obj.ObjType() != gamedb.TypeRoom {
+		g.Notify(d.Player, fmt.Sprintf("The %s shakes and begins to crumble.", typeName))
+	}
+	g.Notify(d.Player, fmt.Sprintf("You will be rewarded shortly for %s(#%d).", DisplayName(obj.Name), target))
 }
 
 func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
+	// C TinyMUSH: @link has CS_INTERP — evaluate arguments
+	args = evalExpr(g, d.Player, args)
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		g.Notify(d.Player, "Usage: @link object = destination")
@@ -170,9 +182,9 @@ func cmdParent(g *Game, d *Descriptor, args string, _ []string) {
 		obj.Parent = parent
 		g.PersistObject(obj)
 		if parent == gamedb.Nothing {
-			g.Notify(d.Player, fmt.Sprintf("Parent of %s(#%d) cleared.", obj.Name, target))
+			g.Notify(d.Player, "Parent cleared.")
 		} else {
-			g.Notify(d.Player, fmt.Sprintf("Parent of %s(#%d) set to %s(#%d).", obj.Name, target, g.ObjName(parent), parent))
+			g.Notify(d.Player, "Parent set.")
 		}
 	}
 }
@@ -298,7 +310,13 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	g.AddToContents(d.Player, ref)
 
 	g.PersistObjects(newObj, playerObj)
-	g.Notify(d.Player, fmt.Sprintf("Cloned %s(#%d) to %s(#%d).", srcObj.Name, target, newName, ref))
+	// C format: "Name cloned, new copy is object #N." or with rename:
+	// "Name cloned as NewName, new copy is object #N."
+	if newName != DisplayName(srcObj.Name) {
+		g.Notify(d.Player, fmt.Sprintf("%s cloned as %s, new copy is object #%d.", DisplayName(srcObj.Name), newName, ref))
+	} else {
+		g.Notify(d.Player, fmt.Sprintf("%s cloned, new copy is object #%d.", DisplayName(srcObj.Name), ref))
+	}
 }
 
 func cmdWipe(g *Game, d *Descriptor, args string, _ []string) {
@@ -629,7 +647,8 @@ func cmdVerb(g *Game, d *Descriptor, args string, _ []string) {
 		actor = g.MatchObject(d.Player, actorStr)
 	}
 	if actor == gamedb.Nothing {
-		actor = d.Player
+		g.Notify(d.Player, "I don't see that here.")
+		return
 	}
 
 	// Extract attribute names (may be empty)
@@ -956,7 +975,11 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 	if HasSwitch(switches, "all") {
 		// @halt/all - halt all objects' queue entries
 		removed := g.Queue.HaltAll()
-		g.Notify(d.Player, fmt.Sprintf("All halted. %d command(s) removed from queue.", removed))
+		if removed == 1 {
+			g.Notify(d.Player, "1 queue entries removed.")
+		} else {
+			g.Notify(d.Player, fmt.Sprintf("%d queue entries removed.", removed))
+		}
 		return
 	}
 	target := d.Player
@@ -972,7 +995,11 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 	// the HALT flag. The HALT flag is only set via @set obj=HALT. This is
 	// important because STARTUP patterns like "@halt me; @wait 60=@tr me/loop"
 	// rely on the object still being able to queue new commands after @halt.
-	g.Notify(d.Player, fmt.Sprintf("Halted. %d command(s) removed from queue.", removed))
+	if removed == 1 {
+		g.Notify(d.Player, "1 queue entries removed.")
+	} else {
+		g.Notify(d.Player, fmt.Sprintf("%d queue entries removed.", removed))
+	}
 }
 
 func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
@@ -1485,20 +1512,17 @@ func cmdEdit(g *Game, d *Descriptor, args string, _ []string) {
 
 	g.SetAttr(target, attrNum, result)
 
-	obj := g.DB.Objects[target]
-	g.Notify(d.Player, fmt.Sprintf("Set - %s/%s: %s", obj.Name, strings.ToUpper(attrName), result))
+	g.Notify(d.Player, fmt.Sprintf("Set - %s: %s", strings.ToUpper(attrName), result))
 }
 
 // parseEditArgs splits "search,replace" respecting brace quoting.
 // Returns (from, to). If only one part, to is empty.
 func parseEditArgs(s string) (string, string) {
-	// Only trim leading space before the search term, preserve the replacement as-is
-	// This matches TinyMUSH behavior: @edit obj/attr=$, text  -> append " text"
 	parts := splitEditComma(s)
 	from := stripBraces(strings.TrimSpace(parts[0]))
 	to := ""
 	if len(parts) > 1 {
-		to = stripBraces(parts[1])
+		to = stripBraces(strings.TrimSpace(parts[1]))
 	}
 	return from, to
 }

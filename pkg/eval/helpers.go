@@ -128,35 +128,74 @@ func (ctx *EvalContext) resolveDBRefSimple(s string) gamedb.DBRef {
 		return gamedb.DBRef(n)
 	}
 
-	// Handle *player
+	// Handle *player — global player lookup
 	if s[0] == '*' {
 		s = s[1:]
-	}
-
-	// Search by name - players first
-	for _, obj := range ctx.DB.Objects {
-		if obj.ObjType() != gamedb.TypePlayer {
-			continue
-		}
-		if strings.EqualFold(obj.Name, s) {
-			return obj.DBRef
-		}
-		// Check A_ALIAS attribute (58) — semicolon-separated like C TinyMUSH
-		for _, attr := range obj.Attrs {
-			if attr.Number == 58 {
-				aliasStr := StripAttrPrefix(attr.Value)
-				if aliasStr != "" {
-					for _, a := range strings.Split(aliasStr, ";") {
-						if strings.EqualFold(strings.TrimSpace(a), s) {
-							return obj.DBRef
+		for _, obj := range ctx.DB.Objects {
+			if obj.ObjType() != gamedb.TypePlayer {
+				continue
+			}
+			if strings.EqualFold(obj.Name, s) {
+				return obj.DBRef
+			}
+			for _, attr := range obj.Attrs {
+				if attr.Number == 58 {
+					aliasStr := StripAttrPrefix(attr.Value)
+					if aliasStr != "" {
+						for _, a := range strings.Split(aliasStr, ";") {
+							if strings.EqualFold(strings.TrimSpace(a), s) {
+								return obj.DBRef
+							}
 						}
 					}
+					break
 				}
-				break
+			}
+		}
+		return gamedb.Nothing
+	}
+
+	// Try matching in current location (room contents, inventory, exits).
+	// Matches C TinyMUSH's match_thing() which searches all local scopes.
+	if ctx.Player != gamedb.Nothing {
+		if pObj, ok := ctx.DB.Objects[ctx.Player]; ok {
+			loc := pObj.Location
+			// Search room contents
+			if locObj, ok := ctx.DB.Objects[loc]; ok {
+				if ref := searchContentChain(ctx.DB, locObj.Contents, s); ref != gamedb.Nothing {
+					return ref
+				}
+				// Search room exits
+				if ref := searchContentChain(ctx.DB, locObj.Exits, s); ref != gamedb.Nothing {
+					return ref
+				}
+			}
+			// Search inventory
+			if ref := searchContentChain(ctx.DB, pObj.Contents, s); ref != gamedb.Nothing {
+				return ref
 			}
 		}
 	}
 
+	return gamedb.Nothing
+}
+
+// searchContentChain walks a contents/exits chain looking for a name match.
+func searchContentChain(db *gamedb.Database, first gamedb.DBRef, name string) gamedb.DBRef {
+	current := first
+	for current != gamedb.Nothing {
+		obj, ok := db.Objects[current]
+		if !ok {
+			break
+		}
+		// Check each alias in the semicolon-separated name
+		for _, alias := range strings.Split(obj.Name, ";") {
+			if strings.EqualFold(strings.TrimSpace(alias), name) {
+				return current
+			}
+		}
+		current = obj.Next
+	}
 	return gamedb.Nothing
 }
 

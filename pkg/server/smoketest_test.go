@@ -1698,7 +1698,8 @@ func TestTeleport_DarkThingSilent(t *testing.T) {
 // Fix: added "has left." message to room when non-dark object is destroyed.
 // ============================================================================
 
-func TestDestroy_DepartureMessage(t *testing.T) {
+func TestDestroy_NoDepartureMessage(t *testing.T) {
+	// C TinyMUSH does NOT send departure messages on @destroy.
 	env := newTestEnv(t)
 
 	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
@@ -1710,30 +1711,9 @@ func TestDestroy_DepartureMessage(t *testing.T) {
 
 	bobOut := getOutput(bobDesc)
 
-	// Bob should see "TestObject has left."
-	if !strings.Contains(bobOut, "TestObject has left.") {
-		t.Errorf("@dest THING: Bob should see 'TestObject has left.', got:\n%s", bobOut)
-	}
-}
-
-func TestDestroy_DarkThingSilent(t *testing.T) {
-	env := newTestEnv(t)
-
-	// Set TestObject #2 to DARK
-	env.game.DB.Objects[2].Flags[0] |= gamedb.FlagDark
-
-	bobDesc := makeTestDescriptor(t, env.game.Conns, 3)
-	clearOutput(bobDesc)
-	clearOutput(env.player)
-
-	// Destroy dark TestObject #2
-	DispatchCommand(env.game, env.player, "@dest #2")
-
-	bobOut := getOutput(bobDesc)
-
-	// Bob should NOT see any departure message
-	if strings.Contains(bobOut, "has left") || strings.Contains(bobOut, "TestObject") {
-		t.Errorf("@dest DARK THING: Bob should see nothing, got:\n%s", bobOut)
+	// Bob should NOT see "TestObject has left." — C doesn't send departure on @destroy
+	if strings.Contains(bobOut, "has left") {
+		t.Errorf("@dest THING: Bob should NOT see departure message (C compat), got:\n%s", bobOut)
 	}
 }
 

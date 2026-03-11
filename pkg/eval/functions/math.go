@@ -211,7 +211,7 @@ func fnRound(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	f := toFloat(args[0])
 	places := toInt(args[1])
 	mult := math.Pow(10, float64(places))
-	result := math.Round(f*mult) / mult
+	result := math.RoundToEven(f*mult) / mult
 	if places <= 0 {
 		writeInt(buf, int(result))
 	} else {
