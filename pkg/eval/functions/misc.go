@@ -148,7 +148,7 @@ func fnSet(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	if !ctx.GameState.Controls(ctx.Player, ref) {
 		return
 	}
-	ctx.GameState.SetFlag(ref, strings.TrimSpace(second))
+	ctx.GameState.SetFlag(ref, strings.TrimSpace(second), ctx.Player)
 }
 
 func fnCreate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {

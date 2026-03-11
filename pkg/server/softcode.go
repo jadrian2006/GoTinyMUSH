@@ -1483,7 +1483,7 @@ func (g *Game) DoSet(player gamedb.DBRef, args string) {
 	}
 
 	// Flag setting
-	g.SetFlag(target, value)
+	g.SetFlag(target, value, player)
 }
 
 // ProcessQueue processes queued commands (called periodically).

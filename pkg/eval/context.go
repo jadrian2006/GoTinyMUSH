@@ -98,8 +98,9 @@ type GameState interface {
 	// Optional executor is the object performing the set — its resolved player-owner
 	// is stored as the attribute owner (matching C TinyMUSH's atr_add behavior).
 	SetAttrByName(obj gamedb.DBRef, attrName string, value string, executor ...gamedb.DBRef)
-	// SetFlag sets or clears a flag on an object. Returns false if unknown flag.
-	SetFlag(target gamedb.DBRef, flagStr string) bool
+	// SetFlag sets or clears a flag on an object.
+	// Optional player param enables permission checks (C TinyMUSH fh_* handlers).
+	SetFlag(target gamedb.DBRef, flagStr string, player ...gamedb.DBRef) int
 	// PlayerLocation returns the location of a player.
 	PlayerLocation(player gamedb.DBRef) gamedb.DBRef
 	// CreateExit creates a new exit linking source to dest.

@@ -1461,9 +1461,14 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 		d.Send("Permission denied.")
 		return
 	}
-	if g.SetFlag(target, value) {
+	switch g.SetFlag(target, value, d.Player) {
+	case SetFlagOK:
 		d.Send("Set.")
-	} else {
+	case SetFlagDenied:
+		d.Send("Permission denied.")
+	case SetFlagAmbiguous:
+		d.Send("Ambiguous flag name.")
+	default:
 		d.Send("I don't know that flag.")
 	}
 }
@@ -1502,10 +1507,24 @@ func (g *Game) setAttrFlag(d *Descriptor, target gamedb.DBRef, attrName string, 
 	}
 	fname = strings.ToUpper(fname)
 
+	// Try exact match first, then prefix match (C TinyMUSH matches by prefix)
 	bit, ok2 := attrFlagNames[fname]
 	if !ok2 {
-		d.Send(fmt.Sprintf("Unknown attribute flag: %s", fname))
-		return
+		var matches []string
+		for name := range attrFlagNames {
+			if strings.HasPrefix(name, fname) {
+				matches = append(matches, name)
+			}
+		}
+		if len(matches) == 1 {
+			bit = attrFlagNames[matches[0]]
+		} else if len(matches) > 1 {
+			d.Send(fmt.Sprintf("Ambiguous attribute flag: %s", fname))
+			return
+		} else {
+			d.Send(fmt.Sprintf("Unknown attribute flag: %s", fname))
+			return
+		}
 	}
 
 	// AF_GOD and AF_WIZARD flags require special permissions
