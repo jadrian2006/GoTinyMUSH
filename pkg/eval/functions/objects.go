@@ -326,6 +326,21 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 func fnName(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
+
+	// 2-arg form: name(obj, newname) — side-effect setter
+	if len(args) >= 2 && ctx.GameState != nil {
+		newName := args[1]
+		if newName == "" {
+			return
+		}
+		result := ctx.GameState.RenameObject(ctx.Player, ref, newName)
+		if result != "" {
+			buf.WriteString(result)
+		}
+		return
+	}
+
+	// 1-arg form: name(obj) — read name
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		name := obj.Name
 		// Return just the display name (before first ;) — aliases are separated by semicolons
@@ -824,6 +839,21 @@ func fnParent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("#-1"); return }
+
+	// 2-arg form: parent(obj, newparent) — side-effect setter
+	if len(args) >= 2 && ctx.GameState != nil {
+		newParent := resolveDBRef(ctx, args[1])
+		if newParent == gamedb.Nothing && strings.TrimSpace(args[1]) != "" {
+			return // invalid parent ref
+		}
+		result := ctx.GameState.SetParent(ctx.Player, ref, newParent)
+		if result != "" {
+			buf.WriteString(result)
+		}
+		return
+	}
+
+	// 1-arg form: parent(obj) — read parent
 	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		buf.WriteString(fmt.Sprintf("#%d", obj.Parent))

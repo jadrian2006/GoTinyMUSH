@@ -272,24 +272,146 @@ func fnTel(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	ctx.GameState.Teleport(victim, dest)
 }
 
-func fnLink(_ *eval.EvalContext, _ []string, _ *strings.Builder, _, _ gamedb.DBRef) {
-	// Stub - would link object
+// fnLink implements link(object, destination) — sets home/dropto/exit dest.
+// C TinyMUSH: side-effect function, requires Controls(player, target).
+func fnLink(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 || ctx.GameState == nil {
+		return
+	}
+	target := resolveDBRef(ctx, args[0])
+	dest := resolveDBRef(ctx, args[1])
+	if target == gamedb.Nothing || dest == gamedb.Nothing {
+		return
+	}
+	ctx.GameState.LinkObject(ctx.Player, target, dest)
 }
 
-func fnTrigger(_ *eval.EvalContext, _ []string, _ *strings.Builder, _, _ gamedb.DBRef) {
-	// Stub - would trigger an attribute
+// fnTrigger implements trigger(obj/attr [, arg0, arg1, ...]) — triggers attribute.
+// C TinyMUSH: side-effect function, FnVarArgs|FnNoEval in C but we use VarArgs.
+func fnTrigger(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		return
+	}
+	// First arg is obj/attr
+	objAttr := strings.TrimSpace(args[0])
+	parts := strings.SplitN(objAttr, "/", 2)
+	if len(parts) != 2 {
+		return
+	}
+	target := resolveDBRef(ctx, strings.TrimSpace(parts[0]))
+	if target == gamedb.Nothing {
+		return
+	}
+	attrName := strings.TrimSpace(parts[1])
+
+	// Remaining args are trigger args (%0-%9)
+	var trigArgs []string
+	for i := 1; i < len(args); i++ {
+		trigArgs = append(trigArgs, args[i])
+	}
+
+	ctx.GameState.TriggerAttr(ctx.Player, ctx.Cause, target, attrName, trigArgs)
 }
 
-func fnWipe(_ *eval.EvalContext, _ []string, _ *strings.Builder, _, _ gamedb.DBRef) {
-	// Stub - would wipe attributes
+// fnWipe implements wipe(obj[/pattern]) — removes matching attributes.
+// C TinyMUSH: side-effect function, requires Controls(player, target).
+func fnWipe(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		return
+	}
+	arg := strings.TrimSpace(args[0])
+	objStr := arg
+	pattern := "*"
+	if slashIdx := strings.IndexByte(arg, '/'); slashIdx >= 0 {
+		objStr = arg[:slashIdx]
+		pattern = arg[slashIdx+1:]
+	}
+	target := resolveDBRef(ctx, objStr)
+	if target == gamedb.Nothing {
+		return
+	}
+	result := ctx.GameState.WipeAttrs(ctx.Player, target, pattern)
+	if result == "" {
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target:  ctx.Player,
+			Message: "Wiped.",
+		})
+	}
 }
 
-func fnForce(_ *eval.EvalContext, _ []string, _ *strings.Builder, _, _ gamedb.DBRef) {
-	// Stub - would force object to execute command
+// fnForce implements force(object, command) — forces object to execute command.
+// C TinyMUSH: side-effect function, requires Controls(player, victim).
+func fnForce(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 || ctx.GameState == nil {
+		return
+	}
+	victim := resolveDBRef(ctx, args[0])
+	if victim == gamedb.Nothing {
+		return
+	}
+	if !ctx.GameState.Controls(ctx.Player, victim) {
+		return
+	}
+	command := args[1]
+	if command != "" {
+		ctx.GameState.ForceCommand(ctx.Player, victim, command)
+	}
 }
 
-func fnWait(_ *eval.EvalContext, _ []string, _ *strings.Builder, _, _ gamedb.DBRef) {
-	// Stub - would queue a delayed command
+// fnWait implements wait(seconds, command) — queues a delayed command.
+// C TinyMUSH: side-effect function.
+func fnWait(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 || ctx.GameState == nil {
+		return
+	}
+	secs := 0
+	if v, err := strconv.Atoi(strings.TrimSpace(args[0])); err == nil {
+		secs = v
+	}
+	command := args[1]
+	if command != "" {
+		ctx.GameState.WaitCommand(ctx.Player, ctx.Cause, secs, command)
+	}
+}
+
+// fnClone implements clone(obj) — clones an object, returns dbref.
+// C TinyMUSH: side-effect function, requires Examinable(player, target).
+func fnClone(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		buf.WriteString("#-1")
+		return
+	}
+	target := resolveDBRef(ctx, args[0])
+	if target == gamedb.Nothing {
+		buf.WriteString("#-1")
+		return
+	}
+	ref := ctx.GameState.CloneObject(ctx.Player, target)
+	buf.WriteString(fmt.Sprintf("#%d", ref))
+}
+
+// fnCommandSE implements command(@cmd, args) — dispatches a command.
+// C TinyMUSH: side-effect function. Uses ForceCommand which queues through
+// normal command dispatch, so all permission checks in command handlers fire.
+func fnCommandSE(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 || ctx.GameState == nil {
+		return
+	}
+	// Build the command string: first arg is the command name, rest are args
+	// C format: command(@dig, Room Name) → executes "@dig Room Name"
+	cmdName := strings.TrimSpace(args[0])
+	if cmdName == "" {
+		return
+	}
+	var cmdStr string
+	if len(args) >= 2 {
+		// Join remaining args with = (C TinyMUSH convention)
+		cmdStr = cmdName + " " + strings.Join(args[1:], "=")
+	} else {
+		cmdStr = cmdName
+	}
+	// Queue through normal dispatch — all command permission checks apply
+	ctx.GameState.ForceCommand(ctx.Player, ctx.Player, cmdStr)
 }
 
 // Utility functions
@@ -1586,10 +1708,17 @@ func fnCdepth(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ game
 	buf.WriteString(strconv.Itoa(ctx.FuncNestLev))
 }
 
-// fnCommand — returns the raw command text currently being evaluated.
-// command() → string
-func fnCommand(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	buf.WriteString(ctx.CurrCmd)
+// fnCommand — 0 args: returns current command text. 1+ args: dispatches command.
+// command() → string (current command)
+// command(@cmd, arg1, arg2) → side-effect: executes "@cmd arg1=arg2"
+// Uses ForceCommand which queues through normal dispatch — all permission checks apply.
+func fnCommand(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) == 0 {
+		buf.WriteString(ctx.CurrCmd)
+		return
+	}
+	// Side-effect dispatch mode
+	fnCommandSE(ctx, args, buf, 0, 0)
 }
 
 // fnLvars — lists all named X-register variables.

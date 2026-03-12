@@ -295,7 +295,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("UPRIVATE", fnUprivate, 0, eval.FnVarArgs)
 
 	// Object functions (stubs for Phase 2)
-	ctx.RegisterFunction("NAME", fnName, 1, 0)
+	ctx.RegisterFunction("NAME", fnName, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("NUM", fnNum, 1, 0)
 	ctx.RegisterFunction("LOC", fnLoc, 1, 0)
 	ctx.RegisterFunction("OWNER", fnOwner, 1, 0)
@@ -321,7 +321,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("LATTR", fnLattr, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("NATTR", fnNattr, 1, 0)
 	ctx.RegisterFunction("HOME", fnHome, 1, 0)
-	ctx.RegisterFunction("PARENT", fnParent, 1, 0)
+	ctx.RegisterFunction("PARENT", fnParent, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("ZONE", fnZone, 1, 0)
 	ctx.RegisterFunction("CONTROLS", fnControls, 2, 0)
 	ctx.RegisterFunction("ROOM", fnRoom, 1, 0)
@@ -402,6 +402,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("WIPE", fnWipe, 1, 0)
 	ctx.RegisterFunction("FORCE", fnForce, 2, 0)
 	ctx.RegisterFunction("WAIT", fnWait, 2, 0)
+	ctx.RegisterFunction("CLONE", fnClone, 1, 0)
 
 	// Spellcheck
 	ctx.RegisterFunction("SPELL", fnSpell, 0, eval.FnVarArgs)
@@ -491,7 +492,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	// TinyMUSH C gap closures
 	ctx.RegisterFunction("CCOUNT", fnCcount, 0, 0)
 	ctx.RegisterFunction("CDEPTH", fnCdepth, 0, 0)
-	ctx.RegisterFunction("COMMAND", fnCommand, 0, 0)
+	ctx.RegisterFunction("COMMAND", fnCommand, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("LVARS", fnLvars, 0, 0)
 	ctx.RegisterFunction("PROGRAMMER", fnProgrammer, 1, 0)
 	ctx.RegisterFunction("WILDPARSE", fnWildparse, 3, 0)

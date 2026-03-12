@@ -1551,6 +1551,187 @@ func (g *Game) DoForce(forcer, victim gamedb.DBRef, command string) {
 	g.WakeQueue()
 }
 
+// ForceCommand implements GameState.ForceCommand — queues command as victim.
+func (g *Game) ForceCommand(forcer, victim gamedb.DBRef, command string) {
+	g.DoForce(forcer, victim, command)
+}
+
+// LinkObject implements GameState.LinkObject — sets link/home/dropto.
+func (g *Game) LinkObject(player, target, dest gamedb.DBRef) string {
+	obj, ok := g.DB.Objects[target]
+	if !ok {
+		return "#-1 NO SUCH OBJECT"
+	}
+	if !Controls(g, player, target) {
+		return "#-1 PERMISSION DENIED"
+	}
+	switch obj.ObjType() {
+	case gamedb.TypeExit:
+		obj.Location = dest
+	case gamedb.TypeRoom:
+		obj.Link = dest
+	default:
+		obj.Link = dest
+	}
+	g.PersistObject(obj)
+	return ""
+}
+
+// WipeAttrs implements GameState.WipeAttrs — removes matching user attrs.
+func (g *Game) WipeAttrs(player, target gamedb.DBRef, pattern string) string {
+	if !Controls(g, player, target) {
+		return "#-1 PERMISSION DENIED"
+	}
+	obj, ok := g.DB.Objects[target]
+	if !ok {
+		return "#-1 NO SUCH OBJECT"
+	}
+	pattern = strings.ToUpper(pattern)
+	if pattern == "*" || pattern == "" {
+		obj.Attrs = nil
+	} else {
+		var remaining []gamedb.Attribute
+		for _, attr := range obj.Attrs {
+			name := g.DB.GetAttrName(attr.Number)
+			if name == "" || !wildMatchSimple(pattern, strings.ToUpper(name)) {
+				remaining = append(remaining, attr)
+			}
+		}
+		obj.Attrs = remaining
+	}
+	g.PersistObject(obj)
+	return ""
+}
+
+// TriggerAttr implements GameState.TriggerAttr — triggers obj/attr with args.
+func (g *Game) TriggerAttr(player, cause gamedb.DBRef, obj gamedb.DBRef, attr string, args []string) bool {
+	if !Controls(g, player, obj) {
+		return false
+	}
+	attrNum := g.ResolveAttrNum(strings.ToUpper(attr))
+	if attrNum < 0 {
+		return false
+	}
+	text := g.GetAttrText(obj, attrNum)
+	if text == "" {
+		return false
+	}
+	entry := &QueueEntry{
+		Player:  obj,
+		Cause:   cause,
+		Caller:  player,
+		Command: text,
+		Args:    args,
+	}
+	g.Queue.Add(entry)
+	g.WakeQueue()
+	return true
+}
+
+// WaitCommand implements GameState.WaitCommand — queues a delayed command.
+func (g *Game) WaitCommand(player, cause gamedb.DBRef, secs int, command string) {
+	if secs < 0 {
+		secs = 0
+	}
+	entry := &QueueEntry{
+		Player:  player,
+		Cause:   cause,
+		Caller:  player,
+		Command: command,
+	}
+	entry.WaitUntil = time.Now().Add(time.Duration(secs) * time.Second)
+	g.Queue.AddWait(entry)
+}
+
+// SetParent implements GameState.SetParent — sets parent with circularity check.
+func (g *Game) SetParent(player, target, newParent gamedb.DBRef) string {
+	if !Controls(g, player, target) {
+		return "#-1 PERMISSION DENIED"
+	}
+	// Circularity check
+	if newParent != gamedb.Nothing {
+		curr := newParent
+		for i := 0; i < 100; i++ {
+			if curr == target {
+				return "#-1 CIRCULAR REFERENCE"
+			}
+			parentObj, ok := g.DB.Objects[curr]
+			if !ok || parentObj.Parent == gamedb.Nothing {
+				break
+			}
+			curr = parentObj.Parent
+		}
+	}
+	if obj, ok := g.DB.Objects[target]; ok {
+		obj.Parent = newParent
+		g.PersistObject(obj)
+		return ""
+	}
+	return "#-1 NO SUCH OBJECT"
+}
+
+// RenameObject implements GameState.RenameObject — sets name with player name conflict check.
+func (g *Game) RenameObject(player, target gamedb.DBRef, newName string) string {
+	if !Controls(g, player, target) {
+		return "#-1 PERMISSION DENIED"
+	}
+	obj, ok := g.DB.Objects[target]
+	if !ok {
+		return "#-1 NO SUCH OBJECT"
+	}
+	if obj.ObjType() == gamedb.TypePlayer {
+		trimmed := strings.TrimSpace(newName)
+		if !strings.EqualFold(trimmed, obj.Name) {
+			existing := LookupPlayer(g.DB, trimmed)
+			if existing != gamedb.Nothing {
+				return "#-1 NAME IN USE"
+			}
+		}
+	}
+	oldName := obj.Name
+	obj.Name = newName
+	g.PersistObject(obj)
+	if obj.ObjType() == gamedb.TypePlayer && g.Store != nil {
+		g.Store.UpdatePlayerIndex(obj, oldName)
+	}
+	return ""
+}
+
+// CloneObject implements GameState.CloneObject — clones an object.
+func (g *Game) CloneObject(player, target gamedb.DBRef) gamedb.DBRef {
+	srcObj, ok := g.DB.Objects[target]
+	if !ok {
+		return gamedb.Nothing
+	}
+	// C TinyMUSH: Examinable() check
+	if !Examinable(g, player, target) {
+		return gamedb.Nothing
+	}
+	if srcObj.ObjType() == gamedb.TypePlayer {
+		return gamedb.Nothing
+	}
+	ref := g.CreateObject(srcObj.Name, srcObj.ObjType(), player)
+	newObj := g.DB.Objects[ref]
+	newObj.Parent = srcObj.Parent
+	newObj.Link = srcObj.Link
+	if srcObj.ObjType() == gamedb.TypeExit {
+		newObj.Location = srcObj.Location
+	}
+	// Copy attributes
+	for _, attr := range srcObj.Attrs {
+		newObj.Attrs = append(newObj.Attrs, gamedb.Attribute{
+			Number: attr.Number,
+			Value:  attr.Value,
+		})
+	}
+	// Place in player's inventory
+	newObj.Location = player
+	g.AddToContents(player, ref)
+	playerObj := g.DB.Objects[player]
+	g.PersistObjects(newObj, playerObj)
+	return ref
+}
+
 // DoSet handles @set obj = attr:value or @set obj = [!]flag
 func (g *Game) DoSet(player gamedb.DBRef, args string) {
 	eqIdx := strings.IndexByte(args, '=')

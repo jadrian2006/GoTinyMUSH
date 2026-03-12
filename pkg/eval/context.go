@@ -264,6 +264,30 @@ type GameState interface {
 
 	// InstanceVehicle returns the instance THING this room belongs to, or Nothing.
 	InstanceVehicle(room gamedb.DBRef) gamedb.DBRef
+
+	// Side-effect function support
+
+	// ForceCommand queues command to execute as victim, with forcer as cause.
+	ForceCommand(forcer, victim gamedb.DBRef, command string)
+	// LinkObject sets the link/home/dropto on target to dest.
+	// Returns "" on success, error message on failure.
+	LinkObject(player, target, dest gamedb.DBRef) string
+	// WipeAttrs removes user-defined attributes matching pattern from target.
+	// Pattern uses wildcard matching. Returns "" on success, error on failure.
+	WipeAttrs(player, target gamedb.DBRef, pattern string) string
+	// TriggerAttr triggers obj/attr with optional args (comma-separated after obj/attr).
+	// Returns true on success.
+	TriggerAttr(player, cause gamedb.DBRef, obj gamedb.DBRef, attr string, args []string) bool
+	// WaitCommand queues a delayed command. secs is the delay in seconds.
+	WaitCommand(player, cause gamedb.DBRef, secs int, command string)
+	// SetParent sets the parent of target to newParent. Checks Controls and circularity.
+	// Returns "" on success, error string on failure.
+	SetParent(player, target, newParent gamedb.DBRef) string
+	// RenameObject sets the name of target. Checks Controls and player name conflicts.
+	// Returns "" on success, error string on failure.
+	RenameObject(player, target gamedb.DBRef, newName string) string
+	// CloneObject clones target, returns the new dbref or Nothing on failure.
+	CloneObject(player, target gamedb.DBRef) gamedb.DBRef
 }
 
 // EvalContext is the execution context for MUSH expression evaluation.
