@@ -607,14 +607,16 @@ func fnIndex(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	s := args[0]
 	delim := args[1]
 	if delim == "" { delim = " " }
-	first := toInt(args[2]) - 1 // 1-indexed to 0-indexed
+	first := toInt(args[2]) // 1-indexed
 	length := toInt(args[3])
+	// C rejects start < 1 or length < 1 or empty string
+	if first < 1 || length < 1 || s == "" { return }
+	idx := first - 1 // convert to 0-based
 	words := splitList(s, delim)
-	if first < 0 { first = 0 }
-	end := first + length
+	end := idx + length
 	if end > len(words) { end = len(words) }
-	if first >= len(words) { return }
-	buf.WriteString(strings.Join(words[first:end], delim))
+	if idx >= len(words) { return }
+	buf.WriteString(strings.Join(words[idx:end], delim))
 }
 
 // fnEncrypt performs C TinyMUSH's encrypt() function.

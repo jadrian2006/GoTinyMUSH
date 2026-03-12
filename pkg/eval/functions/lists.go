@@ -156,13 +156,18 @@ func fnInsert(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	delim := " "
 	if len(args) > 3 && args[3] != "" { delim = args[3] }
 	words := splitList(args[0], delim)
-	pos := toInt(args[1]) - 1 // C is 1-indexed
-	if pos < 0 { pos = 0 }
+	pos := toInt(args[1]) // C is 1-indexed
 	newWord := args[2]
-	if pos >= len(words) {
+	// C rejects pos < 1 and pos > len+1 — return unchanged
+	if pos < 1 || pos > len(words)+1 {
+		buf.WriteString(strings.Join(words, delim))
+		return
+	}
+	idx := pos - 1 // convert to 0-based
+	if idx >= len(words) {
 		words = append(words, newWord)
 	} else {
-		words = append(words[:pos], append([]string{newWord}, words[pos:]...)...)
+		words = append(words[:idx], append([]string{newWord}, words[idx:]...)...)
 	}
 	buf.WriteString(strings.Join(words, delim))
 }
@@ -226,9 +231,9 @@ func fnSort(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 		sort.SliceStable(words, func(i, j int) bool {
 			return parseDBRefNum(words[i]) < parseDBRefNum(words[j])
 		})
-	default: // alphabetic
+	default: // alphabetic — C uses case-sensitive strcmp
 		sort.SliceStable(words, func(i, j int) bool {
-			return strings.ToLower(words[i]) < strings.ToLower(words[j])
+			return words[i] < words[j]
 		})
 	}
 	buf.WriteString(strings.Join(words, delim))
@@ -479,18 +484,32 @@ func fnGroup(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	odelim := delim
 	if len(args) > 3 && args[3] != "" { odelim = args[3] }
-	gdelim := "|"
+	gdelim := odelim
 	if len(args) > 4 && args[4] != "" { gdelim = args[4] }
 	words := splitList(args[0], delim)
-	n := toInt(args[1])
-	if n <= 0 { n = 1 }
-	var groups []string
-	for i := 0; i < len(words); i += n {
-		end := i + n
-		if end > len(words) { end = len(words) }
-		groups = append(groups, strings.Join(words[i:end], odelim))
+	nGroups := toInt(args[1])
+	if nGroups < 2 {
+		// C: if group_count < 2, return list as-is
+		buf.WriteString(strings.Join(words, odelim))
+		return
 	}
-	buf.WriteString(strings.Join(groups, gdelim))
+	if nGroups >= len(words) {
+		// C: each element becomes its own group, separated by gdelim
+		buf.WriteString(strings.Join(words, gdelim))
+		return
+	}
+	// C column-wise distribution: group i gets elements at indices i, i+nGroups, i+2*nGroups, ...
+	first := true
+	for i := 0; i < nGroups; i++ {
+		if !first { buf.WriteString(gdelim) }
+		first = false
+		firstInGroup := true
+		for j := i; j < len(words); j += nGroups {
+			if !firstInGroup { buf.WriteString(odelim) }
+			firstInGroup = false
+			buf.WriteString(words[j])
+		}
+	}
 }
 
 // fnWildgrep — grep attrs using wildcard matching (not substring).
@@ -578,29 +597,31 @@ func fnSortby(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 }
 
 // fnLreplace — replace element(s) in a list.
-// lreplace(list, pos, [count], newelem[, delim])
+// C: lreplace(list, replacement_list, position_list[, isep[, osep]])
+// Both replacement_list and position_list must have equal word count.
+// Positions are 1-based; invalid positions are silently ignored.
 func fnLreplace(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 3 { return }
 	delim := " "
-	// Determine argument layout:
-	// lreplace(list, position, new-elements[, delim])
+	odelim := " "
 	if len(args) > 3 && args[3] != "" { delim = args[3] }
+	if len(args) > 4 && args[4] != "" { odelim = args[4] } else { odelim = delim }
 	words := splitList(args[0], delim)
-	pos := toInt(args[1]) - 1 // 1-indexed
-	newElems := splitList(args[2], delim)
-	if pos < 0 { pos = 0 }
-	if pos >= len(words) {
-		words = append(words, newElems...)
-	} else {
-		end := pos + 1
-		if end > len(words) { end = len(words) }
-		result := make([]string, 0, len(words)+len(newElems))
-		result = append(result, words[:pos]...)
-		result = append(result, newElems...)
-		result = append(result, words[end:]...)
-		words = result
+	replacements := splitList(args[1], delim)
+	positions := splitList(args[2], delim)
+	// C requires equal counts
+	if len(replacements) != len(positions) {
+		buf.WriteString("#-1 NUMBER OF WORDS MUST BE EQUAL")
+		return
 	}
-	buf.WriteString(strings.Join(words, delim))
+	// Apply replacements at each position (1-based)
+	for i, posStr := range positions {
+		pos := toInt(posStr) - 1 // convert to 0-based
+		if pos >= 0 && pos < len(words) {
+			words[pos] = replacements[i]
+		}
+	}
+	buf.WriteString(strings.Join(words, odelim))
 }
 
 // fnLedit — apply edit() to every element in a list.
