@@ -512,10 +512,6 @@ func evalExpr(g *Game, player gamedb.DBRef, text string) string {
 
 func cmdSay(g *Game, d *Descriptor, args string, _ []string) {
 	args = strings.TrimSpace(args)
-	if args == "" {
-		g.Notify(d.Player, "Say what?")
-		return
-	}
 	args = evalExpr(g, d.Player, args)
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
@@ -574,7 +570,7 @@ func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		g.Notify(d.Player, "Page whom?")
+		g.Notify(d.Player, "You have not paged anyone.")
 		return
 	}
 	// Format: page name=message or page name message
@@ -592,7 +588,8 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 
 	target := LookupPlayer(g.DB, targetName)
 	if target == gamedb.Nothing {
-		g.Notify(d.Player, "I don't recognize that player.")
+		g.Notify(d.Player, fmt.Sprintf("I don't recognize %s.", targetName))
+		g.Notify(d.Player, "No one to page.")
 		return
 	}
 
@@ -769,13 +766,15 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 	// @pemit target=message
 	// @pemit/contents target=message  (send to all contents of target)
 	// @pemit/list targets=message     (targets is space-separated dbrefs)
-	eqIdx := strings.IndexByte(args, '=')
-	if eqIdx < 0 {
-		g.Notify(d.Player, "@pemit: I need a target and message separated by =.")
-		return
+	// CS_TWO_ARG: no = means target=args, message=""
+	var targetStr, message string
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		message = stripEqSep(args[eqIdx+1:])
+	} else {
+		targetStr = strings.TrimSpace(args)
+		message = ""
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	message := stripEqSep(args[eqIdx+1:])
 
 	ctx := MakeEvalContextWithGame(g, d.Player, func(c *eval.EvalContext) {
 		functions.RegisterAll(c)
@@ -832,7 +831,7 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		target = g.MatchObject(d.Player, targetStr)
 	}
 	if target == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "Emit to whom?")
 		return
 	}
 	g.SendMarkedToPlayer(target, "EMIT", message)
@@ -1186,17 +1185,25 @@ func cmdDig(g *Game, d *Descriptor, args string, switches []string) {
 	g.Notify(d.Player, fmt.Sprintf("%s created with room number %d.", roomName, newRef))
 
 	// Handle exit creation if specified
+	// C TinyMUSH: CS_ARGV splits remaining args by = so
+	// @dig room=exit1=exit2 gives args[0]=exit1, args[1]=exit2
 	if len(parts) > 1 {
-		exitParts := strings.SplitN(parts[1], ",", 2)
+		exitParts := strings.SplitN(parts[1], "=", 2)
 		if exitParts[0] != "" {
 			exitTo := strings.TrimSpace(exitParts[0])
 			exitRef := g.CreateExit(exitTo, g.PlayerLocation(d.Player), newRef, d.Player)
-			g.Notify(d.Player, fmt.Sprintf("Exit %s created as #%d.", exitTo, exitRef))
+			if exitRef != gamedb.Nothing {
+				g.Notify(d.Player, "Opened.")
+				g.Notify(d.Player, "Linked.")
+			}
 		}
 		if len(exitParts) > 1 && exitParts[1] != "" {
 			exitFrom := strings.TrimSpace(exitParts[1])
 			exitRef := g.CreateExit(exitFrom, newRef, g.PlayerLocation(d.Player), d.Player)
-			g.Notify(d.Player, fmt.Sprintf("Exit %s created as #%d.", exitFrom, exitRef))
+			if exitRef != gamedb.Nothing {
+				g.Notify(d.Player, "Opened.")
+				g.Notify(d.Player, "Linked.")
+			}
 		}
 	}
 
@@ -1208,7 +1215,7 @@ func cmdDig(g *Game, d *Descriptor, args string, switches []string) {
 
 func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
-		g.Notify(d.Player, "Open what?")
+		g.Notify(d.Player, "Open where?")
 		return
 	}
 	// @open exit_name=destination
@@ -1231,7 +1238,13 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	loc := g.PlayerLocation(d.Player)
 	exitRef := g.CreateExit(exitName, loc, dest, d.Player)
-	g.Notify(d.Player, fmt.Sprintf("Exit %s created as #%d.", exitName, exitRef))
+	if exitRef == gamedb.Nothing {
+		return
+	}
+	g.Notify(d.Player, "Opened.")
+	if dest != gamedb.Nothing {
+		g.Notify(d.Player, "Linked.")
+	}
 }
 
 func cmdDescribe(g *Game, d *Descriptor, args string, _ []string) {
@@ -1246,10 +1259,7 @@ func cmdDescribe(g *Game, d *Descriptor, args string, _ []string) {
 		targetStr = strings.TrimSpace(args[:eqIdx])
 		desc = strings.TrimSpace(args[eqIdx+1:])
 	}
-	if targetStr == "" {
-		g.Notify(d.Player, "@describe: Usage: @desc thing = description")
-		return
-	}
+	// Empty target goes through MatchObject → "I don't see that here."
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
@@ -1261,16 +1271,22 @@ func cmdDescribe(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdRename(g *Game, d *Descriptor, args string, _ []string) {
-	eqIdx := strings.IndexByte(args, '=')
-	if eqIdx < 0 {
-		g.Notify(d.Player, "@name: Usage: @name thing = new name")
-		return
+	// CS_TWO_ARG: no = means target=args, newName=""
+	var targetStr, newName string
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		newName = strings.TrimSpace(args[eqIdx+1:])
+	} else {
+		targetStr = strings.TrimSpace(args)
+		newName = ""
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	newName := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	if newName == "" {
+		g.Notify(d.Player, "Give it what new name?")
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
@@ -3958,18 +3974,19 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 }
 
 func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {
-	// whisper player = message
-	eqIdx := strings.IndexByte(args, '=')
-	if eqIdx < 0 {
-		g.Notify(d.Player, "Whisper what to whom?")
-		return
+	// whisper player = message  (CS_TWO_ARG: no = means target=args, msg="")
+	var targetStr, message string
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		message = stripEqSep(args[eqIdx+1:])
+	} else {
+		targetStr = strings.TrimSpace(args)
+		message = ""
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	message := stripEqSep(args[eqIdx+1:])
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "Whisper to whom?")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]

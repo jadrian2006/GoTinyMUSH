@@ -67,10 +67,6 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
-	if args == "" {
-		g.Notify(d.Player, "Destroy what?")
-		return
-	}
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
@@ -124,13 +120,11 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	// @destroy/instant — bypass the GOING delay, destroy now
+	// C TinyMUSH: instant path calls destroy_thing/exit/etc which call
+	// destroy_obj(NOTHING, thing) — no "shakes" message, no "Destroyed."
+	// The owner still gets the refund notification.
 	if instant {
-		if obj.ObjType() != gamedb.TypeRoom {
-			g.Notify(d.Player, fmt.Sprintf("The %s shakes and begins to crumble.", typeName))
-		} else {
-			g.Conns.SendToRoomExcept(g.DB, target, d.Player, "The room shakes and begins to crumble.")
-		}
-		g.destroyImmediate(d.Player, target)
+		g.destroyImmediate(gamedb.Nothing, target)
 		return
 	}
 
@@ -317,18 +311,24 @@ func (g *Game) destroyImmediate(player, ref gamedb.DBRef) {
 }
 
 func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
-	// C TinyMUSH: @link has CS_INTERP — evaluate arguments
+	// C TinyMUSH: @link has CS_TWO_ARG|CS_INTERP
 	args = evalExpr(g, d.Player, args)
-	eqIdx := strings.IndexByte(args, '=')
-	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @link object = destination")
-		return
+	var targetStr, destStr string
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		destStr = strings.TrimSpace(args[eqIdx+1:])
+	} else {
+		targetStr = strings.TrimSpace(args)
+		destStr = ""
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	destStr := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	// C TinyMUSH: @link with empty dest calls do_unlink
+	if destStr == "" {
+		cmdUnlink(g, d, targetStr, nil)
 		return
 	}
 	dest := g.ResolveRef(d.Player, destStr)
@@ -384,13 +384,15 @@ func cmdUnlink(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdParent(g *Game, d *Descriptor, args string, _ []string) {
-	eqIdx := strings.IndexByte(args, '=')
-	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @parent object = parent")
-		return
+	// CS_TWO_ARG: no = means target=args, parent=""
+	var targetStr, parentStr string
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		parentStr = strings.TrimSpace(args[eqIdx+1:])
+	} else {
+		targetStr = strings.TrimSpace(args)
+		parentStr = ""
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	parentStr := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
@@ -485,10 +487,6 @@ func cmdChown(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
-	if args == "" {
-		g.Notify(d.Player, "Clone what?")
-		return
-	}
 	// @clone[/parent][/inventory] obj [= newname]
 	parts := strings.SplitN(args, "=", 2)
 	target := g.MatchObject(d.Player, strings.TrimSpace(parts[0]))
@@ -1266,6 +1264,10 @@ func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdWall(g *Game, d *Descriptor, args string, _ []string) {
+	if !g.IsWizard(d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	if args == "" {
 		return
 	}
@@ -2249,17 +2251,19 @@ func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 
 func cmdOemit(g *Game, d *Descriptor, args string, _ []string) {
 	// @oemit target = message — emits to target's room, excluding target
-	eqIdx := strings.IndexByte(args, '=')
-	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @oemit target = message")
-		return
+	// CS_TWO_ARG: no = means target=args, msg=""
+	var targetStr, message string
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		message = stripEqSep(args[eqIdx+1:])
+	} else {
+		targetStr = strings.TrimSpace(args)
+		message = ""
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	message := stripEqSep(args[eqIdx+1:])
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "Emit except to whom?")
 		return
 	}
 
@@ -2272,18 +2276,19 @@ func cmdOemit(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdRemit(g *Game, d *Descriptor, args string, _ []string) {
-	// @remit room = message
-	eqIdx := strings.IndexByte(args, '=')
-	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @remit room = message")
-		return
+	// @remit room = message (CS_TWO_ARG: no = means target=args, msg="")
+	var roomStr, message string
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		roomStr = strings.TrimSpace(args[:eqIdx])
+		message = stripEqSep(args[eqIdx+1:])
+	} else {
+		roomStr = strings.TrimSpace(args)
+		message = ""
 	}
-	roomStr := strings.TrimSpace(args[:eqIdx])
-	message := stripEqSep(args[eqIdx+1:])
 
 	room := g.ResolveRef(d.Player, roomStr)
 	if room == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "Emit to whom?")
 		return
 	}
 	message = evalExpr(g, d.Player, message)
