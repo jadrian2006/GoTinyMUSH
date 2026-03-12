@@ -231,23 +231,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 		d.SendRaw(oob.EncodeMSSP(s.buildMSSPData()))
 	}
 
-	// Start keepalive: send IAC NOP periodically to prevent NAT timeout
-	if s.Game.Conf != nil && s.Game.Conf.KeepaliveInterval > 0 {
-		interval := time.Duration(s.Game.Conf.KeepaliveInterval) * time.Second
-		go func() {
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			nop := []byte{oob.IAC, oob.NOP}
-			for {
-				<-ticker.C
-				if d.IsClosed() {
-					return
-				}
-				d.SendRaw(nop)
-			}
-		}()
-	}
-
 	defer func() {
 		s.Game.DisconnectPlayer(d)
 		s.Game.Conns.Remove(d)
@@ -271,11 +254,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 		d.SendNoNewline(s.Config.WelcomeText)
 	}
 
-	// Main read loop — prepend any leftover bytes from OOB negotiation
+	// Main read loop — prepend any leftover bytes from OOB negotiation.
+	// Wrap in telnetFilterReader to intercept IAC NOP keepalives at the
+	// byte level, refreshing the idle timer even without a trailing newline.
 	var reader io.Reader = d.Conn
 	if len(leftover) > 0 {
 		reader = io.MultiReader(bytes.NewReader(leftover), d.Conn)
 	}
+	reader = &telnetFilterReader{r: reader, d: d}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 8192), 8192)
 
@@ -593,6 +579,62 @@ func (s *Server) handleCreate(d *Descriptor, user, password string) {
 
 	// Show room
 	s.Game.ShowRoom(d, startRoom)
+}
+
+// telnetFilterReader wraps an io.Reader and strips IAC NOP sequences at the
+// byte level, refreshing the descriptor's idle timer when one is received.
+// This ensures that client keepalive NOPs (which may arrive without a newline)
+// reset the session idle timer even though the line-based scanner won't see them.
+type telnetFilterReader struct {
+	r    io.Reader
+	d    *Descriptor
+	hold byte    // buffered byte after seeing 0xFF
+	have bool    // whether hold contains a valid byte
+}
+
+func (t *telnetFilterReader) Read(p []byte) (int, error) {
+	buf := make([]byte, len(p))
+	n, err := t.r.Read(buf[:len(p)])
+
+	j := 0
+	for i := 0; i < n; i++ {
+		if t.have {
+			t.have = false
+			if buf[i] == oob.NOP {
+				// IAC NOP: refresh idle timer, discard both bytes
+				t.d.LastCmd = time.Now()
+				continue
+			}
+			// Not NOP — emit the held IAC and this byte
+			if j < len(p) {
+				p[j] = t.hold
+				j++
+			}
+			if j < len(p) {
+				p[j] = buf[i]
+				j++
+			}
+			continue
+		}
+		if buf[i] == oob.IAC {
+			t.hold = buf[i]
+			t.have = true
+			continue
+		}
+		if j < len(p) {
+			p[j] = buf[i]
+			j++
+		}
+	}
+	// If we ended with a held IAC and got EOF, flush it
+	if t.have && err != nil {
+		if j < len(p) {
+			p[j] = t.hold
+			j++
+			t.have = false
+		}
+	}
+	return j, err
 }
 
 // stripTelnet removes telnet IAC command sequences from input.
