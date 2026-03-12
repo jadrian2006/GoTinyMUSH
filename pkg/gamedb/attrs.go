@@ -153,6 +153,7 @@ var WellKnownAttrs = map[int]string{
 	209: "SpeechLock",
 	214: "Conformat",   // A_LCON_FMT
 	215: "Exitformat",  // A_LEXITS_FMT
+	216: "ExitVarDest", // A_EXITVARDEST — variable exit destination expression
 	217: "ChownLock",
 	218: "Lastip",
 	219: "DarkLock",
@@ -183,6 +184,7 @@ var WellKnownAttrs = map[int]string{
 // Well-known attribute number constants.
 const A_SEMAPHORE = 47
 const A_PROGCMD = 210
+const A_EXITVARDEST = 216
 
 // A_USER_START is the first attribute number available for user-defined attrs.
 const A_USER_START = 256

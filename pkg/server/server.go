@@ -574,6 +574,9 @@ func (s *Server) handleCreate(d *Descriptor, user, password string) {
 		s.Game.Store.UpdatePlayerIndex(playerObj, "")
 	}
 
+	// Initialize quota for new player
+	s.Game.InitPlayerQuota(ref)
+
 	log.Printf("[%d] New player %s(#%d) created from %s", d.ID, user, ref, d.Addr)
 
 	// Log them in

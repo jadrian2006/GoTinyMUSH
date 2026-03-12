@@ -850,8 +850,8 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
-		// C TinyMUSH: non-wizards need nearby || Controls
-		if !Wizard(g, d.Player) && !Controls(g, d.Player, target) && !g.Nearby(d.Player, target) {
+		// C TinyMUSH: non-wizards need nearby || Controls || Long_Fingers
+		if !Wizard(g, d.Player) && !Controls(g, d.Player, target) && !g.Nearby(d.Player, target) && !CanLongFingers(g, d.Player) {
 			g.Notify(d.Player, "Permission denied.")
 			return
 		}
@@ -894,7 +894,7 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 	// C TinyMUSH: non-wizards need nearby || Controls || Long_Fingers
-	if !Wizard(g, d.Player) && !Controls(g, d.Player, target) && !g.Nearby(d.Player, target) {
+	if !Wizard(g, d.Player) && !Controls(g, d.Player, target) && !g.Nearby(d.Player, target) && !CanLongFingers(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -904,6 +904,31 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 }
 
 // --- Movement Commands ---
+
+// findVarDest resolves a variable exit's destination by evaluating its
+// EXITVARDEST attribute as softcode. Matches C TinyMUSH find_var_dest().
+func findVarDest(g *Game, player, exit gamedb.DBRef) gamedb.DBRef {
+	destText := g.GetAttrText(exit, gamedb.A_EXITVARDEST)
+	if destText == "" {
+		return gamedb.Nothing
+	}
+	// Evaluate DESTINATION attr with exit as executor, player as enactor
+	ctx := MakeEvalContextForObj(g, exit, player, func(c *eval.EvalContext) {
+		functions.RegisterAll(c)
+	})
+	result := ctx.Exec(destText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+	result = strings.TrimSpace(result)
+	// C: result must be #digits to be valid
+	if len(result) > 1 && result[0] == '#' {
+		if n, err := strconv.Atoi(result[1:]); err == nil && n >= 0 {
+			ref := gamedb.DBRef(n)
+			if _, ok := g.DB.Objects[ref]; ok {
+				return ref
+			}
+		}
+	}
+	return gamedb.Nothing
+}
 
 func cmdGo(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
@@ -937,6 +962,10 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 	// Helper to execute exit traversal (SUCC/OSUCC/ASUCC messages + move)
 	doExit := func(exitRef gamedb.DBRef, exitObj *gamedb.Object) bool {
 		dest := exitObj.Location
+		if dest == gamedb.Ambiguous {
+			// C TinyMUSH: variable exit — evaluate EXITVARDEST attr
+			dest = findVarDest(g, d.Player, exitRef)
+		}
 		if dest == gamedb.Nothing || dest == gamedb.Home {
 			playerObj := g.DB.Objects[d.Player]
 			dest = playerObj.Link
@@ -1263,7 +1292,13 @@ func cmdDig(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
 		return
 	}
+	// C TinyMUSH: quota check
+	if !g.CanPayQuota(d.Player, g.Conf.RoomQuota, gamedb.TypeRoom) {
+		g.Notify(d.Player, "You have exceeded your quota.")
+		return
+	}
 	playerObj.Pennies -= cost
+	g.PayQuota(d.Player, g.Conf.RoomQuota, gamedb.TypeRoom)
 	g.PersistObject(playerObj)
 
 	newRef := g.CreateObject(roomName, gamedb.TypeRoom, d.Player)
@@ -1314,7 +1349,13 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
 		return
 	}
+	// C TinyMUSH: quota check
+	if !g.CanPayQuota(d.Player, g.Conf.ExitQuota, gamedb.TypeExit) {
+		g.Notify(d.Player, "You have exceeded your quota.")
+		return
+	}
 	playerObj.Pennies -= cost
+	g.PayQuota(d.Player, g.Conf.ExitQuota, gamedb.TypeExit)
 	g.PersistObject(playerObj)
 
 	dest := gamedb.Nothing
@@ -4499,4 +4540,29 @@ func (g *Game) DisconnectPlayer(d *Descriptor) {
 		}
 	}
 	d.Close()
+}
+
+// CheckIdleConnections disconnects players who have been idle beyond
+// the configured idle_timeout. C TinyMUSH: check_idle in bsd.c.
+// Exempt: wizards, players with idle power.
+func (g *Game) CheckIdleConnections() {
+	if g.Conf == nil || g.Conf.IdleTimeout <= 0 {
+		return
+	}
+	timeout := time.Duration(g.Conf.IdleTimeout) * time.Second
+	now := time.Now()
+	for _, d := range g.Conns.AllDescriptors() {
+		if d.State != ConnConnected {
+			continue
+		}
+		if now.Sub(d.LastCmd) < timeout {
+			continue
+		}
+		// C TinyMUSH: wizards and idle power exempt
+		if Wizard(g, d.Player) || HasPow(g, d.Player, 0, gamedb.PowIdle) {
+			continue
+		}
+		d.Send("*** Idle timeout ***")
+		g.DisconnectPlayer(d)
+	}
 }

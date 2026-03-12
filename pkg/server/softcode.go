@@ -1952,6 +1952,8 @@ func (g *Game) StartQueueProcessor() {
 			case <-dbckTimer.C:
 				// Reap GOING objects — deferred @destroy cleanup (C's purge_going)
 				g.PurgeGoing()
+				// C TinyMUSH: check_idle — disconnect idle connections
+				g.CheckIdleConnections()
 			}
 		}
 	}()

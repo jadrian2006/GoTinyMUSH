@@ -64,6 +64,19 @@ type GameConf struct {
 	EvalOutputLimit       int `yaml:"eval_output_limit"`       // Max output bytes per eval (default 1048576 = 1MB)
 	DolistLimit           int `yaml:"dolist_limit"`            // Max elements per @dolist (default 10000)
 
+	// --- Quotas ---
+	Quotas           bool `yaml:"quotas"`             // Enable quota enforcement (default false, matching C)
+	TypedQuotas      bool `yaml:"typed_quotas"`       // Track quotas per object type (default false)
+	StartQuota       int  `yaml:"start_quota"`        // Initial overall quota for new players (default 20)
+	StartRoomQuota   int  `yaml:"start_room_quota"`   // Initial room quota (default 20)
+	StartExitQuota   int  `yaml:"start_exit_quota"`   // Initial exit quota (default 20)
+	StartThingQuota  int  `yaml:"start_thing_quota"`  // Initial thing quota (default 20)
+	StartPlayerQuota int  `yaml:"start_player_quota"` // Initial robot player quota (default 20)
+	RoomQuota        int  `yaml:"room_quota"`         // Quota cost per room (default 1)
+	ExitQuota        int  `yaml:"exit_quota"`         // Quota cost per exit (default 1)
+	ThingQuota       int  `yaml:"thing_quota"`        // Quota cost per thing (default 1)
+	PlayerQuota      int  `yaml:"player_quota"`       // Quota cost per robot player (default 1)
+
 	// --- Object destruction ---
 	InstantRecycle bool `yaml:"instant_recycle"` // DESTROY_OK things skip GOING, destroy immediately (default true, matches C)
 
@@ -217,6 +230,17 @@ func DefaultGameConf() *GameConf {
 		CommandInvocationLimit:  2500,
 		EvalOutputLimit:         1048576, // 1MB
 		DolistLimit:             10000,
+		Quotas:                  false,
+		TypedQuotas:             false,
+		StartQuota:              20,
+		StartRoomQuota:          20,
+		StartExitQuota:          20,
+		StartThingQuota:         20,
+		StartPlayerQuota:        20,
+		RoomQuota:               1,
+		ExitQuota:               1,
+		ThingQuota:              1,
+		PlayerQuota:             1,
 		InstantRecycle:          true,
 		OutputLimit:             16384,
 		MatchOwnCommands:        false,
@@ -454,6 +478,30 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.EvalOutputLimit = atoi(val, gc.EvalOutputLimit)
 		case "dolist_limit":
 			gc.DolistLimit = atoi(val, gc.DolistLimit)
+
+		// --- Quotas ---
+		case "quotas":
+			gc.Quotas = parseBool(val)
+		case "typed_quotas":
+			gc.TypedQuotas = parseBool(val)
+		case "starting_quota":
+			gc.StartQuota = atoi(val, gc.StartQuota)
+		case "starting_room_quota":
+			gc.StartRoomQuota = atoi(val, gc.StartRoomQuota)
+		case "starting_exit_quota":
+			gc.StartExitQuota = atoi(val, gc.StartExitQuota)
+		case "starting_thing_quota":
+			gc.StartThingQuota = atoi(val, gc.StartThingQuota)
+		case "starting_player_quota":
+			gc.StartPlayerQuota = atoi(val, gc.StartPlayerQuota)
+		case "room_quota":
+			gc.RoomQuota = atoi(val, gc.RoomQuota)
+		case "exit_quota":
+			gc.ExitQuota = atoi(val, gc.ExitQuota)
+		case "thing_quota":
+			gc.ThingQuota = atoi(val, gc.ThingQuota)
+		case "player_quota":
+			gc.PlayerQuota = atoi(val, gc.PlayerQuota)
 
 		// --- Object destruction ---
 		case "instant_recycle":

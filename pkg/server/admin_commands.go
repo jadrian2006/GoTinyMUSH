@@ -51,11 +51,17 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
 		return
 	}
+	// C TinyMUSH: quota check
+	if !g.CanPayQuota(d.Player, g.Conf.ThingQuota, gamedb.TypeThing) {
+		g.Notify(d.Player, "You have exceeded your quota.")
+		return
+	}
 
 	ref := g.CreateObject(name, gamedb.TypeThing, d.Player)
 	obj := g.DB.Objects[ref]
-	// Charge the player
+	// Charge the player (money + quota)
 	playerObj.Pennies -= cost
+	g.PayQuota(d.Player, g.Conf.ThingQuota, gamedb.TypeThing)
 	// Set object value (endowment)
 	obj.Pennies = g.Conf.ObjectEndowment(cost)
 	// Place in player's inventory
@@ -240,6 +246,8 @@ func (g *Game) PurgeGoing() {
 			g.PersistObject(ownerObj)
 			g.Notify(owner, fmt.Sprintf("You get back your %d %s deposit for %s(#%d).", val, g.MoneyName(val), DisplayName(obj.Name), ref))
 		}
+		// C TinyMUSH: refund quota on destroy
+		g.RefundQuota(owner, quotaCostForType(g, obj.ObjType()), obj.ObjType())
 
 		// Convert to garbage
 		obj.Name = fmt.Sprintf("Garbage(#%d)", ref)
@@ -373,10 +381,17 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 		cmdUnlink(g, d, targetStr, nil)
 		return
 	}
-	dest := g.ResolveRef(d.Player, destStr)
-	if dest == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that destination.")
-		return
+	// C TinyMUSH: @link exit=variable creates a variable exit
+	isVariable := strings.EqualFold(destStr, "variable")
+	var dest gamedb.DBRef
+	if isVariable {
+		dest = gamedb.Ambiguous
+	} else {
+		dest = g.ResolveRef(d.Player, destStr)
+		if dest == gamedb.Nothing {
+			g.Notify(d.Player, "I don't see that destination.")
+			return
+		}
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
 		// C TinyMUSH: Controls() check, link_to_anything/link_any_home bypass
@@ -386,13 +401,20 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 		}
 		switch obj.ObjType() {
 		case gamedb.TypeExit:
-			// For exits, destination is stored in Location
-			// C: link_to_anything power bypasses destination ownership check
-			if !Controls(g, d.Player, dest) && !CanLinkToAny(g, d.Player) {
-				destObj, dok := g.DB.Objects[dest]
-				if !dok || !destObj.HasFlag(gamedb.FlagLinkOK) {
+			if isVariable {
+				// C TinyMUSH: link_variable power required for variable exits
+				if !CanLinkVariable(g, d.Player) {
 					g.Notify(d.Player, "Permission denied.")
 					return
+				}
+			} else {
+				// C: link_to_anything power bypasses destination ownership check
+				if !Controls(g, d.Player, dest) && !CanLinkToAny(g, d.Player) {
+					destObj, dok := g.DB.Objects[dest]
+					if !dok || !destObj.HasFlag(gamedb.FlagLinkOK) {
+						g.Notify(d.Player, "Permission denied.")
+						return
+					}
 				}
 			}
 			obj.Location = dest
@@ -640,6 +662,14 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
 		newName = strings.TrimSpace(parts[1])
 	}
+
+	// C TinyMUSH: quota check
+	cloneType := srcObj.ObjType()
+	if !g.CanPayQuota(d.Player, quotaCostForType(g, cloneType), cloneType) {
+		g.Notify(d.Player, "You have exceeded your quota.")
+		return
+	}
+	g.PayQuota(d.Player, quotaCostForType(g, cloneType), cloneType)
 
 	ref := g.CreateObject(newName, srcObj.ObjType(), d.Player)
 	newObj := g.DB.Objects[ref]
@@ -1656,6 +1686,7 @@ func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
 		g.Store.PutMeta()
 		g.Store.UpdatePlayerIndex(playerObj, "")
 	}
+	g.InitPlayerQuota(ref)
 	log.Printf("PCREATE: %s(#%d) created player %s(#%d)", g.PlayerName(d.Player), d.Player, name, ref)
 	g.Notify(d.Player, fmt.Sprintf("Player %s created as #%d.", name, ref))
 }
@@ -1711,6 +1742,7 @@ func cmdBotcreate(g *Game, d *Descriptor, args string, _ []string) {
 		g.Store.PutMeta()
 		g.Store.UpdatePlayerIndex(playerObj, "")
 	}
+	g.InitPlayerQuota(ref)
 	// Generate API key
 	var rawKey string
 	if g.Store != nil {
@@ -1765,6 +1797,11 @@ func cmdFind(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
+	// C TinyMUSH: @stats requires wizard or stat_any power
+	if !Wizard(g, d.Player) && !CanStatAny(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	rooms, things, exits, players, garbage := 0, 0, 0, 0, 0
 	for _, obj := range g.DB.Objects {
 		switch obj.ObjType() {
@@ -1801,9 +1838,10 @@ func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
 }
 
 func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
-	// C TinyMUSH: @ps/all requires wizard
+	// C TinyMUSH: @ps/all requires wizard or see_queue power
+	canSeeAll := Wizard(g, d.Player) || HasPow(g, d.Player, 0, gamedb.PowSeeQueue)
 	showAll := HasSwitch(switches, "all")
-	if showAll && !Wizard(g, d.Player) {
+	if showAll && !canSeeAll {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -3084,13 +3122,6 @@ func cmdEntrances(g *Game, d *Descriptor, args string, _ []string) {
 	} else {
 		g.Notify(d.Player, fmt.Sprintf("%d entrances found.", count))
 	}
-}
-
-// --- @quota command ---
-// C TinyMUSH: if quotas are not enabled, says "Quotas are not enabled."
-// We don't implement quota enforcement, so match C's disabled behavior.
-func cmdQuota(g *Game, d *Descriptor, args string, _ []string) {
-	g.Notify(d.Player, "Quotas are not enabled.")
 }
 
 // decompileAttrCmd maps well-known attribute numbers to their @-command names.

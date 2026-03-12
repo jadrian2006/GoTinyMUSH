@@ -201,6 +201,13 @@ func (g *Game) SetFlag(target gamedb.DBRef, flagStr string, player ...gamedb.DBR
 			}
 		}
 
+		// fh_watcher: WATCHER requires watch power or wizard (C Can_Watch)
+		if def.Bit == gamedb.Flag2Watcher && def.Word == 1 && !clear {
+			if !Wizard(g, p) && !HasPow(g, p, 0, gamedb.PowWatch) {
+				return SetFlagDenied
+			}
+		}
+
 		// fh_player_bit: ROBOT can only be set on players
 		if def.Bit == gamedb.FlagRobot && def.Word == 0 && !clear {
 			if obj.ObjType() != gamedb.TypePlayer {

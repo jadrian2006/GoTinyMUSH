@@ -217,6 +217,8 @@ func (g *Game) CreateGuest() (gamedb.DBRef, string) {
 		})
 	}
 
+	g.InitPlayerQuota(ref)
+
 	// Update player index in bolt store
 	if g.Store != nil {
 		g.Store.PutMeta()

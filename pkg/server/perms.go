@@ -551,6 +551,21 @@ func CanWizardWho(g *Game, player gamedb.DBRef) bool {
 	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowWizardWho)
 }
 
+// CanLinkVariable returns true if player can create variable exits (wizard or link_variable power).
+func CanLinkVariable(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 1, gamedb.Pow2LinkVar)
+}
+
+// CanFreeQuota returns true if player is exempt from quota checks (wizard or free_quota power).
+func CanFreeQuota(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowFreeQuota)
+}
+
+// CanChangeQuotas returns true if player can modify others' quotas (wizard or change_quotas power).
+func CanChangeQuotas(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowChgQuotas)
+}
+
 // PassLocks returns true if player has the POW_PASS_LOCKS power.
 // Unlike C TinyMUSH (which includes Wizard(x)), we require the explicit
 // pass_locks power so wizards don't silently bypass all locks.
