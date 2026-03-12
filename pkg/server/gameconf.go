@@ -57,6 +57,13 @@ type GameConf struct {
 	FunctionInvocationLimit int `yaml:"function_invocation_limit"`
 	MachineCommandCost      int `yaml:"machine_command_cost"`
 
+	// --- Execution safety limits ---
+	IterLimit             int `yaml:"iter_limit"`              // Max iterations per iter/parse/map/filter/etc. (default 10000)
+	EvalTimeLimit         int `yaml:"eval_time_limit"`         // Wall-clock seconds per queue entry eval (default 30)
+	CommandInvocationLimit int `yaml:"command_invocation_limit"` // Max commands per queue entry chain (default 2500)
+	EvalOutputLimit       int `yaml:"eval_output_limit"`       // Max output bytes per eval (default 1048576 = 1MB)
+	DolistLimit           int `yaml:"dolist_limit"`            // Max elements per @dolist (default 10000)
+
 	// --- Output ---
 	OutputLimit int `yaml:"output_limit"`
 
@@ -195,6 +202,11 @@ func DefaultGameConf() *GameConf {
 		QueueIdleChunk:          3,
 		FunctionInvocationLimit: 2500,
 		MachineCommandCost:      64,
+		IterLimit:               10000,
+		EvalTimeLimit:           30,
+		CommandInvocationLimit:  2500,
+		EvalOutputLimit:         1048576, // 1MB
+		DolistLimit:             10000,
 		OutputLimit:             16384,
 		MatchOwnCommands:        false,
 		PlayerMatchOwnCommands:  false,
@@ -419,6 +431,18 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.FunctionInvocationLimit = atoi(val, gc.FunctionInvocationLimit)
 		case "machine_command_cost":
 			gc.MachineCommandCost = atoi(val, gc.MachineCommandCost)
+
+		// --- Execution safety limits ---
+		case "iter_limit":
+			gc.IterLimit = atoi(val, gc.IterLimit)
+		case "eval_time_limit":
+			gc.EvalTimeLimit = atoi(val, gc.EvalTimeLimit)
+		case "command_invocation_limit":
+			gc.CommandInvocationLimit = atoi(val, gc.CommandInvocationLimit)
+		case "eval_output_limit":
+			gc.EvalOutputLimit = atoi(val, gc.EvalOutputLimit)
+		case "dolist_limit":
+			gc.DolistLimit = atoi(val, gc.DolistLimit)
 
 		// --- Output ---
 		case "output_limit":

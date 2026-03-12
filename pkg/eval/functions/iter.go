@@ -28,6 +28,9 @@ func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	words := splitList(listStr, idelim)
 	if len(words) == 0 { return }
 
+	// Enforce iteration limit
+	words = words[:ctx.ClampIterList(len(words))]
+
 	// Push loop state
 	ctx.Loop.InLoop++
 	ctx.Loop.LoopTokens = append(ctx.Loop.LoopTokens, "")
@@ -40,6 +43,7 @@ func fnIter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	// do not produce separators, matching observed production behavior.
 	first := true
 	for i, word := range words {
+		if ctx.TimedOut { break }
 		ctx.Loop.LoopTokens[idx] = word
 		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
@@ -96,9 +100,11 @@ func fnMap(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { odelim = d } }
 
 	words := splitList(listStr, delim)
+	words = words[:ctx.ClampIterList(len(words))]
 
 	var results []string
 	for _, word := range words {
+		if ctx.TimedOut { break }
 		result := ctx.CallIterFun(objAttr, []string{word})
 		results = append(results, result)
 	}
@@ -116,9 +122,11 @@ func fnFilter(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { odelim = d } }
 
 	words := splitList(listStr, delim)
+	words = words[:ctx.ClampIterList(len(words))]
 
 	var results []string
 	for _, word := range words {
+		if ctx.TimedOut { break }
 		result := ctx.CallIterFun(objAttr, []string{word})
 		if isTrue(result) {
 			results = append(results, word)
@@ -146,7 +154,9 @@ func fnFold(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 		words = words[1:]
 	}
 
+	words = words[:ctx.ClampIterList(len(words))]
 	for _, word := range words {
+		if ctx.TimedOut { break }
 		acc = ctx.CallIterFun(objAttr, []string{acc, word})
 	}
 	buf.WriteString(acc)
@@ -157,7 +167,11 @@ func fnForeach(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	if len(args) < 2 { return }
 	str := evalArg(ctx, args[0])
 	objAttr := evalFunRef(ctx, args[1])
+	count := 0
 	for _, ch := range str {
+		if ctx.TimedOut { break }
+		count++
+		if ctx.IterLim > 0 && count > ctx.IterLim { ctx.IterLimited = true; break }
 		result := ctx.CallIterFun(objAttr, []string{string(ch)})
 		buf.WriteString(result)
 	}
@@ -173,8 +187,10 @@ func fnWhile(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
 
 	var results []string
-	limit := 10000
+	limit := ctx.IterLim
+	if limit <= 0 { limit = 10000 }
 	for i := 0; i < limit; i++ {
+		if ctx.TimedOut { break }
 		cond := ctx.CallIterFun(condFn, []string{current})
 		if !isTrue(cond) { break }
 		current = ctx.CallIterFun(bodyFn, []string{current})
@@ -234,10 +250,12 @@ func fnStep(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
 	if len(args) > 4 { d := evalArg(ctx, args[4]); if d != "" { odelim = d } }
 	words := splitList(listStr, delim)
+	words = words[:ctx.ClampIterList(len(words))]
 	step := toInt(stepStr)
 	if step <= 0 { step = 1 }
 	var results []string
 	for i := 0; i < len(words); i += step {
+		if ctx.TimedOut { break }
 		end := i + step
 		if end > len(words) { end = len(words) }
 		chunk := words[i:end]
@@ -265,8 +283,10 @@ func fnMix(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	for _, w := range words {
 		if len(w) > maxLen { maxLen = len(w) }
 	}
+	maxLen = ctx.ClampIterList(maxLen)
 	var results []string
 	for i := 0; i < maxLen; i++ {
+		if ctx.TimedOut { break }
 		var callArgs []string
 		for _, w := range words {
 			if i < len(w) { callArgs = append(callArgs, w[i]) } else { callArgs = append(callArgs, "") }
@@ -295,6 +315,7 @@ func fnIter2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	maxLen := len(words1)
 	if len(words2) > maxLen { maxLen = len(words2) }
 	if maxLen == 0 { return }
+	maxLen = ctx.ClampIterList(maxLen)
 
 	ctx.Loop.InLoop++
 	ctx.Loop.LoopTokens = append(ctx.Loop.LoopTokens, "")
@@ -304,6 +325,7 @@ func fnIter2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 
 	var results []string
 	for i := 0; i < maxLen; i++ {
+		if ctx.TimedOut { break }
 		w1, w2 := "", ""
 		if i < len(words1) { w1 = words1[i] }
 		if i < len(words2) { w2 = words2[i] }
@@ -346,6 +368,7 @@ func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, brea
 
 	words := splitList(listStr, idelim)
 	if len(words) == 0 { return }
+	words = words[:ctx.ClampIterList(len(words))]
 
 	ctx.Loop.InLoop++
 	ctx.Loop.LoopTokens = append(ctx.Loop.LoopTokens, "")
@@ -355,6 +378,7 @@ func whenHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, brea
 
 	first := true
 	for i, word := range words {
+		if ctx.TimedOut { break }
 		ctx.Loop.LoopTokens[idx] = word
 		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
@@ -390,8 +414,10 @@ func fnFilterbool(ctx *eval.EvalContext, args []string, buf *strings.Builder, _,
 	if len(args) > 2 { d := evalArg(ctx, args[2]); if d != "" { delim = d } }
 	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { odelim = d } }
 	words := splitList(listStr, delim)
+	words = words[:ctx.ClampIterList(len(words))]
 	var results []string
 	for _, word := range words {
+		if ctx.TimedOut { break }
 		result := ctx.CallIterFun(objAttr, []string{word})
 		if isTrue(result) {
 			results = append(results, word)
@@ -410,8 +436,10 @@ func fnUntil(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	delim := " "
 	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
 	var results []string
-	limit := 10000
+	limit := ctx.IterLim
+	if limit <= 0 { limit = 10000 }
 	for i := 0; i < limit; i++ {
+		if ctx.TimedOut { break }
 		cond := ctx.CallIterFun(condFn, []string{current})
 		if isTrue(cond) { break }
 		current = ctx.CallIterFun(bodyFn, []string{current})
@@ -434,6 +462,7 @@ func fnLoop(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 
 	words := splitList(listStr, idelim)
 	if len(words) == 0 { return }
+	words = words[:ctx.ClampIterList(len(words))]
 
 	ctx.Loop.InLoop++
 	ctx.Loop.LoopTokens = append(ctx.Loop.LoopTokens, "")
@@ -442,6 +471,7 @@ func fnLoop(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	idx := ctx.Loop.InLoop - 1
 
 	for i, word := range words {
+		if ctx.TimedOut { break }
 		ctx.Loop.LoopTokens[idx] = word
 		ctx.Loop.LoopNumbers[idx] = i + 1
 		result := ctx.Exec(pattern, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
@@ -480,6 +510,7 @@ func fnList2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	maxLen := len(words1)
 	if len(words2) > maxLen { maxLen = len(words2) }
 	if maxLen == 0 { return }
+	maxLen = ctx.ClampIterList(maxLen)
 
 	ctx.Loop.InLoop++
 	ctx.Loop.LoopTokens = append(ctx.Loop.LoopTokens, "")
@@ -488,6 +519,7 @@ func fnList2(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	idx := ctx.Loop.InLoop - 1
 
 	for i := 0; i < maxLen; i++ {
+		if ctx.TimedOut { break }
 		w1, w2 := "", ""
 		if i < len(words1) { w1 = words1[i] }
 		if i < len(words2) { w2 = words2[i] }
@@ -537,6 +569,7 @@ func when2Helper(ctx *eval.EvalContext, args []string, buf *strings.Builder, wan
 	maxLen := len(words1)
 	if len(words2) > maxLen { maxLen = len(words2) }
 	if maxLen == 0 { return }
+	maxLen = ctx.ClampIterList(maxLen)
 
 	ctx.Loop.InLoop++
 	ctx.Loop.LoopTokens = append(ctx.Loop.LoopTokens, "")
@@ -546,6 +579,7 @@ func when2Helper(ctx *eval.EvalContext, args []string, buf *strings.Builder, wan
 
 	var results []string
 	for i := 0; i < maxLen; i++ {
+		if ctx.TimedOut { break }
 		w1, w2 := "", ""
 		if i < len(words1) { w1 = words1[i] }
 		if i < len(words2) { w2 = words2[i] }

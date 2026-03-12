@@ -31,6 +31,11 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 		return
 	}
 
+	// Short-circuit if timed out or output capped
+	if ctx.TimedOut || ctx.OutputLimited {
+		return
+	}
+
 	// Propagate parent cargs: if caller passed nil, inherit from context.
 	// If caller passed explicit cargs, update context (and restore on return).
 	if cargs == nil {
@@ -189,7 +194,11 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 					// Call the UFunction: fetch attr, evaluate with args as %0-%9
 					ctx.FuncNestLev++
 					ctx.FuncInvkCtr++
-					if ctx.FuncNestLev >= ctx.FuncNestLim {
+					if ctx.FuncInvkCtr%100 == 0 && ctx.CheckDeadline() {
+						buf.WriteString("#-1 CPU TIME LIMIT EXCEEDED")
+					} else if ctx.CheckOutputLimit(buf.Len()) {
+						buf.WriteString("#-1 OUTPUT LIMIT EXCEEDED")
+					} else if ctx.FuncNestLev >= ctx.FuncNestLim {
 						buf.WriteString("#-1 FUNCTION RECURSION LIMIT EXCEEDED")
 					} else if ctx.FuncInvkCtr >= ctx.FuncInvkLim {
 						buf.WriteString("#-1 FUNCTION INVOCATION LIMIT EXCEEDED")
@@ -286,10 +295,15 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				nfargs = 0
 			}
 
-			// Check recursion and invocation limits
+			// Check recursion, invocation, and time limits
 			ctx.FuncNestLev++
 			ctx.FuncInvkCtr++
-			if ctx.FuncNestLev >= ctx.FuncNestLim {
+			// Check deadline every 100 invocations (amortized cost)
+			if ctx.FuncInvkCtr%100 == 0 && ctx.CheckDeadline() {
+				buf.WriteString("#-1 CPU TIME LIMIT EXCEEDED")
+			} else if ctx.CheckOutputLimit(buf.Len()) {
+				buf.WriteString("#-1 OUTPUT LIMIT EXCEEDED")
+			} else if ctx.FuncNestLev >= ctx.FuncNestLim {
 				buf.WriteString("#-1 FUNCTION RECURSION LIMIT EXCEEDED")
 			} else if ctx.FuncInvkCtr >= ctx.FuncInvkLim {
 				buf.WriteString("#-1 FUNCTION INVOCATION LIMIT EXCEEDED")

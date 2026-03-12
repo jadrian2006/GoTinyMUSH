@@ -2,6 +2,7 @@ package eval
 
 import (
 	"strings"
+	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
@@ -290,6 +291,19 @@ type EvalContext struct {
 	FuncNestLim int // default 50
 	FuncInvkLim int // default 2500
 
+	// Iteration limit — caps iter/parse/map/filter/foreach/etc. element count (default 10000)
+	IterLim     int
+	IterLimited bool // set when iteration limit was hit
+
+	// Wall-clock deadline for this evaluation context.
+	// Zero means no deadline (backward compat for unit tests).
+	Deadline time.Time
+	TimedOut bool // set when deadline exceeded; all further eval returns ""
+
+	// Output buffer cap (bytes). 0 = unlimited (backward compat for unit tests).
+	OutputLimit   int
+	OutputLimited bool // set when output cap exceeded
+
 	// Current command text
 	CurrCmd string
 
@@ -385,12 +399,49 @@ func NewEvalContext(db *gamedb.Database) *EvalContext {
 		RData:         NewRegisterData(),
 		FuncNestLim:   50,
 		FuncInvkLim:   2500,
+		IterLim:       10000,
+		OutputLimit:   1048576, // 1MB default
 		SpaceCompress: false,
 		AnsiColors:    true,
 		UFunctions:    make(map[string]*UFunction),
 		Functions:     make(map[string]*Function),
 	}
 	return ctx
+}
+
+// CheckDeadline tests if the wall-clock deadline has been exceeded.
+// Should be called periodically (e.g. every 100 function invocations).
+// Returns true if evaluation should stop.
+func (ctx *EvalContext) CheckDeadline() bool {
+	if ctx.TimedOut {
+		return true
+	}
+	if !ctx.Deadline.IsZero() && time.Now().After(ctx.Deadline) {
+		ctx.TimedOut = true
+		return true
+	}
+	return false
+}
+
+// ClampIterList returns n clamped to IterLim, setting IterLimited if truncated.
+func (ctx *EvalContext) ClampIterList(n int) int {
+	if ctx.IterLim > 0 && n > ctx.IterLim {
+		ctx.IterLimited = true
+		return ctx.IterLim
+	}
+	return n
+}
+
+// CheckOutputLimit returns true if the output buffer has exceeded the cap.
+func (ctx *EvalContext) CheckOutputLimit(bufLen int) bool {
+	if ctx.OutputLimited {
+		return true
+	}
+	if ctx.OutputLimit > 0 && bufLen > ctx.OutputLimit {
+		ctx.OutputLimited = true
+		return true
+	}
+	return false
 }
 
 // GetAttrValue fetches an attribute value for an object from the DB.

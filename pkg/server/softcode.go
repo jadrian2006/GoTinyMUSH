@@ -357,10 +357,18 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 	ctx.Cause = entry.Cause
 	ctx.Caller = entry.Caller
 
+	// Set wall-clock deadline for this evaluation
+	if g.Conf != nil && g.Conf.EvalTimeLimit > 0 {
+		ctx.Deadline = time.Now().Add(time.Duration(g.Conf.EvalTimeLimit) * time.Second)
+	}
+
 	// Restore register data if present
 	if entry.RData != nil {
 		ctx.RData = entry.RData
 	}
+
+	// Deferred: check for limit violations after execution and alert wizards
+	defer g.checkEvalLimits(ctx, entry)
 
 	// Split on semicolons FIRST (respecting braces), then evaluate each command.
 	// This mirrors TinyMUSH's process_cmdline which uses parse_to(&cmdline, ';', 0)
@@ -723,6 +731,23 @@ func (g *Game) handleDolistDeferred(ctx *eval.EvalContext, entry *QueueEntry, de
 		elements = strings.Split(evalLHS, delim)
 	} else {
 		elements = strings.Fields(evalLHS)
+	}
+
+	// Enforce @dolist element cap
+	dolistLim := 10000
+	if g.Conf != nil && g.Conf.DolistLimit > 0 {
+		dolistLim = g.Conf.DolistLimit
+	}
+	if len(elements) > dolistLim {
+		objName := "#" + fmt.Sprintf("%d", entry.Player)
+		if obj, ok := g.DB.Objects[entry.Player]; ok {
+			objName = obj.Name + "(#" + fmt.Sprintf("%d", entry.Player) + ")"
+		}
+		logMsg := fmt.Sprintf("[LIMIT] dolist_limit (%d elements, had %d): %s", dolistLim, len(elements), objName)
+		wizMsg := logMsg + "\n  adjust with @admin dolist_limit or in config file"
+		log.Print(logMsg)
+		g.NotifyWizards(wizMsg)
+		elements = elements[:dolistLim]
 	}
 
 	immediate := HasSwitch(switches, "now")
@@ -1597,6 +1622,43 @@ func (g *Game) safeExecuteQueueEntry(entry *QueueEntry) {
 	})
 	g.ExecuteQueueEntry(entry)
 	timer.Stop()
+}
+
+// checkEvalLimits inspects the EvalContext after execution completes and
+// alerts connected wizards if any safety limit was hit.
+func (g *Game) checkEvalLimits(ctx *eval.EvalContext, entry *QueueEntry) {
+	objName := "#" + fmt.Sprintf("%d", entry.Player)
+	if obj, ok := g.DB.Objects[entry.Player]; ok {
+		objName = obj.Name + "(#" + fmt.Sprintf("%d", entry.Player) + ")"
+	}
+	cmdSnippet := entry.Command
+	if len(cmdSnippet) > 60 {
+		cmdSnippet = cmdSnippet[:60] + "..."
+	}
+
+	notify := func(limitName, detail string) {
+		logMsg := fmt.Sprintf("[LIMIT] %s (%s): %s cmd=%q", limitName, detail, objName, cmdSnippet)
+		wizMsg := logMsg + "\n  adjust with @admin " + limitName + " or in config file"
+		log.Print(logMsg)
+		g.NotifyWizards(wizMsg)
+	}
+
+	if ctx.TimedOut {
+		limit := 30
+		if g.Conf != nil && g.Conf.EvalTimeLimit > 0 {
+			limit = g.Conf.EvalTimeLimit
+		}
+		notify("eval_time_limit", fmt.Sprintf("%ds", limit))
+	}
+	if ctx.OutputLimited {
+		notify("eval_output_limit", fmt.Sprintf("%d bytes", ctx.OutputLimit))
+	}
+	if ctx.FuncInvkCtr >= ctx.FuncInvkLim {
+		notify("function_invocation_limit", fmt.Sprintf("%d", ctx.FuncInvkLim))
+	}
+	if ctx.IterLimited {
+		notify("iter_limit", fmt.Sprintf("%d", ctx.IterLim))
+	}
 }
 
 // WakeQueue signals the queue processor to run immediately.
