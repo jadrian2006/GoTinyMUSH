@@ -159,6 +159,12 @@ type GameConf struct {
 	// --- Alias config includes (YAML: list of paths; legacy: from "include" directives) ---
 	AliasFiles []string `yaml:"alias_files"`
 
+	// --- Function access control ---
+	// Maps function names (uppercase) to access levels: "public", "wizard", "god", "disabled".
+	// Matches C TinyMUSH's function_access config directive.
+	// Example: function_access: { FORCE: wizard, WIPE: wizard, BEEP: wizard }
+	FunctionAccess map[string]string `yaml:"function_access"`
+
 	// --- Compatibility ---
 	FixEscapeEval bool `yaml:"fix_escape_eval"` // Strip double-escaped \\[ \\] \\% \\{ \\} in queued attrs (default true)
 

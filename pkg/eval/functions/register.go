@@ -460,12 +460,14 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("STARTTIME", fnStarttime, 0, 0)
 	ctx.RegisterFunction("RESTARTTIME", fnRestarttime, 0, 0)
 	ctx.RegisterFunction("PORTS", fnPorts, 1, 0)
+	ctx.Functions["PORTS"].Perms = eval.FnAccessWizard // C default: CA_WIZARD
 	ctx.RegisterFunction("CONNRECORD", fnConnrecord, 0, 0)
 	ctx.RegisterFunction("FCOUNT", fnFcount, 0, 0)
 	ctx.RegisterFunction("FDEPTH", fnFdepth, 0, 0)
 	ctx.RegisterFunction("CONFIG", fnConfig, 1, 0)
 	ctx.RegisterFunction("EVAL", fnEvalFn, 2, 0)
 	ctx.RegisterFunction("BEEP", fnBeep, 0, 0)
+	ctx.Functions["BEEP"].Perms = eval.FnAccessWizard // C default: CA_WIZARD
 	ctx.RegisterFunction("SEARCH", fnSearch, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("LSEARCH", fnSearch, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("STATS", fnStats, 0, eval.FnVarArgs)

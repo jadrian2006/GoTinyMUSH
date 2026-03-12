@@ -805,6 +805,11 @@ func (g *Game) IsWizard(player gamedb.DBRef) bool {
 	return Wizard(g, player)
 }
 
+// IsGod returns true if the player is the God player.
+func (g *Game) IsGod(player gamedb.DBRef) bool {
+	return IsGod(g, player)
+}
+
 // sortStrings sorts a slice of strings in place.
 func sortStrings(s []string) {
 	for i := 1; i < len(s); i++ {

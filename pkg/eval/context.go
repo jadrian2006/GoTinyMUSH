@@ -179,6 +179,8 @@ type GameState interface {
 	SetAttrDefFlags(player gamedb.DBRef, attrName, flags string) string
 	// IsWizard returns true if the player is an effective wizard.
 	IsWizard(player gamedb.DBRef) bool
+	// IsGod returns true if the player is the God player (#1).
+	IsGod(player gamedb.DBRef) bool
 	// GetObjLockStr returns the serialized default lock (obj.Lock BoolExp) for an object.
 	// Returns "" if no header lock is set. Used as fallback when attr 42 is empty.
 	GetObjLockStr(obj gamedb.DBRef) string
@@ -407,6 +409,7 @@ type Function struct {
 	MinArgs int // Minimum args for VarArgs functions (0 = no minimum)
 	MaxArgs int // Maximum args for VarArgs functions (0 = no maximum)
 	Flags   int
+	Perms   int // Access level: FnAccessPublic, FnAccessWizard, FnAccessGod, FnAccessDisabled
 }
 
 // Function flags
@@ -417,6 +420,36 @@ const (
 	FnNoregs  = 0x0008 // Don't pass registers
 	FnPres    = 0x0010 // Preserve registers across call
 )
+
+// Function access levels (matching C TinyMUSH CA_PUBLIC/CA_WIZARD/CA_GOD/CA_DISABLED)
+const (
+	FnAccessPublic   = 0 // Anyone can use (default)
+	FnAccessWizard   = 1 // Wizard-only
+	FnAccessGod      = 2 // God-only
+	FnAccessDisabled = 3 // Completely disabled
+)
+
+// CheckFuncAccess checks whether the current player can invoke a function.
+// Returns true if access is allowed.
+func (ctx *EvalContext) CheckFuncAccess(fn *Function) bool {
+	switch fn.Perms {
+	case FnAccessPublic:
+		return true
+	case FnAccessWizard:
+		if ctx.GameState != nil {
+			return ctx.GameState.IsWizard(ctx.Player)
+		}
+		return false
+	case FnAccessGod:
+		if ctx.GameState != nil {
+			return ctx.GameState.IsGod(ctx.Player)
+		}
+		return false
+	case FnAccessDisabled:
+		return false
+	}
+	return true
+}
 
 // NewEvalContext creates an EvalContext with reasonable defaults.
 func NewEvalContext(db *gamedb.Database) *EvalContext {

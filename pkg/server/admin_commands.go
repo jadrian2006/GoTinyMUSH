@@ -4104,6 +4104,16 @@ func getAdminParam(c *GameConf, param string) (string, bool) {
 	case "debug":
 		if IsDebug() { return "1", true }
 		return "0", true
+	case "function_access":
+		// Show all configured function access overrides
+		if c.FunctionAccess == nil || len(c.FunctionAccess) == 0 {
+			return "(none)", true
+		}
+		var parts []string
+		for name, level := range c.FunctionAccess {
+			parts = append(parts, strings.ToUpper(name)+":"+level)
+		}
+		return strings.Join(parts, " "), true
 	default:
 		return "", false
 	}
@@ -4193,6 +4203,29 @@ func setAdminParam(c *GameConf, param, value string) bool {
 		return true
 	case "debug":
 		SetDebug(parseBoolAdmin(value, negate))
+		return true
+	case "function_access":
+		// @admin function_access=FUNCNAME LEVEL
+		// e.g.: @admin function_access=FORCE wizard
+		// e.g.: @admin function_access=BEEP disabled
+		// e.g.: @admin function_access=FORCE public  (reset to default)
+		parts := strings.Fields(value)
+		if len(parts) != 2 {
+			return false
+		}
+		funcName := strings.ToUpper(parts[0])
+		level := strings.ToLower(parts[1])
+		if level != "public" && level != "wizard" && level != "god" && level != "disabled" {
+			return false
+		}
+		if c.FunctionAccess == nil {
+			c.FunctionAccess = make(map[string]string)
+		}
+		if level == "public" {
+			delete(c.FunctionAccess, funcName)
+		} else {
+			c.FunctionAccess[funcName] = level
+		}
 		return true
 	default:
 		return false

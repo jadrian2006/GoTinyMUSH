@@ -307,6 +307,8 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				buf.WriteString("#-1 FUNCTION RECURSION LIMIT EXCEEDED")
 			} else if ctx.FuncInvkCtr >= ctx.FuncInvkLim {
 				buf.WriteString("#-1 FUNCTION INVOCATION LIMIT EXCEEDED")
+			} else if !ctx.CheckFuncAccess(fn) {
+				buf.WriteString("#-1 PERMISSION DENIED")
 			} else if fn.Flags&FnVarArgs != 0 {
 				// VarArgs: enforce min/max if set (matching C fn_range_check format)
 				if (fn.MinArgs > 0 && nfargs < fn.MinArgs) || (fn.MaxArgs > 0 && nfargs > fn.MaxArgs) {

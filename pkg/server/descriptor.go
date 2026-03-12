@@ -500,13 +500,39 @@ func MakeEvalContextForObj(g *Game, executor gamedb.DBRef, enactor gamedb.DBRef,
 	return ctx
 }
 
-// applyGameFuncs copies @function-defined functions from Game to an EvalContext.
+// applyGameFuncs copies @function-defined functions from Game to an EvalContext,
+// and applies function_access permissions from config.
 func applyGameFuncs(g *Game, ctx *eval.EvalContext) {
-	if g == nil || g.GameFuncs == nil {
+	if g == nil {
 		return
 	}
-	for name, uf := range g.GameFuncs {
-		ctx.UFunctions[name] = uf
+	if g.GameFuncs != nil {
+		for name, uf := range g.GameFuncs {
+			ctx.UFunctions[name] = uf
+		}
+	}
+	// Apply function_access config permissions
+	if g.Conf != nil && g.Conf.FunctionAccess != nil {
+		for name, level := range g.Conf.FunctionAccess {
+			upper := strings.ToUpper(name)
+			if fn, ok := ctx.Functions[upper]; ok {
+				fn.Perms = parseFuncAccessLevel(level)
+			}
+		}
+	}
+}
+
+// parseFuncAccessLevel converts a string access level to the eval constant.
+func parseFuncAccessLevel(level string) int {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "wizard":
+		return eval.FnAccessWizard
+	case "god":
+		return eval.FnAccessGod
+	case "disabled":
+		return eval.FnAccessDisabled
+	default:
+		return eval.FnAccessPublic
 	}
 }
 
