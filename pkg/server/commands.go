@@ -3121,6 +3121,14 @@ func (g *Game) ObjName(ref gamedb.DBRef) string {
 	return fmt.Sprintf("#%d", ref)
 }
 
+// ObjFlags returns the C-style flag letters string for an object (e.g. "PMOUc").
+func (g *Game) ObjFlags(ref gamedb.DBRef) string {
+	if obj, ok := g.DB.Objects[ref]; ok {
+		return flagString(obj)
+	}
+	return ""
+}
+
 // GetAttrText returns the text of an attribute on an object.
 // It checks the object first, then walks the parent chain (like TinyMUSH's atr_pget).
 func (g *Game) GetAttrText(obj gamedb.DBRef, attrNum int) string {

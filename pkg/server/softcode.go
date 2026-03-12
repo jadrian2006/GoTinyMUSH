@@ -1398,22 +1398,75 @@ func (g *Game) DoTriggerNow(player, cause gamedb.DBRef, args string) {
 }
 
 // DoWait queues a delayed command.
-// Format: @wait seconds = command  OR  @wait obj/attr = command
+// Format: @wait seconds = command  OR  @wait obj[/attr] = command
+// C: CS_TWO_ARG — no = means event=args, cmd="".
+// Non-numeric args are semaphore object names; match failure → error messages.
 func (g *Game) DoWait(player, cause gamedb.DBRef, args string) {
+	var waitSpec, command string
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
+		// C: no = sign → event=full args, cmd=""
+		waitSpec = strings.TrimSpace(args)
+		command = ""
+	} else {
+		waitSpec = strings.TrimSpace(args[:eqIdx])
+		command = strings.TrimSpace(args[eqIdx+1:])
+	}
+
+	// C: if event is all numeric → simple timed wait
+	if waitSpec != "" && isNumeric(waitSpec) {
+		if command == "" {
+			return
+		}
+		command = stripOuterBraces(command)
+		secs := toIntSimple(waitSpec)
+		if secs < 0 {
+			secs = 0
+		}
+		entry := &QueueEntry{
+			Player:  player,
+			Cause:   cause,
+			Caller:  player,
+			Command: command,
+		}
+		entry.WaitUntil = time.Now().Add(time.Duration(secs) * time.Second)
+		g.Queue.AddWait(entry)
 		return
 	}
-	waitSpec := strings.TrimSpace(args[:eqIdx])
-	command := strings.TrimSpace(args[eqIdx+1:])
+
+	// Non-numeric: semaphore path — parse obj[/attr]
+	var objStr string
+	var attrStr string
+	if slashIdx := strings.IndexByte(waitSpec, '/'); slashIdx >= 0 {
+		objStr = waitSpec[:slashIdx]
+		attrStr = waitSpec[slashIdx+1:]
+	} else {
+		objStr = waitSpec
+	}
+
+	target := g.ResolveRef(player, objStr)
+	if target == gamedb.Nothing {
+		target = g.MatchObject(player, objStr)
+	}
+	if target == gamedb.Nothing {
+		// C: noisy_match_result() + explicit "No match."
+		g.Notify(player, "I don't see that here.")
+		g.Notify(player, "No match.")
+		return
+	}
+
 	if command == "" {
 		return
 	}
-	// Strip outer braces so the body is treated as multiple semicolon-separated
-	// commands (each evaluated independently), not as a single brace-grouped
-	// expression where all [bracket] calls evaluate before any command dispatches.
-	// This matches handleWaitDeferred's behavior and C TinyMUSH's process_cmdline.
 	command = stripOuterBraces(command)
+
+	// Determine semaphore attr
+	attr := gamedb.A_SEMAPHORE
+	if attrStr != "" {
+		if a := g.ResolveAttrNum(attrStr); a > 0 {
+			attr = a
+		}
+	}
 
 	entry := &QueueEntry{
 		Player:  player,
@@ -1421,41 +1474,7 @@ func (g *Game) DoWait(player, cause gamedb.DBRef, args string) {
 		Caller:  player,
 		Command: command,
 	}
-
-	// Check if it's a number (timed wait) or obj/attr (semaphore)
-	if isNumeric(waitSpec) {
-		secs := toIntSimple(waitSpec)
-		if secs < 0 {
-			secs = 0
-		}
-		entry.WaitUntil = time.Now().Add(time.Duration(secs) * time.Second)
-		g.Queue.AddWait(entry)
-	} else if slashIdx := strings.IndexByte(waitSpec, '/'); slashIdx >= 0 {
-		// Semaphore wait: obj/attr
-		objStr := waitSpec[:slashIdx]
-		attrStr := waitSpec[slashIdx+1:]
-		target := g.ResolveRef(player, objStr)
-		if target == gamedb.Nothing {
-			return
-		}
-		attr := g.ResolveAttrNum(attrStr)
-		if attr <= 0 {
-			attr = gamedb.A_SEMAPHORE
-		}
-		g.semaphoreWait(target, attr, entry)
-	} else {
-		// C TinyMUSH: @wait <obj>={cmd} without /attr defaults to A_SEMAPHORE (47).
-		target := g.ResolveRef(player, waitSpec)
-		if target == gamedb.Nothing {
-			target = g.MatchObject(player, waitSpec)
-		}
-		if target != gamedb.Nothing {
-			g.semaphoreWait(target, gamedb.A_SEMAPHORE, entry)
-		} else {
-			// Unrecognized — queue immediate
-			g.Queue.Add(entry)
-		}
-	}
+	g.semaphoreWait(target, attr, entry)
 }
 
 // DoForce forces an object to execute a command.
@@ -2044,12 +2063,16 @@ func (g *Game) semaphoreAddTo(obj gamedb.DBRef, attr int, amount int) int {
 func (g *Game) semaphoreWait(target gamedb.DBRef, attr int, qe *QueueEntry) {
 	count := g.semaphoreAddTo(target, attr, 1)
 	DebugLog("SEMWAIT target=#%d attr=%d count=%d player=#%d cmd=%q", target, attr, count, qe.Player, truncDebug(qe.Command, 200))
-	if count <= 1 {
-		// Idle (was 0) or pre-notified (was negative): execute immediately
+	if count <= 0 {
+		// Pre-notified (was negative before increment): execute immediately.
+		// C TinyMUSH: if add_to returns <= 0, sets sem=NOTHING so wait_que
+		// puts it on the immediate queue.
 		g.Queue.Add(qe)
 		g.WakeQueue()
 	} else {
-		// Another command is in-flight (count > 1): queue for serialization
+		// count > 0: queue for semaphore serialization.
+		// C TinyMUSH: if add_to returns > 0, wait_que puts it on sem queue.
+		// @notify will release it later.
 		qe.SemObj = target
 		qe.SemAttr = attr
 		g.Queue.AddSemaphore(qe)
@@ -2065,6 +2088,9 @@ func (g *Game) semaphoreNotify(target gamedb.DBRef, attr int, count int) int {
 		g.semaphoreAddTo(target, attr, -1)
 		w := g.Queue.NotifySemaphore(target, attr, 1)
 		woken += w
+	}
+	if woken > 0 {
+		g.WakeQueue()
 	}
 	return woken
 }

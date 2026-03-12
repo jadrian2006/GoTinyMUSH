@@ -1136,13 +1136,16 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdForce(g *Game, d *Descriptor, args string, _ []string) {
+	// C: CS_TWO_ARG — splits at =. No = → targetStr=args, command=""
+	var targetStr, command string
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @force object = command")
-		return
+		targetStr = strings.TrimSpace(args)
+		command = ""
+	} else {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		command = strings.TrimSpace(args[eqIdx+1:])
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	command := strings.TrimSpace(args[eqIdx+1:])
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
@@ -1152,7 +1155,9 @@ func cmdForce(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
-	g.DoForce(d.Player, target, command)
+	if command != "" {
+		g.DoForce(d.Player, target, command)
+	}
 }
 
 func cmdTriggerCmd(g *Game, d *Descriptor, args string, switches []string) {
@@ -1187,7 +1192,9 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 	parts := strings.SplitN(objAttr, "/", 2)
 	target := g.MatchObject(d.Player, parts[0])
 	if target == gamedb.Nothing {
+		// C: noisy_match_result() + explicit "No match."
 		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "No match.")
 		return
 	}
 
@@ -1204,8 +1211,8 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 		count = 1
 	}
 
-	woken := g.semaphoreNotify(target, attr, count)
-	_ = woken // C TinyMUSH only shows "Notified." if neither player nor target is QUIET
+	g.semaphoreNotify(target, attr, count)
+	g.Notify(d.Player, "Notified.")
 }
 
 func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
@@ -1529,32 +1536,83 @@ func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
 }
 
 func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
-	imm, wait, sem := g.Queue.Stats()
-	g.Notify(d.Player, fmt.Sprintf("Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
-	g.Notify(d.Player, fmt.Sprintf("Total: %d entries", imm+wait+sem))
+	// C format: show entries by queue type with headers, then Totals line
+	entries := g.Queue.Peek(200)
+	owner := ResolveOwner(g, d.Player)
+	showAll := HasSwitch(switches, "all")
 
-	if HasSwitch(switches, "all") {
-		entries := g.Queue.Peek(50)
-		if len(entries) == 0 {
-			g.Notify(d.Player, "(no entries)")
-			return
-		}
-		for i, e := range entries {
-			name := g.PlayerName(e.Player)
-			cmd := e.Command
-			if len(cmd) > 60 {
-				cmd = cmd[:60] + "..."
+	// Categorize entries
+	var playerQ, objectQ, waitQ, semQ []*QueueEntry
+	var pTot, oTot, wTot, sTot int
+	for _, e := range entries {
+		eOwner := ResolveOwner(g, e.Player)
+		isWait := !e.WaitUntil.IsZero() && e.SemObj < 0
+		isSem := e.SemObj >= 0
+		switch {
+		case isSem:
+			sTot++
+			if showAll || eOwner == owner {
+				semQ = append(semQ, e)
 			}
-			qtype := "imm"
-			if !e.WaitUntil.IsZero() {
-				qtype = "wait"
+		case isWait:
+			wTot++
+			if showAll || eOwner == owner {
+				waitQ = append(waitQ, e)
 			}
-			if e.SemObj >= 0 {
-				qtype = "sem"
+		default:
+			// C separates Player queue and Object queue
+			if e.Player == eOwner {
+				pTot++
+				if showAll || eOwner == owner {
+					playerQ = append(playerQ, e)
+				}
+			} else {
+				oTot++
+				if showAll || eOwner == owner {
+					objectQ = append(objectQ, e)
+				}
 			}
-			g.Notify(d.Player, fmt.Sprintf("  [%d] %s player=%s(#%d) cmd=%s", i+1, qtype, name, e.Player, cmd))
 		}
 	}
+
+	// Show entries with headers (C format: "----- X Queue -----")
+	showQ := func(label string, q []*QueueEntry) {
+		if len(q) == 0 {
+			return
+		}
+		g.Notify(d.Player, fmt.Sprintf("----- %s Queue -----", label))
+		for _, e := range q {
+			name := g.ObjName(e.Player)
+			flags := g.ObjFlags(e.Player)
+			objStr := fmt.Sprintf("%s(#%d%s)", name, e.Player, flags)
+			if e.SemObj >= 0 && !e.WaitUntil.IsZero() {
+				secs := int(time.Until(e.WaitUntil).Seconds())
+				if secs < 0 {
+					secs = 0
+				}
+				g.Notify(d.Player, fmt.Sprintf("[#%d/%d] %s:%s", e.SemObj, secs, objStr, e.Command))
+			} else if !e.WaitUntil.IsZero() {
+				secs := int(time.Until(e.WaitUntil).Seconds())
+				if secs < 0 {
+					secs = 0
+				}
+				g.Notify(d.Player, fmt.Sprintf("[%d] %s:%s", secs, objStr, e.Command))
+			} else if e.SemObj >= 0 {
+				g.Notify(d.Player, fmt.Sprintf("[#%d] %s:%s", e.SemObj, objStr, e.Command))
+			} else {
+				g.Notify(d.Player, fmt.Sprintf("%s:%s", objStr, e.Command))
+			}
+		}
+	}
+
+	showQ("Player", playerQ)
+	showQ("Object", objectQ)
+	showQ("Wait", waitQ)
+	showQ("Semaphore", semQ)
+
+	// C Totals line
+	g.Notify(d.Player, fmt.Sprintf("Totals: Player...%d/%d  Object...%d/%d  Wait...%d/%d  Semaphore...%d/%d",
+		len(playerQ), pTot, len(objectQ), oTot, len(waitQ), wTot, len(semQ), sTot))
 }
 
 // --- Softcode Commands ---
@@ -3405,7 +3463,9 @@ func cmdFunction(g *Game, d *Descriptor, args string, switches []string) {
 func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 	args = strings.TrimSpace(args)
 	if args == "" {
-		g.Notify(d.Player, "Usage: @drain <object>")
+		// C: noisy_match_result("") + explicit "No match."
+		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "No match.")
 		return
 	}
 
@@ -3437,12 +3497,13 @@ func cmdDrain(g *Game, d *Descriptor, args string, _ []string) {
 		}
 	}
 
-	count := g.Queue.DrainObject(target, semAttr)
+	g.Queue.DrainObject(target, semAttr)
 
 	// Reset the semaphore count on the object (clear attr)
 	g.SetAttr(target, semAttr, "")
 
-	g.Notify(d.Player, fmt.Sprintf("Drained %d entries from %s.", count, objStr))
+	// C: just "Drained." with no details
+	g.Notify(d.Player, "Drained.")
 }
 
 // --- Archive Commands ---

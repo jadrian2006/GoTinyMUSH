@@ -197,7 +197,7 @@ var WellKnownAttrFlags = map[int]int{
 	41:  AFInternal | AFGod,                         // A_ALLOWANCE
 	42:  AFInternal | AFNoProg | AFNoCMD | AFIsLock,  // A_LOCK — default lock (shown via Key: line)
 	43:  AFInternal,                                 // A_NAME
-	47:  AFInternal,                                 // A_SEMAPHORE
+	47:  AFNoProg | AFWizard | AFNoCMD | AFNoClone,   // A_SEMAPHORE
 	48:  AFInternal,                                 // A_TIMEOUT
 	49:  AFInternal | AFGod,                         // A_QUOTA
 	59:  AFNoProg | AFNoCMD | AFIsLock,               // A_LENTER — EnterLock
