@@ -722,6 +722,8 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLGive // A_LGIVE = 63
 	} else if HasSwitch(switches, "receive") || HasSwitch(switches, "receivelock") {
 		lockAttrNum = aLRecv // A_LRECEIVE = 87
+	} else if HasSwitch(switches, "drop") || HasSwitch(switches, "droplock") {
+		lockAttrNum = aLDrop // A_LDROP = 86
 	}
 	// Parse lock expression at set time to resolve names (me, here, etc.) to dbrefs.
 	// This matches C TinyMUSH behavior where lock keys are stored as parsed boolexps.
@@ -756,6 +758,8 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLGive // A_LGIVE = 63
 	} else if HasSwitch(switches, "receive") || HasSwitch(switches, "receivelock") {
 		lockAttrNum = aLRecv // A_LRECEIVE = 87
+	} else if HasSwitch(switches, "drop") || HasSwitch(switches, "droplock") {
+		lockAttrNum = aLDrop // A_LDROP = 86
 	}
 	g.SetAttr(target, lockAttrNum, "")
 	g.Notify(d.Player, "Unlocked.")
@@ -986,7 +990,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 
 	dest := g.ResolveRef(d.Player, destStr)
 	if dest == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that destination.")
+		g.Notify(d.Player, "No match.")
 		return
 	}
 
@@ -1152,10 +1156,16 @@ func cmdForce(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdTriggerCmd(g *Game, d *Descriptor, args string, switches []string) {
+	var ok bool
 	if HasSwitch(switches, "now") {
 		g.DoTriggerNow(d.Player, d.Player, args)
+		ok = true // DoTriggerNow doesn't return bool; assume success for /now
 	} else {
-		g.DoTrigger(d.Player, d.Player, args)
+		ok = g.DoTrigger(d.Player, d.Player, args)
+	}
+	if !ok {
+		g.Notify(d.Player, "No match.")
+		return
 	}
 	g.Notify(d.Player, "Triggered.")
 }

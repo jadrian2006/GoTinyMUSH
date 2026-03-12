@@ -1279,7 +1279,8 @@ func (g *Game) objSetVAttr(player gamedb.DBRef, rest string) {
 
 // DoTrigger triggers an attribute on an object.
 // Format: @trigger obj/attr [= arg0, arg1, ...]
-func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
+// Returns true if the attribute was found and queued, false if no match.
+func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) bool {
 	var objAttr, argStr string
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 		objAttr = strings.TrimSpace(args[:eqIdx])
@@ -1290,26 +1291,26 @@ func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
 
 	parts := strings.SplitN(objAttr, "/", 2)
 	if len(parts) != 2 {
-		return
+		return false
 	}
 
 	target := g.ResolveRef(player, parts[0])
 	if target == gamedb.Nothing {
 		DebugLog("TRIGGER player=#%d target=%q RESOLVE FAILED", player, parts[0])
-		return
+		return false
 	}
 
 	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
 	attrNum := g.ResolveAttrNum(attrName)
 	if attrNum < 0 {
 		DebugLog("TRIGGER player=#%d target=#%d attr=%q ATTR NOT FOUND", player, target, attrName)
-		return
+		return false
 	}
 	// GetAttrText walks the parent chain (like C's atr_pget)
 	text := g.GetAttrText(target, attrNum)
 	if text == "" {
 		DebugLog("TRIGGER player=#%d target=#%d attr=%q (#%d) TEXT EMPTY", player, target, attrName, attrNum)
-		return
+		return false
 	}
 	DebugLog("TRIGGER player=#%d target=#%d attr=%q (#%d) text=%q", player, target, attrName, attrNum, truncDebug(text, 200))
 
@@ -1338,6 +1339,7 @@ func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) {
 	}
 	g.Queue.Add(entry)
 	g.WakeQueue()
+	return true
 }
 
 // DoTriggerNow triggers an attribute and executes it immediately (not queued).

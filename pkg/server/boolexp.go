@@ -46,6 +46,9 @@ const (
 	aDFail   = 135 // A_DFAIL — drop fail message
 	aODFail  = 136 // A_ODFAIL — others drop fail message
 	aADFail  = 137 // A_ADFAIL — drop fail action
+	aKill    = 11  // A_KILL — kill success message to killer
+	aOKill   = 10  // A_OKILL — kill success message to room
+	aAKill   = 15  // A_AKILL — kill success action
 )
 
 // Maximum indirection depth for @-locks to prevent infinite loops.

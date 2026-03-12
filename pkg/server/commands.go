@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"log"
+	mathrand "math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -173,6 +174,7 @@ func InitCommands() map[string]*Command {
 	register("whisper", cmdWhisper)
 	register("use", cmdUse)
 	registerNG("kill", cmdKill)
+	register("slay", cmdSlay) // wizard-only guaranteed kill
 
 	// Communication
 	register("@oemit", cmdOemit)
@@ -3478,10 +3480,7 @@ func makeAttrSetter(attrNum int) CommandHandler {
 // --- Player Object Commands ---
 
 func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
-	if args == "" {
-		g.Notify(d.Player, "Get what?")
-		return
-	}
+	// C TinyMUSH: empty args falls through to match which returns Nothing
 	target := g.MatchInRoom(d.Player, args)
 	if target == gamedb.Ambiguous {
 		g.Notify(d.Player, "I don't know which one you mean!")
@@ -3496,53 +3495,75 @@ func cmdGet(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
-	// Can only pick up THINGs
-	if obj.ObjType() != gamedb.TypeThing {
-		g.Notify(d.Player, "You can't pick that up.")
+
+	objType := obj.ObjType()
+	if objType != gamedb.TypeThing && objType != gamedb.TypePlayer {
+		g.Notify(d.Player, "You can't take that!")
 		return
 	}
+
+	// C: match_neighbor only finds TYPE_THING in room — player matching "me" returns
+	// Nothing via match, but if matched (e.g. long fingers), give friendly message.
+	if target == d.Player {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+
+	// Already carrying it?
+	if obj.Location == d.Player {
+		g.Notify(d.Player, "You already have that!")
+		return
+	}
+
 	loc := g.PlayerLocation(d.Player)
+
 	// Check lock
 	if !CouldDoIt(g, d.Player, target, aLock) {
-		HandleLockFailure(g, d, target, aFail, aOFail, aAFail, "You can't pick that up.")
+		failMsg := "You can't pick that up."
+		if obj.Location != loc {
+			failMsg = "You can't take that from there."
+		}
+		HandleLockFailure(g, d, target, aFail, aOFail, aAFail, failMsg)
 		return
 	}
 
-	// Remove from room contents, add to player inventory
-	g.RemoveFromContents(loc, target)
+	// Notify previous owner/container if different from current room
+	prevLoc := obj.Location
+	if prevLoc != loc {
+		if prevObj, ok := g.DB.Objects[prevLoc]; ok {
+			_ = prevObj
+			g.Conns.SendToPlayer(prevLoc,
+				fmt.Sprintf("%s was taken from you.", DisplayName(obj.Name)))
+		}
+	}
+
+	// Remove from previous location, add to player inventory
+	g.RemoveFromContents(prevLoc, target)
 	obj.Location = d.Player
 	g.AddToContents(d.Player, target)
-	playerObj := g.DB.Objects[d.Player]
-	g.PersistObjects(obj, playerObj)
+	g.PersistObject(obj)
 
-	// C TinyMUSH did_it pattern: SUCC to player, OSUCC to room, ASUCC action
-	if g.GetAttrText(target, aSucc) != "" || g.GetAttrText(target, aOSucc) != "" {
-		g.DidIt(d.Player, target, aSucc, aOSucc, aASucc)
-	} else {
-		g.Notify(d.Player, fmt.Sprintf("You pick up %s.", DisplayName(obj.Name)))
-		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-			fmt.Sprintf("%s picks up %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
-		g.QueueAttrAction(target, d.Player, aASucc, nil)
-	}
+	// Notify the object itself
+	g.Conns.SendToPlayer(target, "Taken.")
+
+	// C TinyMUSH did_it: SUCC/OSUCC/ASUCC — default "Taken." with no OSUCC
+	g.DidItDefault(d.Player, target, aSucc, "Taken.", aOSucc, "", aASucc)
 }
 
 func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
-	if args == "" {
-		g.Notify(d.Player, "Drop what?")
-		return
-	}
+	// C TinyMUSH: empty args / not found → "You don't have that!"
 	target := g.MatchInInventory(d.Player, args)
 	if target == gamedb.Ambiguous {
-		g.Notify(d.Player, "I don't know which one you mean!")
+		g.Notify(d.Player, "I don't know which you mean!")
 		return
 	}
 	if target == gamedb.Nothing {
-		g.Notify(d.Player, "You aren't carrying that.")
+		g.Notify(d.Player, "You don't have that!")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
 	if !ok {
-		g.Notify(d.Player, "You aren't carrying that.")
+		g.Notify(d.Player, "You don't have that!")
 		return
 	}
 
@@ -3552,66 +3573,77 @@ func cmdDrop(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 
-	// Remove from inventory, add to room contents
-	g.RemoveFromContents(d.Player, target)
+	// Validate room BEFORE removing from inventory (prevent object corruption)
 	loc := g.PlayerLocation(d.Player)
 	locObj, ok := g.DB.Objects[loc]
 	if !ok {
+		g.Notify(d.Player, "You can't drop that here.")
 		return
 	}
+
+	// Remove from inventory, add to room contents
+	g.RemoveFromContents(d.Player, target)
 	obj.Location = loc
 	g.AddToContents(loc, target)
 	g.PersistObjects(obj, locObj)
 
-	// C TinyMUSH did_it pattern: DROP to player, ODROP to room, ADROP action
-	if g.GetAttrText(target, aDrop) != "" || g.GetAttrText(target, aODrop) != "" {
-		g.DidIt(d.Player, target, aDrop, aODrop, aADrop)
-	} else {
-		g.Notify(d.Player, fmt.Sprintf("You drop %s.", DisplayName(obj.Name)))
-		g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-			fmt.Sprintf("%s drops %s.", g.PlayerName(d.Player), DisplayName(obj.Name)))
-		g.QueueAttrAction(target, d.Player, aADrop, nil)
-	}
+	// Notify the object itself
+	g.Conns.SendToPlayer(target, "Dropped.")
+
+	// C TinyMUSH did_it: DROP/ODROP/ADROP — default "Dropped." with ODROP "dropped X."
+	oDropDefault := fmt.Sprintf("dropped %s.", DisplayName(obj.Name))
+	g.DidItDefault(d.Player, target, aDrop, "Dropped.", aODrop, oDropDefault, aADrop)
 }
 
 func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
-	// give recipient = amount or give recipient = object
+	// C: give <recipient>=<thing/amount> — or no = means give <recipient> with empty item
+	var targetStr, whatStr string
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		g.Notify(d.Player, "Give what to whom?")
-		return
+		// No = sign: C treats whole arg as recipient, item is ""
+		targetStr = strings.TrimSpace(args)
+		whatStr = ""
+	} else {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		whatStr = strings.TrimSpace(args[eqIdx+1:])
 	}
-	targetStr := strings.TrimSpace(args[:eqIdx])
-	whatStr := strings.TrimSpace(args[eqIdx+1:])
 
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "Give to whom?")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]
 	if !ok {
-		g.Notify(d.Player, "I don't see that here.")
+		g.Notify(d.Player, "Give to whom?")
 		return
 	}
 
-	// Try as penny amount first (only if it's a pure number, not a dbref like #123)
+	// Try as penny amount first (only if it's a pure number)
 	if isNumeric(whatStr) {
 		amount := toIntSimple(whatStr)
-		if amount > 0 {
-			playerObj := g.DB.Objects[d.Player]
-			if playerObj.Pennies < amount {
-				g.Notify(d.Player, fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
-				return
-			}
-			playerObj.Pennies -= amount
-			targetObj.Pennies += amount
-			g.PersistObjects(playerObj, targetObj)
-			g.Notify(d.Player, fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
-			g.Conns.SendToPlayer(target,
-				fmt.Sprintf("%s gives you %d %s.", g.PlayerName(d.Player), amount, g.MoneyName(amount)))
+		// C: must be positive
+		if amount <= 0 {
+			g.Notify(d.Player, fmt.Sprintf("You must specify a positive number of %s.", g.MoneyName(2)))
 			return
 		}
+		// C: can't give money to yourself
+		if target == d.Player {
+			g.Notify(d.Player, fmt.Sprintf("That player doesn't need that many %s!", g.MoneyName(2)))
+			return
+		}
+		playerObj := g.DB.Objects[d.Player]
+		if playerObj.Pennies < amount {
+			g.Notify(d.Player, fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
+			return
+		}
+		playerObj.Pennies -= amount
+		targetObj.Pennies += amount
+		g.PersistObjects(playerObj, targetObj)
+		g.Notify(d.Player, fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
+		g.Conns.SendToPlayer(target,
+			fmt.Sprintf("%s gives you %d %s.", g.PlayerName(d.Player), amount, g.MoneyName(amount)))
+		return
 	}
 
 	// Try as object — match in giver's inventory
@@ -3663,10 +3695,10 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 	g.AddToContents(target, thing)
 	g.PersistObjects(thingObj, targetObj)
 
-	// Notify giver, recipient, and thing (matches C's give_thing)
-	g.Notify(d.Player, "Given.")
+	// C: notify recipient first, then "Given." to giver, then thing
 	g.Conns.SendToPlayer(target,
 		fmt.Sprintf("%s gave you %s.", g.PlayerName(d.Player), DisplayName(thingObj.Name)))
+	g.Notify(d.Player, "Given.")
 	g.Conns.SendToPlayer(thing,
 		fmt.Sprintf("%s gave you to %s.", g.PlayerName(d.Player), DisplayName(targetObj.Name)))
 
@@ -3695,6 +3727,50 @@ func (g *Game) DidIt(cause, thing gamedb.DBRef, msgAttr, oMsgAttr, aMsgAttr int)
 	// Evaluate and show O-message to room (excluding cause)
 	// C TinyMUSH prefixes O-messages with the cause's name: "Name msg"
 	if oMsgText := g.GetAttrText(thing, oMsgAttr); oMsgText != "" {
+		loc := g.PlayerLocation(cause)
+		if loc != gamedb.Nothing {
+			ctx := MakeEvalContextForObj(g, thing, cause, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			msg := ctx.Exec(oMsgText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+			if msg != "" {
+				name := DisplayName(g.ObjName(cause))
+				g.Conns.SendToRoomExcept(g.DB, loc, cause,
+					fmt.Sprintf("%s %s", name, msg))
+			}
+		}
+	}
+
+	// Queue the action attribute
+	if aMsgAttr > 0 {
+		g.QueueAttrAction(thing, cause, aMsgAttr, nil)
+	}
+}
+
+// DidItDefault is like DidIt but uses fallback strings when attrs are empty.
+// Matches C's did_it() when called with literal default strings (e.g. "Taken.", "Dropped.").
+func (g *Game) DidItDefault(cause, thing gamedb.DBRef, msgAttr int, msgDefault string, oMsgAttr int, oMsgDefault string, aMsgAttr int) {
+	// Show message to cause
+	msgText := g.GetAttrText(thing, msgAttr)
+	if msgText == "" {
+		msgText = msgDefault
+	}
+	if msgText != "" {
+		ctx := MakeEvalContextForObj(g, thing, cause, func(c *eval.EvalContext) {
+			functions.RegisterAll(c)
+		})
+		msg := ctx.Exec(msgText, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
+		if msg != "" {
+			g.Conns.SendToPlayer(cause, msg)
+		}
+	}
+
+	// Show O-message to room (excluding cause), prefixed with cause's name
+	oMsgText := g.GetAttrText(thing, oMsgAttr)
+	if oMsgText == "" {
+		oMsgText = oMsgDefault
+	}
+	if oMsgText != "" {
 		loc := g.PlayerLocation(cause)
 		if loc != gamedb.Nothing {
 			ctx := MakeEvalContextForObj(g, thing, cause, func(c *eval.EvalContext) {
@@ -3975,49 +4051,189 @@ func cmdUse(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
-	if args == "" {
-		g.Notify(d.Player, "Kill whom?")
-		return
-	}
-	// kill player [= cost]
+	// C TinyMUSH: kill doesn't take switches — empty args falls through match
+	// Parse: kill <target> [= cost]
 	targetStr := args
+	costStr := ""
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 		targetStr = strings.TrimSpace(args[:eqIdx])
+		costStr = strings.TrimSpace(args[eqIdx+1:])
 	}
 
 	target := g.MatchObject(d.Player, targetStr)
-	if target == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that here.")
+	switch target {
+	case gamedb.Nothing:
+		g.Notify(d.Player, "I don't see that player here.")
+		return
+	case gamedb.Ambiguous:
+		g.Notify(d.Player, "I don't know who you mean!")
 		return
 	}
 	targetObj, ok := g.DB.Objects[target]
 	if !ok {
 		return
 	}
+	objType := targetObj.ObjType()
+	if objType != gamedb.TypePlayer && objType != gamedb.TypeThing {
+		g.Notify(d.Player, "Sorry, you can only kill players and things.")
+		return
+	}
 
-	senderName := g.PlayerName(d.Player)
-	g.Notify(d.Player, fmt.Sprintf("You killed %s!", DisplayName(targetObj.Name)))
+	// HAVEN check — can't kill in a HAVEN room (unless wizard)
+	victimLoc := targetObj.Location
+	if locObj, ok := g.DB.Objects[victimLoc]; ok {
+		if locObj.HasFlag(gamedb.FlagHaven) && !g.IsWizard(d.Player) {
+			g.Notify(d.Player, "Sorry.")
+			return
+		}
+	}
+	// Victim controls their location and killer doesn't → can't kill
+	if g.Controls(target, victimLoc) && !g.Controls(d.Player, victimLoc) {
+		g.Notify(d.Player, "Sorry.")
+		return
+	}
+	// IMMORTAL flag — can't be killed
+	if targetObj.HasFlag(gamedb.FlagImmortal) && !g.IsWizard(d.Player) {
+		g.Notify(d.Player, "Sorry.")
+		return
+	}
+
+	// Parse and clamp cost
+	cost := g.Conf.KillMin
+	if costStr != "" {
+		if v, err := strconv.Atoi(costStr); err == nil {
+			cost = v
+		}
+	}
+	if cost < g.Conf.KillMin {
+		cost = g.Conf.KillMin
+	}
+	if cost > g.Conf.KillMax {
+		cost = g.Conf.KillMax
+	}
+
+	// Charge the killer
+	playerObj := g.DB.Objects[d.Player]
+	if playerObj.Pennies < cost {
+		g.Notify(d.Player, fmt.Sprintf("You don't have enough %s.", g.MoneyName(2)))
+		return
+	}
+	playerObj.Pennies -= cost
+	g.PersistObject(playerObj)
+
+	// Probability check: random(killGuarantee) < cost
+	killGuarantee := g.Conf.KillGuarantee
+	if killGuarantee <= 0 {
+		killGuarantee = 100
+	}
+	roll := randInt(killGuarantee)
+	if roll >= cost {
+		// Failed
+		g.Notify(d.Player, "Your murder attempt failed.")
+		g.Conns.SendToPlayer(target,
+			fmt.Sprintf("%s tried to kill you!", g.PlayerName(d.Player)))
+		return
+	}
+
+	// Success — fire KILL/OKILL/AKILL trigger chain
+	killMsg := fmt.Sprintf("You killed %s!", DisplayName(targetObj.Name))
+	oKillMsg := fmt.Sprintf("killed %s!", DisplayName(targetObj.Name))
+	g.DidItDefault(d.Player, target, aKill, killMsg, aOKill, oKillMsg, aAKill)
+
+	// Notify victim
 	g.Conns.SendToPlayer(target,
-		fmt.Sprintf("%s killed you!", senderName))
+		fmt.Sprintf("%s killed you!", g.PlayerName(d.Player)))
 
-	// Send to home
-	home := targetObj.Link
-	if home != gamedb.Nothing {
-		loc := targetObj.Location
-		g.RemoveFromContents(loc, target)
-		g.Conns.SendToRoomExcept(g.DB, loc, target,
-			fmt.Sprintf("%s has left.", DisplayName(targetObj.Name)))
-		targetObj.Location = home
-		g.AddToContents(home, target)
-		if destObj, ok := g.DB.Objects[home]; ok {
-			g.PersistObjects(targetObj, destObj)
+	// Insurance payout (victim gets half cost if under pay limit)
+	if cost > 0 {
+		insurance := cost / 2
+		if insurance > 0 {
+			if targetOwner, ok := g.DB.Objects[targetObj.Owner]; ok {
+				if targetOwner.Pennies < g.Conf.PayLimit {
+					targetOwner.Pennies += insurance
+					g.PersistObject(targetOwner)
+					g.Conns.SendToPlayer(target,
+						fmt.Sprintf("Your insurance policy pays %d %s.", insurance, g.MoneyName(insurance)))
+				} else {
+					g.Conns.SendToPlayer(target, "Your insurance policy has been revoked.")
+				}
+			}
 		}
-		g.Conns.SendToRoomExcept(g.DB, home, target,
-			fmt.Sprintf("%s has arrived.", DisplayName(targetObj.Name)))
-		// Show room to victim
-		for _, dd := range g.Conns.GetByPlayer(target) {
-			g.ShowRoom(dd, home)
-		}
+	}
+
+	// Send victim home
+	g.MoveToHome(target)
+}
+
+// cmdSlay is the wizard-only guaranteed kill (no cost, no probability check).
+// Matches C TinyMUSH's do_kill called with key=KILL_SLAY.
+func cmdSlay(g *Game, d *Descriptor, args string, _ []string) {
+	if !g.IsWizard(d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	target := g.MatchObject(d.Player, args)
+	switch target {
+	case gamedb.Nothing:
+		g.Notify(d.Player, "I don't see that player here.")
+		return
+	case gamedb.Ambiguous:
+		g.Notify(d.Player, "I don't know who you mean!")
+		return
+	}
+	targetObj, ok := g.DB.Objects[target]
+	if !ok {
+		return
+	}
+	objType := targetObj.ObjType()
+	if objType != gamedb.TypePlayer && objType != gamedb.TypeThing {
+		g.Notify(d.Player, "Sorry, you can only kill players and things.")
+		return
+	}
+
+	killMsg := fmt.Sprintf("You killed %s!", DisplayName(targetObj.Name))
+	oKillMsg := fmt.Sprintf("killed %s!", DisplayName(targetObj.Name))
+	g.DidItDefault(d.Player, target, aKill, killMsg, aOKill, oKillMsg, aAKill)
+	g.Conns.SendToPlayer(target, fmt.Sprintf("%s killed you!", g.PlayerName(d.Player)))
+	g.MoveToHome(target)
+}
+
+// randInt returns a pseudo-random integer in [0, n). Matches C TinyMUSH Randomize(n).
+func randInt(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return mathrand.IntN(n)
+}
+
+// MoveToHome sends an object to its home, firing ODROP/ADROP on the object being moved.
+// Matches C TinyMUSH move_via_generic(victim, HOME, ...).
+func (g *Game) MoveToHome(ref gamedb.DBRef) {
+	obj, ok := g.DB.Objects[ref]
+	if !ok {
+		return
+	}
+	home := obj.Link
+	if home == gamedb.Nothing {
+		home = gamedb.DBRef(g.Conf.PlayerStartingHome)
+	}
+	if home == gamedb.Nothing {
+		return
+	}
+	from := obj.Location
+	g.RemoveFromContents(from, ref)
+	obj.Location = home
+	g.AddToContents(home, ref)
+	g.PersistObject(obj)
+	// Notify room they left
+	g.Conns.SendToRoomExcept(g.DB, from, ref,
+		fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
+	// Notify new room they arrived
+	g.Conns.SendToRoomExcept(g.DB, home, ref,
+		fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
+	// Show new room to victim's connections
+	for _, dd := range g.Conns.GetByPlayer(ref) {
+		g.ShowRoom(dd, home)
 	}
 }
 

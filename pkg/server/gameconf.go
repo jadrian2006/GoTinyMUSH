@@ -42,6 +42,10 @@ type GameConf struct {
 	RobotCost         int    `yaml:"robot_cost"`
 	SacrificeAdjust   int    `yaml:"sacrifice_adjust"`
 	SacrificeFactor   int    `yaml:"sacrifice_factor"`
+	KillMin           int    `yaml:"kill_min"`         // min cost to attempt kill (default 10)
+	KillMax           int    `yaml:"kill_max"`         // max cost to attempt kill (default 100)
+	KillGuarantee     int    `yaml:"kill_guarantee"`   // cost needed for 100% kill (default 100)
+	PayLimit          int    `yaml:"pay_limit"`        // max pennies before insurance revoked (default 10000)
 
 	// --- Idle/timeout ---
 	IdleTimeout       int  `yaml:"idle_timeout"`
@@ -181,6 +185,10 @@ func DefaultGameConf() *GameConf {
 		RobotCost:               1000,
 		SacrificeAdjust:         -1,
 		SacrificeFactor:         5,
+		KillMin:                 10,
+		KillMax:                 100,
+		KillGuarantee:           100,
+		PayLimit:                10000,
 		IdleTimeout:             3600,
 		IdleWizDark:             false,
 		KeepaliveInterval:      60,
@@ -387,6 +395,14 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.SacrificeAdjust = atoi(val, gc.SacrificeAdjust)
 		case "sacrifice_factor":
 			gc.SacrificeFactor = atoi(val, gc.SacrificeFactor)
+		case "kill_min":
+			gc.KillMin = atoi(val, gc.KillMin)
+		case "kill_max":
+			gc.KillMax = atoi(val, gc.KillMax)
+		case "kill_guarantee":
+			gc.KillGuarantee = atoi(val, gc.KillGuarantee)
+		case "pay_limit":
+			gc.PayLimit = atoi(val, gc.PayLimit)
 
 		// --- Idle/timeout ---
 		case "idle_timeout":

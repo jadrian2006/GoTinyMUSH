@@ -470,8 +470,8 @@ func TestGet(t *testing.T) {
 
 	DispatchCommand(env.game, env.player, "get TestObject")
 	out := getOutput(env.player)
-	if !strings.Contains(out, "You pick up TestObject") {
-		t.Errorf("get: expected 'You pick up TestObject', got: %s", out)
+	if !strings.Contains(out, "Taken.") {
+		t.Errorf("get: expected 'Taken.', got: %s", out)
 	}
 
 	// Verify object moved to inventory
@@ -487,8 +487,9 @@ func TestGetEmpty(t *testing.T) {
 
 	DispatchCommand(env.game, env.player, "get")
 	out := getOutput(env.player)
-	if !strings.Contains(out, "Get what?") {
-		t.Errorf("get empty: expected 'Get what?', got: %s", out)
+	// C TinyMUSH: empty get falls through match → "I don't see that here."
+	if !strings.Contains(out, "I don't see that here.") {
+		t.Errorf("get empty: expected 'I don't see that here.', got: %s", out)
 	}
 }
 
@@ -503,8 +504,8 @@ func TestDrop(t *testing.T) {
 	// Now drop it
 	DispatchCommand(env.game, env.player, "drop TestObject")
 	out := getOutput(env.player)
-	if !strings.Contains(out, "You drop TestObject") {
-		t.Errorf("drop: expected 'You drop TestObject', got: %s", out)
+	if !strings.Contains(out, "Dropped.") {
+		t.Errorf("drop: expected 'Dropped.', got: %s", out)
 	}
 
 	obj := env.game.DB.Objects[2]
@@ -519,8 +520,9 @@ func TestDropNotCarrying(t *testing.T) {
 
 	DispatchCommand(env.game, env.player, "drop TestObject")
 	out := getOutput(env.player)
-	if !strings.Contains(out, "aren't carrying") {
-		t.Errorf("drop not carrying: expected 'aren't carrying', got: %s", out)
+	// C TinyMUSH: "You don't have that!"
+	if !strings.Contains(out, "You don't have that!") {
+		t.Errorf("drop not carrying: expected 'You don't have that!', got: %s", out)
 	}
 }
 
@@ -612,7 +614,8 @@ func TestKill(t *testing.T) {
 	env := newTestEnv(t)
 	clearOutput(env.player)
 
-	DispatchCommand(env.game, env.player, "kill Bob")
+	// Use slay (wizard-only, guaranteed kill) to avoid random probability
+	DispatchCommand(env.game, env.player, "slay Bob")
 	out := getOutput(env.player)
 	if !strings.Contains(out, "You killed Bob!") {
 		t.Errorf("kill: expected 'You killed Bob!', got: %s", out)

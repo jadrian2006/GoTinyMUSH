@@ -2597,8 +2597,8 @@ func TestDrop_NoDropLockAllowsDrop(t *testing.T) {
 	cmdDrop(env.game, env.player, "Normal Item", nil)
 	out := getOutput(env.player)
 
-	// Should drop normally
-	if !strings.Contains(out, "You drop Normal Item") {
+	// Should drop normally — C TinyMUSH default is "Dropped."
+	if !strings.Contains(out, "Dropped.") {
 		t.Errorf("expected normal drop, got: %s", out)
 	}
 
