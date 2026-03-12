@@ -337,7 +337,17 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 		return
 	}
 
-	// Handle single-character prefixes: " for say, : for pose, ; for pose-nospc, & for setvattr
+	// C: Make sure player isn't GOING (marked for destruction).
+	// GOING objects must not execute any commands.
+	if obj, ok := g.DB.Objects[d.Player]; ok && obj.IsGoing() {
+		owner := obj.Owner
+		if owner != d.Player {
+			g.Notify(owner, fmt.Sprintf("Attempt to execute command by destroyed object #%d", d.Player))
+		}
+		return
+	}
+
+	// Handle single-character prefixes: " for say, : for pose, ; for pose-nospc, & for setvattr, # for force, \ for emit
 	switch input[0] {
 	case '"':
 		cmdSay(g, d, input[1:], nil)
@@ -354,6 +364,50 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 			return
 		}
 		cmdSetVAttr(g, d, input[1:], nil)
+		return
+	case '#':
+		// C: do_force_prefixed — #<number> <command> forces object by dbref.
+		// C help: "Forces the object whose database number is <number> to
+		// perform <command>." Only numeric dbrefs, not names or "me"/"here".
+		rest := input[1:]
+		spIdx := strings.IndexByte(rest, ' ')
+		if spIdx < 0 {
+			return
+		}
+		targetStr := strings.TrimSpace(rest[:spIdx])
+		command := strings.TrimSpace(rest[spIdx+1:])
+		if targetStr == "" || command == "" {
+			return
+		}
+		// Parse as numeric dbref only — matches C's canonical behavior.
+		num, err := strconv.Atoi(targetStr)
+		if err != nil || num < 0 {
+			g.Notify(d.Player, "I don't see that here.")
+			return
+		}
+		target := gamedb.DBRef(num)
+		if target == gamedb.Nothing {
+			g.Notify(d.Player, "I don't see that here.")
+			return
+		}
+		if _, ok := g.DB.Objects[target]; !ok {
+			g.Notify(d.Player, "I don't see that here.")
+			return
+		}
+		if !g.Controls(d.Player, target) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		g.DoForce(d.Player, target, command)
+		return
+	case '\\':
+		// C: do_say with SAY_PREFIX|SAY_EMIT — \message emits to room.
+		// Double backslash \\msg strips one backslash.
+		msg := input[1:]
+		if len(msg) > 0 && msg[0] == '\\' {
+			msg = msg[1:]
+		}
+		cmdEmit(g, d, msg, nil)
 		return
 	}
 
@@ -935,6 +989,27 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 		}
 		exitRef = exitObj.Next
 	}
+
+	// C: If no local exit matched, check master room exits as a fallback.
+	masterRoom := g.MasterRoomRef()
+	if masterRoom != gamedb.Nothing && masterRoom != loc {
+		if masterObj, ok := g.DB.Objects[masterRoom]; ok {
+			seenExits = make(map[gamedb.DBRef]bool)
+			exitRef = masterObj.Exits
+			for exitRef != gamedb.Nothing && !seenExits[exitRef] {
+				seenExits[exitRef] = true
+				exitObj, ok := g.DB.Objects[exitRef]
+				if !ok {
+					break
+				}
+				if matchExit(exitObj) {
+					return doExit(exitRef, exitObj)
+				}
+				exitRef = exitObj.Next
+			}
+		}
+	}
+
 	return false
 }
 

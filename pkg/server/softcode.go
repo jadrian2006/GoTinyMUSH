@@ -1560,6 +1560,10 @@ func (g *Game) ProcessQueue() bool {
 		if entry == nil {
 			break
 		}
+		// C: Skip GOING objects — they must not execute queued commands.
+		if obj, ok := g.DB.Objects[entry.Player]; ok && obj.IsGoing() {
+			continue
+		}
 		g.objExecCount[entry.Player]++
 		if g.objExecCount[entry.Player] > maxPerObjPerSec {
 			if g.objExecCount[entry.Player] == maxPerObjPerSec+1 {

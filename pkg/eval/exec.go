@@ -72,7 +72,9 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			pos++
 
 		case '\\':
-			// General escape - add following char literally
+			// General escape - add following char literally.
+			// Go always strips the backslash (matching EV_STRIP_ESC behavior).
+			// C's default preserves \, but Go's softcode ecosystem assumes strip.
 			atSpace = false
 			pos++
 			if pos < len(input) {
@@ -658,6 +660,60 @@ func (ctx *EvalContext) handlePercent(buf *strings.Builder, input string, pos in
 	case '|':
 		// Piped output
 		buf.WriteString(ctx.PipeOut)
+		return pos + 1
+
+	case '=':
+		// C: %=<attrname> — shorthand for get(me/<attr>) with See_attr check.
+		pos++
+		if pos >= len(input) || input[pos] != '<' {
+			return pos
+		}
+		pos++ // skip '<'
+		end := strings.IndexByte(input[pos:], '>')
+		if end < 0 {
+			// No closing '>' — back up to after '='
+			return pos
+		}
+		attrName := input[pos : pos+end]
+		if attrName != "" {
+			text := ctx.GetAttrByNameHelper(ctx.Player, attrName)
+			buf.WriteString(text)
+		}
+		return pos + end + 1
+
+	case '_':
+		// C: %_x or %_<name> — x-variable lookup from XRegs.
+		// In C, x-variables are global per-player; in Go we use XRegs
+		// (same store as setx()/store()/xvars()).
+		pos++
+		if pos >= len(input) {
+			return pos
+		}
+		if input[pos] == '<' {
+			// Long form: %_<varname>
+			pos++
+			end := strings.IndexByte(input[pos:], '>')
+			if end < 0 {
+				return pos
+			}
+			name := strings.ToLower(input[pos : pos+end])
+			if ctx.RData != nil {
+				if val, ok := ctx.RData.XRegs[name]; ok {
+					buf.WriteString(val)
+				}
+			}
+			return pos + end + 1
+		}
+		// Short form: %_x (single alphanumeric char)
+		varCh := input[pos]
+		if (varCh >= 'a' && varCh <= 'z') || (varCh >= 'A' && varCh <= 'Z') || (varCh >= '0' && varCh <= '9') {
+			name := strings.ToLower(string(varCh))
+			if ctx.RData != nil {
+				if val, ok := ctx.RData.XRegs[name]; ok {
+					buf.WriteString(val)
+				}
+			}
+		}
 		return pos + 1
 
 	default:
