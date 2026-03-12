@@ -304,6 +304,11 @@ type EvalContext struct {
 	OutputLimit   int
 	OutputLimited bool // set when output cap exceeded
 
+	// Command invocation limit — caps semicolon-separated commands per queue entry.
+	CmdInvkLim     int
+	CmdInvkCtr     int
+	CmdInvkLimited bool
+
 	// Current command text
 	CurrCmd string
 

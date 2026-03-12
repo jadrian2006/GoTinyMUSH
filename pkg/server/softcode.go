@@ -384,6 +384,15 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 			continue
 		}
 
+		// Check command invocation limit
+		if ctx.CmdInvkLim > 0 {
+			ctx.CmdInvkCtr++
+			if ctx.CmdInvkCtr > ctx.CmdInvkLim {
+				ctx.CmdInvkLimited = true
+				break
+			}
+		}
+
 		// Brace-wrapped group: strip outer braces, split on semicolons, and
 		// dispatch each piece through the full pipeline (handleDeferredBodyCmd
 		// + eval + dispatch). This handles @force bodies like "{cmd1;cmd2}"
@@ -398,6 +407,14 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 				ic = strings.TrimSpace(ic)
 				if ic == "" {
 					continue
+				}
+				// Check command invocation limit for inner commands too
+				if ctx.CmdInvkLim > 0 {
+					ctx.CmdInvkCtr++
+					if ctx.CmdInvkCtr > ctx.CmdInvkLim {
+						ctx.CmdInvkLimited = true
+						break
+					}
 				}
 				// Try deferred-body commands first (@wait, @dolist, @switch, etc.)
 				if g.handleDeferredBodyCmd(ic, ctx, entry, descs) {
@@ -414,6 +431,9 @@ func (g *Game) ExecuteQueueEntry(entry *QueueEntry) {
 				} else {
 					g.ExecuteAsObject(entry.Player, entry.Cause, ic)
 				}
+			}
+			if ctx.CmdInvkLimited {
+				break
 			}
 			continue
 		}
@@ -1658,6 +1678,9 @@ func (g *Game) checkEvalLimits(ctx *eval.EvalContext, entry *QueueEntry) {
 	}
 	if ctx.IterLimited {
 		notify("iter_limit", fmt.Sprintf("%d", ctx.IterLim))
+	}
+	if ctx.CmdInvkLimited {
+		notify("command_invocation_limit", fmt.Sprintf("%d", ctx.CmdInvkLim))
 	}
 }
 

@@ -464,6 +464,9 @@ func MakeEvalContextWithGame(g *Game, player gamedb.DBRef, registerFn func(*eval
 		if g.Conf.EvalOutputLimit > 0 {
 			ctx.OutputLimit = g.Conf.EvalOutputLimit
 		}
+		if g.Conf.CommandInvocationLimit > 0 {
+			ctx.CmdInvkLim = g.Conf.CommandInvocationLimit
+		}
 	}
 	if registerFn != nil {
 		registerFn(ctx)
