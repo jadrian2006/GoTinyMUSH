@@ -193,8 +193,9 @@ func (g *Game) PurgeGoing() {
 		owner := obj.Owner
 		ownerObj, ownerOK := g.DB.Objects[owner]
 
-		// Halt any queued commands for this object
-		g.Queue.HaltPlayer(ref)
+		// Halt any queued commands for this object and clean up semaphore counters
+		_, removedSem := g.Queue.HaltPlayer(ref)
+		g.cleanupSemaphoreCounters(removedSem)
 
 		// Type-specific cleanup
 		switch obj.ObjType() {
@@ -295,8 +296,9 @@ func (g *Game) destroyImmediate(player, ref gamedb.DBRef) {
 	owner := obj.Owner
 	ownerObj, ownerOK := g.DB.Objects[owner]
 
-	// Halt queued commands
-	g.Queue.HaltPlayer(ref)
+	// Halt queued commands and clean up semaphore counters
+	_, removedSem := g.Queue.HaltPlayer(ref)
+	g.cleanupSemaphoreCounters(removedSem)
 
 	// Type-specific cleanup
 	switch obj.ObjType() {
@@ -1422,7 +1424,8 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 			return
 		}
 		// @halt/all - halt all objects' queue entries
-		removed := g.Queue.HaltAll()
+		removed, removedSemAll := g.Queue.HaltAll()
+		g.cleanupSemaphoreCounters(removedSemAll)
 		if removed == 1 {
 			g.Notify(d.Player, "1 queue entries removed.")
 		} else {
@@ -1443,7 +1446,8 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 			return
 		}
 	}
-	removed := g.Queue.HaltPlayer(target)
+	removed, removedSemHalt := g.Queue.HaltPlayer(target)
+	g.cleanupSemaphoreCounters(removedSemHalt)
 	// Note: C TinyMUSH's @halt only clears queue entries — it does NOT set
 	// the HALT flag. The HALT flag is only set via @set obj=HALT. This is
 	// important because STARTUP patterns like "@halt me; @wait 60=@tr me/loop"

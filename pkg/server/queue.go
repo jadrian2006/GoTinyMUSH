@@ -188,11 +188,15 @@ func (q *CommandQueue) PopImmediate() *QueueEntry {
 }
 
 // HaltPlayer removes all queued commands for a player/object.
-func (q *CommandQueue) HaltPlayer(player gamedb.DBRef) int {
+// Returns the total removed count and any removed semaphore entries
+// so the caller can decrement semaphore counters (matching C TinyMUSH
+// cque.c halt_que which calls add_to(player, sem, -1, attr) per entry).
+func (q *CommandQueue) HaltPlayer(player gamedb.DBRef) (int, []*QueueEntry) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	removed := 0
+	var removedSem []*QueueEntry
 	filter := func(entries []*QueueEntry) []*QueueEntry {
 		var result []*QueueEntry
 		for _, e := range entries {
@@ -206,19 +210,38 @@ func (q *CommandQueue) HaltPlayer(player gamedb.DBRef) int {
 	}
 	q.immediate = filter(q.immediate)
 	q.waitQueue = filter(q.waitQueue)
-	q.semQueue = filter(q.semQueue)
-	return removed
+	// Collect removed semaphore entries separately
+	var remSem []*QueueEntry
+	for _, e := range q.semQueue {
+		if e.Player == player {
+			removed++
+			if e.SemObj != gamedb.Nothing {
+				removedSem = append(removedSem, e)
+			}
+		} else {
+			remSem = append(remSem, e)
+		}
+	}
+	q.semQueue = remSem
+	return removed, removedSem
 }
 
 // HaltAll removes all queued commands from all queues.
-func (q *CommandQueue) HaltAll() int {
+// Returns removed count and semaphore entries for counter cleanup.
+func (q *CommandQueue) HaltAll() (int, []*QueueEntry) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	removed := len(q.immediate) + len(q.waitQueue) + len(q.semQueue)
+	var removedSem []*QueueEntry
+	for _, e := range q.semQueue {
+		if e.SemObj != gamedb.Nothing {
+			removedSem = append(removedSem, e)
+		}
+	}
 	q.immediate = nil
 	q.waitQueue = nil
 	q.semQueue = nil
-	return removed
+	return removed, removedSem
 }
 
 // CountByOwner returns how many commands are queued for a given owner.

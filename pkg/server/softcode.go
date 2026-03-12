@@ -2382,6 +2382,17 @@ func (g *Game) semaphoreNotify(target gamedb.DBRef, attr int, count int) int {
 	return woken
 }
 
+// cleanupSemaphoreCounters decrements semaphore counters for removed queue entries.
+// This matches C TinyMUSH's halt_que (cque.c:163) which calls
+// add_to(player, point->sem, -1, point->attr) before freeing each entry.
+func (g *Game) cleanupSemaphoreCounters(entries []*QueueEntry) {
+	for _, e := range entries {
+		if e.SemObj != gamedb.Nothing {
+			g.semaphoreAddTo(e.SemObj, e.SemAttr, -1)
+		}
+	}
+}
+
 // --- Helper functions ---
 
 // findUnescapedColon finds the first unescaped ':' in a string.
