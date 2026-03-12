@@ -344,6 +344,9 @@ type EvalContext struct {
 	// Output buffer for side-effect notifications
 	Notifications []Notification
 
+	// C TinyMUSH c_is_command: when true, %c = current command; when false, %c is literal
+	CIsCommand bool
+
 	// Space compression (default true in most configs)
 	SpaceCompress bool
 

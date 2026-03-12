@@ -668,6 +668,14 @@ func (ctx *EvalContext) handlePercent(buf *strings.Builder, input string, pos in
 		buf.WriteString(ctx.CurrCmd)
 		return pos + 1
 
+	case 'c', 'C':
+		// %c: conditional — current command when c_is_command is set,
+		// otherwise literal (matching C TinyMUSH eval.c behavior)
+		if ctx.CIsCommand {
+			buf.WriteString(ctx.CurrCmd)
+		}
+		return pos + 1
+
 	case '+':
 		// Number of function args
 		buf.WriteString(fmt.Sprintf("%d", len(cargs)))

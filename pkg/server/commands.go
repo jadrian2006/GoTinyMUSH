@@ -1322,8 +1322,8 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 		dest = g.ResolveRef(d.Player, strings.TrimSpace(parts[1]))
 	}
 	loc := g.PlayerLocation(d.Player)
-	// C TinyMUSH: must control the room to open an exit in it
-	if !Controls(g, d.Player, loc) {
+	// C TinyMUSH: must control the room to open an exit (open_anywhere bypasses)
+	if !Controls(g, d.Player, loc) && !CanOpenAnywhere(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -2862,7 +2862,7 @@ func (g *Game) LookupAttrDef(attrNum int) *gamedb.AttrDef {
 
 // ShowWho displays the WHO list.
 func (g *Game) ShowWho(d *Descriptor) {
-	isWiz := Wizard(g, d.Player)
+	isWiz := CanWizardWho(g, d.Player)
 
 	now := time.Now()
 
@@ -2890,10 +2890,12 @@ func (g *Game) ShowWho(d *Descriptor) {
 		if dd.State != ConnConnected {
 			continue
 		}
-		// Hide DARK players from non-wizards
+		// Hide DARK/cloaked players from non-wizards
 		if !isWiz {
-			if pObj, ok := g.DB.Objects[dd.Player]; ok && pObj.HasFlag(gamedb.FlagDark) {
-				continue
+			if pObj, ok := g.DB.Objects[dd.Player]; ok {
+				if pObj.HasFlag(gamedb.FlagDark) || pObj.HasPower(1, gamedb.Pow2Cloak) {
+					continue
+				}
 			}
 		}
 		name := g.PlayerName(dd.Player)
@@ -3751,8 +3753,8 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 	// Try as penny amount first (only if it's a pure number)
 	if isNumeric(whatStr) {
 		amount := toIntSimple(whatStr)
-		// C: must be positive
-		if amount <= 0 {
+		// C: must be positive (unless steal power)
+		if amount <= 0 && !CanSteal(g, d.Player) {
 			g.Notify(d.Player, fmt.Sprintf("You must specify a positive number of %s.", g.MoneyName(2)))
 			return
 		}
@@ -4230,8 +4232,8 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "Sorry.")
 		return
 	}
-	// IMMORTAL flag — can't be killed
-	if targetObj.HasFlag(gamedb.FlagImmortal) && !g.IsWizard(d.Player) {
+	// IMMORTAL flag or unkillable power — can't be killed
+	if (targetObj.HasFlag(gamedb.FlagImmortal) || targetObj.HasPower(0, gamedb.PowUnkillable)) && !g.IsWizard(d.Player) {
 		g.Notify(d.Player, "Sorry.")
 		return
 	}

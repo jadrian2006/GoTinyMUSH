@@ -461,6 +461,96 @@ func (g *Game) Nearby(obj1, obj2 gamedb.DBRef) bool {
 	return loc1 == loc2 || loc1 == obj2 || loc2 == obj1 || obj1 == obj2
 }
 
+// HasPow returns true if obj has the given power bit in the specified word.
+// Convenience wrapper to avoid repeated DB lookups in command handlers.
+func HasPow(g *Game, obj gamedb.DBRef, word, bit int) bool {
+	o, ok := g.DB.Objects[obj]
+	if !ok {
+		return false
+	}
+	return o.HasPower(word, bit)
+}
+
+// CanBoot returns true if player can @boot (wizard or boot power).
+func CanBoot(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowBoot)
+}
+
+// CanHalt returns true if player can @halt/all (wizard or halt power).
+func CanHalt(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowHalt)
+}
+
+// CanAnnounce returns true if player can @wall (wizard or announce power).
+func CanAnnounce(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowAnnounce)
+}
+
+// CanSearch returns true if player can @search all objects (wizard or search power).
+func CanSearch(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowSearch)
+}
+
+// CanProg returns true if player can @program others (wizard or prog power).
+func CanProg(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowProg)
+}
+
+// CanHide returns true if player can set DARK on themselves (wizard or hide power).
+func CanHide(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowHide)
+}
+
+// CanBuilder returns true if player can build (@dig/@open/@create without wizard).
+func CanBuilder(g *Game, player gamedb.DBRef) bool {
+	return HasPow(g, player, 1, gamedb.Pow2Builder)
+}
+
+// CanChownAny returns true if player can @chown anything (wizard or chown_anything power).
+func CanChownAny(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowChownAny)
+}
+
+// CanFindUnfindable returns true if player can find UNFINDABLE objects.
+func CanFindUnfindable(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowFindUnfind)
+}
+
+// CanStatAny returns true if player can @stat any object (wizard or stat_any power).
+func CanStatAny(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowStatAny)
+}
+
+// CanSteal returns true if player can give negative money (wizard or steal power).
+func CanSteal(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowSteal)
+}
+
+// CanLongFingers returns true if player can reach objects at a distance.
+func CanLongFingers(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowLongfingers)
+}
+
+// CanLinkToAny returns true if player can link to any object.
+func CanLinkToAny(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 1, gamedb.Pow2LinkToAny)
+}
+
+// CanOpenAnywhere returns true if player can @open from any location.
+func CanOpenAnywhere(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 1, gamedb.Pow2OpenAnyLoc)
+}
+
+// CanLinkHome returns true if player can link home to any object.
+func CanLinkHome(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 1, gamedb.Pow2LinkHome)
+}
+
+// CanWizardWho returns true if player sees wizard WHO info.
+func CanWizardWho(g *Game, player gamedb.DBRef) bool {
+	return Wizard(g, player) || HasPow(g, player, 0, gamedb.PowWizardWho)
+}
+
 // PassLocks returns true if player has the POW_PASS_LOCKS power.
 // Unlike C TinyMUSH (which includes Wizard(x)), we require the explicit
 // pass_locks power so wizards don't silently bypass all locks.

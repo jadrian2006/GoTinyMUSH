@@ -166,6 +166,7 @@ type GameConf struct {
 	FunctionAccess map[string]string `yaml:"function_access"`
 
 	// --- Compatibility ---
+	CIsCommand    bool `yaml:"c_is_command"`    // %c = current command (true) or literal (false, default). Matches C c_is_command.
 	FixEscapeEval bool `yaml:"fix_escape_eval"` // Strip double-escaped \\[ \\] \\% \\{ \\} in queued attrs (default true)
 
 	// --- Attribute access config ---

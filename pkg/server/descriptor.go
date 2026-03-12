@@ -458,6 +458,7 @@ func MakeEvalContextWithGame(g *Game, player gamedb.DBRef, registerFn func(*eval
 	if g.Conf != nil {
 		ctx.MudName = g.Conf.MudName
 		ctx.FuncInvkLim = g.Conf.FunctionInvocationLimit
+		ctx.CIsCommand = g.Conf.CIsCommand
 		if g.Conf.IterLimit > 0 {
 			ctx.IterLim = g.Conf.IterLimit
 		}
@@ -492,6 +493,7 @@ func MakeEvalContextForObj(g *Game, executor gamedb.DBRef, enactor gamedb.DBRef,
 	if g.Conf != nil {
 		ctx.MudName = g.Conf.MudName
 		ctx.FuncInvkLim = g.Conf.FunctionInvocationLimit
+		ctx.CIsCommand = g.Conf.CIsCommand
 	}
 	if registerFn != nil {
 		registerFn(ctx)

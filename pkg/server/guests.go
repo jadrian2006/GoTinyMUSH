@@ -63,9 +63,16 @@ func (gm *GuestManager) AllGuests() []gamedb.DBRef {
 	return refs
 }
 
-// IsGuest returns true if the given player is a tracked guest.
+// IsGuest returns true if the given player is a tracked guest or has the guest power.
+// C TinyMUSH checks POW_GUEST for guest restrictions.
 func (g *Game) IsGuest(player gamedb.DBRef) bool {
-	return g.Guests != nil && g.Guests.IsGuest(player)
+	if g.Guests != nil && g.Guests.IsGuest(player) {
+		return true
+	}
+	if obj, ok := g.DB.Objects[player]; ok {
+		return obj.HasPower(0, gamedb.PowGuest)
+	}
+	return false
 }
 
 // GuestsEnabled returns true if the guest system is configured.

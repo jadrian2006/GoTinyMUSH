@@ -411,6 +411,13 @@ func locatable(ctx *eval.EvalContext, player, target gamedb.DBRef) bool {
 		return true
 	}
 
+	// C TinyMUSH: find_unfindable power bypasses UNFINDABLE
+	if pObj, ok := ctx.DB.Objects[player]; ok {
+		if pObj.HasPower(0, gamedb.PowFindUnfind) {
+			return true
+		}
+	}
+
 	return false
 }
 

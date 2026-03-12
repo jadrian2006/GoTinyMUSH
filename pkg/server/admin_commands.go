@@ -94,6 +94,11 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "You can't destroy that!")
 		return
 	}
+	// C TinyMUSH: no_destroy power — object is protected from destruction
+	if obj.HasPower(0, gamedb.PowNoDestroy) && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "That object is protected from destruction.")
+		return
+	}
 	// Player destruction checks (matches C TinyMUSH can_destroy_player)
 	if obj.ObjType() == gamedb.TypePlayer {
 		if !g.IsWizard(d.Player) {
@@ -374,14 +379,22 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
-		// C TinyMUSH: Controls() check for player/thing/room; exits check in link_exit
-		if !Controls(g, d.Player, target) {
+		// C TinyMUSH: Controls() check, link_to_anything/link_any_home bypass
+		if !Controls(g, d.Player, target) && !CanLinkToAny(g, d.Player) {
 			g.Notify(d.Player, "Permission denied.")
 			return
 		}
 		switch obj.ObjType() {
 		case gamedb.TypeExit:
 			// For exits, destination is stored in Location
+			// C: link_to_anything power bypasses destination ownership check
+			if !Controls(g, d.Player, dest) && !CanLinkToAny(g, d.Player) {
+				destObj, dok := g.DB.Objects[dest]
+				if !dok || !destObj.HasFlag(gamedb.FlagLinkOK) {
+					g.Notify(d.Player, "Permission denied.")
+					return
+				}
+			}
 			obj.Location = dest
 			g.PersistObject(obj)
 			g.Notify(d.Player, "Linked.")
@@ -392,6 +405,14 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 			g.Notify(d.Player, "Dropto set.")
 		default:
 			// For players/things, @link sets Home
+			// C: link_any_home power bypasses destination check
+			if !Controls(g, d.Player, dest) && !CanLinkHome(g, d.Player) {
+				destObj, dok := g.DB.Objects[dest]
+				if !dok || !destObj.HasFlag(gamedb.FlagLinkOK) {
+					g.Notify(d.Player, "Permission denied.")
+					return
+				}
+			}
 			obj.Link = dest
 			g.PersistObject(obj)
 			g.Notify(d.Player, "Home set.")
@@ -554,8 +575,8 @@ func cmdChown(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	// Must control the target
-	if !Controls(g, d.Player, target) {
+	// Must control the target (or have chown_anything power)
+	if !Controls(g, d.Player, target) && !CanChownAny(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -1418,8 +1439,8 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 	if HasSwitch(switches, "all") {
-		// C TinyMUSH: Can_Halt (wizard) check for /all
-		if !Wizard(g, d.Player) {
+		// C TinyMUSH: Can_Halt power check for /all
+		if !CanHalt(g, d.Player) {
 			g.Notify(d.Player, "Permission denied.")
 			return
 		}
@@ -1460,8 +1481,8 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 }
 
 func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
-	// C TinyMUSH: requires Can_Boot power (wizard-level)
-	if !Wizard(g, d.Player) {
+	// C TinyMUSH: requires Can_Boot power
+	if !CanBoot(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -1493,7 +1514,7 @@ func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdWall(g *Game, d *Descriptor, args string, _ []string) {
-	if !g.IsWizard(d.Player) {
+	if !CanAnnounce(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -2880,7 +2901,7 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 		if namePattern != "" && !wildMatchSimple(namePattern, strings.ToLower(obj.Name)) {
 			continue
 		}
-		if !g.Controls(d.Player, ref) {
+		if !g.Controls(d.Player, ref) && !CanSearch(g, d.Player) {
 			continue
 		}
 		matches = append(matches, ref)
@@ -4101,6 +4122,9 @@ func getAdminParam(c *GameConf, param string) (string, bool) {
 	case "read_remote_name":
 		if c.ReadRemoteName { return "1", true }
 		return "0", true
+	case "c_is_command":
+		if c.CIsCommand { return "1", true }
+		return "0", true
 	case "debug":
 		if IsDebug() { return "1", true }
 		return "0", true
@@ -4197,6 +4221,8 @@ func setAdminParam(c *GameConf, param, value string) bool {
 		c.ExaminePublicAttrs = parseBoolAdmin(value, negate); return true
 	case "read_remote_name":
 		c.ReadRemoteName = parseBoolAdmin(value, negate); return true
+	case "c_is_command":
+		c.CIsCommand = parseBoolAdmin(value, negate); return true
 	case "log":
 		// @admin log=all_commands / @admin log=!all_commands
 		// Currently a no-op placeholder; TinyMUSH uses this for log configuration

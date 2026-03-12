@@ -43,8 +43,8 @@ func cmdProgram(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	// Permission check: caller must control the target player
-	if !Controls(g, d.Player, target) {
+	// Permission check: caller must control the target player (or have prog power)
+	if !Controls(g, d.Player, target) && !CanProg(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}

@@ -175,9 +175,12 @@ func (g *Game) SetFlag(target gamedb.DBRef, flagStr string, player ...gamedb.DBR
 		p := player[0]
 
 		// fh_dark_bit: non-wizards can only set DARK on exits
+		// or on themselves if they have the hide power (C Can_Hide)
 		if def.Bit == gamedb.FlagDark && def.Word == 0 && !clear {
 			if !Wizard(g, p) && obj.ObjType() != gamedb.TypeExit {
-				return SetFlagDenied
+				if !(CanHide(g, p) && target == p) {
+					return SetFlagDenied
+				}
 			}
 		}
 
