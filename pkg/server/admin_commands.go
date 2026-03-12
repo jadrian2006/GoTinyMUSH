@@ -569,11 +569,18 @@ func (g *Game) PropagateParentAttrs(parent, child gamedb.DBRef) int {
 func cmdChown(g *Game, d *Descriptor, args string, switches []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @chown object = player")
+		g.Notify(d.Player, "Usage: @chown object[/attr] = player")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	ownerStr := strings.TrimSpace(args[eqIdx+1:])
+
+	// Check for obj/attr syntax — attribute ownership transfer
+	if slashIdx := strings.IndexByte(targetStr, '/'); slashIdx >= 0 {
+		cmdChownAttr(g, d, targetStr[:slashIdx], targetStr[slashIdx+1:], ownerStr)
+		return
+	}
+
 	target := g.MatchObject(d.Player, targetStr)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
@@ -597,18 +604,18 @@ func cmdChown(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	// Must control the target (or have chown_anything power)
-	if !Controls(g, d.Player, target) && !CanChownAny(g, d.Player) {
-		g.Notify(d.Player, "Permission denied.")
-		return
+	// Resolve new owner
+	owner := gamedb.DBRef(gamedb.Nothing)
+	if ownerStr == "" || strings.EqualFold(ownerStr, "me") {
+		owner = gamedb.DBRef(ResolveOwner(g, d.Player))
+	} else {
+		owner = g.ResolveRef(d.Player, ownerStr)
+		if owner == gamedb.Nothing {
+			owner = LookupPlayer(g.DB, ownerStr)
+		}
 	}
-
-	owner := g.ResolveRef(d.Player, ownerStr)
 	if owner == gamedb.Nothing {
-		owner = LookupPlayer(g.DB, ownerStr)
-	}
-	if owner == gamedb.Nothing {
-		g.Notify(d.Player, "I don't see that player.")
+		g.Notify(d.Player, "I couldn't find that player.")
 		return
 	}
 	// New owner must be a player
@@ -617,22 +624,190 @@ func cmdChown(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
+	// C TinyMUSH permission check (set.c:735-741):
+	// Must control target OR have chown_anything OR (CHOWN_OK + pass ChownLock)
+	// Things must be in player's inventory unless chown_anything
+	// Must control new owner (unless chown_anything)
+	// Cannot chown God objects
+	if IsGod(g, target) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	canChown := Controls(g, d.Player, target) || CanChownAny(g, d.Player)
+	if !canChown {
+		// Check CHOWN_OK + ChownLock
+		if tObj.Flags[0]&gamedb.FlagChownOK != 0 && CouldDoIt(g, d.Player, target, 217) { // A_LCHOWN
+			canChown = true
+		}
+	}
+	// Things must be in player's inventory unless chown_anything
+	if canChown && tObj.ObjType() == gamedb.TypeThing && tObj.Location != d.Player && !CanChownAny(g, d.Player) {
+		canChown = false
+	}
+	// Must control new owner unless chown_anything
+	if canChown && !Controls(g, d.Player, owner) && !CanChownAny(g, d.Player) {
+		canChown = false
+	}
+	if !canChown {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
+	// Quota transfer: charge new owner, refund old owner
+	oldOwner := gamedb.DBRef(ResolveOwner(g, target))
+	cost := quotaCostForType(g, tObj.ObjType())
+	if !g.CanPayQuota(owner, cost, tObj.ObjType()) {
+		g.Notify(d.Player, "That player doesn't have enough quota.")
+		return
+	}
+	g.PayQuota(owner, cost, tObj.ObjType())
+	g.RefundQuota(oldOwner, cost, tObj.ObjType())
+
 	// Set the new owner
 	tObj.Owner = owner
 
+	// C TinyMUSH: update unlocked attribute owners to new owner (atr_chown)
+	atrChown(g, tObj, owner)
+
 	// C TinyMUSH: strip privilege flags after chown (unless /nostrip by God)
 	nostrip := HasSwitch(switches, "nostrip") && IsGod(g, d.Player)
-	if !nostrip && tObj.ObjType() != gamedb.TypePlayer {
-		// Strip CHOWN_OK
+	if nostrip {
+		// God+nostrip: only strip CHOWN_OK, set HALT
 		tObj.Flags[0] &^= gamedb.FlagChownOK
-		// Strip privilege flags and powers
+		tObj.Flags[0] |= gamedb.FlagHalt
+	} else {
+		// Strip CHOWN_OK + privilege flags + powers, set HALT
+		tObj.Flags[0] &^= gamedb.FlagChownOK
 		StripPrivFlags(g, target)
-		// Set HALT to stop queued commands running under old permissions
 		tObj.Flags[0] |= gamedb.FlagHalt
 	}
 
+	// Halt queued commands running under old permissions
+	_, removedSem := g.Queue.HaltPlayer(target)
+	g.cleanupSemaphoreCounters(removedSem)
+
 	g.PersistObject(tObj)
-	g.Notify(d.Player, fmt.Sprintf("Owner of %s(#%d) changed to %s(#%d).", tObj.Name, target, g.ObjName(owner), owner))
+	g.Notify(d.Player, fmt.Sprintf("Owner changed."))
+}
+
+// atrChown updates unlocked attribute owners to the new object owner.
+// Matches C TinyMUSH's atr_chown(): for each attribute on the object,
+// if the attr is not AF_LOCK'd and the owner differs, set owner to new owner.
+func atrChown(g *Game, obj *gamedb.Object, newOwner gamedb.DBRef) {
+	for i, attr := range obj.Attrs {
+		info := ParseAttrInfo(attr.Value)
+		if info.Flags&gamedb.AFLock != 0 {
+			continue // locked attrs keep their owner
+		}
+		if info.Owner == newOwner {
+			continue // already correct
+		}
+		// Rewrite the prefix with new owner, preserving flags and text
+		text := eval.StripAttrPrefix(attr.Value)
+		obj.Attrs[i].Value = fmt.Sprintf("\x01%d:%d:%s", newOwner, info.Flags, text)
+	}
+}
+
+// cmdChownAttr handles @chown obj/attr=player — attribute ownership transfer.
+// C TinyMUSH rules (set.c:617-684):
+// - Chown to yourself: must own the object AND attr is not locked
+// - Chown to object owner: must own the attr AND attr is not locked
+// - Otherwise: must be wizard
+// - Cannot chown attrs on God objects (unless God)
+func cmdChownAttr(g *Game, d *Descriptor, objStr, attrStr, ownerStr string) {
+	target := g.MatchObject(d.Player, strings.TrimSpace(objStr))
+	if target == gamedb.Nothing {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	tObj, ok := g.DB.Objects[target]
+	if !ok {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+
+	// Resolve attr
+	attrName := strings.ToUpper(strings.TrimSpace(attrStr))
+	attrNum := g.LookupAttrNum(attrName)
+	if attrNum < 0 {
+		g.Notify(d.Player, "No such attribute.")
+		return
+	}
+
+	// Find the attribute on the object
+	var found bool
+	var attrInfo AttrInfo
+	for _, attr := range tObj.Attrs {
+		if attr.Number == attrNum {
+			attrInfo = ParseAttrInfo(attr.Value)
+			found = true
+			break
+		}
+	}
+	if !found {
+		g.Notify(d.Player, "Attribute not present on object.")
+		return
+	}
+
+	// Resolve new owner
+	owner := gamedb.DBRef(gamedb.Nothing)
+	if ownerStr == "" {
+		owner = gamedb.DBRef(ResolveOwner(g, target))
+	} else if strings.EqualFold(ownerStr, "me") {
+		owner = gamedb.DBRef(ResolveOwner(g, d.Player))
+	} else {
+		owner = g.ResolveRef(d.Player, ownerStr)
+		if owner == gamedb.Nothing {
+			owner = LookupPlayer(g.DB, ownerStr)
+		}
+	}
+	if owner == gamedb.Nothing {
+		g.Notify(d.Player, "I couldn't find that player.")
+		return
+	}
+
+	// Cannot chown attrs on God objects unless you are God
+	if IsGod(g, target) && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
+	// Permission check (matching C set.c:637-669)
+	doIt := false
+	playerOwner := gamedb.DBRef(ResolveOwner(g, d.Player))
+	objOwner := gamedb.DBRef(ResolveOwner(g, target))
+	isLocked := attrInfo.Flags&gamedb.AFLock != 0
+
+	if Wizard(g, d.Player) {
+		doIt = true
+	} else if owner == playerOwner {
+		// Chown attr to myself: must own the object and attr not locked
+		if Controls(g, d.Player, target) && !isLocked {
+			doIt = true
+		}
+	} else if owner == objOwner {
+		// Chown attr to object owner: must own the attr and attr not locked
+		if playerOwner == attrInfo.Owner && !isLocked {
+			doIt = true
+		}
+	}
+
+	if !doIt {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
+	// Update the attribute owner
+	for i, attr := range tObj.Attrs {
+		if attr.Number == attrNum {
+			text := eval.StripAttrPrefix(attr.Value)
+			tObj.Attrs[i].Value = fmt.Sprintf("\x01%d:%d:%s", owner, attrInfo.Flags, text)
+			break
+		}
+	}
+
+	g.PersistObject(tObj)
+	g.Notify(d.Player, "Attribute owner changed.")
 }
 
 func cmdClone(g *Game, d *Descriptor, args string, switches []string) {

@@ -243,7 +243,7 @@ func (p *boolParser) resolveAttrNum(name string) int {
 	}
 	upper := strings.ToUpper(name)
 	for num, n := range gamedb.WellKnownAttrs {
-		if n == upper {
+		if strings.EqualFold(n, upper) {
 			return num
 		}
 	}
@@ -562,7 +562,7 @@ func CouldDoIt(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
 		return EvalBoolExp(g, player, thing, thing, parsed, 0)
 	}
 
-	// For default lock (attr 38), also check Object.Lock header-based lock
+	// For default lock (attr 42), also check Object.Lock header-based lock
 	if lockAttr == aLock {
 		if tObj, ok := g.DB.Objects[thing]; ok && tObj.Lock != nil {
 			return EvalBoolExp(g, player, thing, thing, tObj.Lock, 0)
