@@ -701,7 +701,8 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 	// @lock obj = lockkey (simplified - just store as text)
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @lock object = key")
+		// C: "I don't see what you want to lock!"
+		g.Notify(d.Player, "I don't see what you want to lock!")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
@@ -1853,7 +1854,8 @@ func stripBraces(s string) string {
 func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
-		g.Notify(d.Player, "Usage: @set thing = attribute:value  or  @set thing = [!]flag")
+		// C: CS_TWO_ARG — no = means match against full args (usually empty → "I don't see that here.")
+		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
