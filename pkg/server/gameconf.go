@@ -64,6 +64,9 @@ type GameConf struct {
 	EvalOutputLimit       int `yaml:"eval_output_limit"`       // Max output bytes per eval (default 1048576 = 1MB)
 	DolistLimit           int `yaml:"dolist_limit"`            // Max elements per @dolist (default 10000)
 
+	// --- Object destruction ---
+	InstantRecycle bool `yaml:"instant_recycle"` // DESTROY_OK things skip GOING, destroy immediately (default true, matches C)
+
 	// --- Output ---
 	OutputLimit int `yaml:"output_limit"`
 
@@ -207,6 +210,7 @@ func DefaultGameConf() *GameConf {
 		CommandInvocationLimit:  2500,
 		EvalOutputLimit:         1048576, // 1MB
 		DolistLimit:             10000,
+		InstantRecycle:          true,
 		OutputLimit:             16384,
 		MatchOwnCommands:        false,
 		PlayerMatchOwnCommands:  false,
@@ -443,6 +447,10 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.EvalOutputLimit = atoi(val, gc.EvalOutputLimit)
 		case "dolist_limit":
 			gc.DolistLimit = atoi(val, gc.DolistLimit)
+
+		// --- Object destruction ---
+		case "instant_recycle":
+			gc.InstantRecycle = parseBool(val)
 
 		// --- Output ---
 		case "output_limit":

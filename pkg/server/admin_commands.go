@@ -77,8 +77,11 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "No such object.")
 		return
 	}
-	// Check control
-	if !g.Controls(d.Player, target) {
+	// C TinyMUSH: you can destroy DESTROY_OK things in your inventory
+	// even if you don't control them (create.c:813-822)
+	destroyOKInv := obj.ObjType() == gamedb.TypeThing &&
+		obj.HasFlag(gamedb.FlagDestroyOK) && obj.Location == d.Player
+	if !g.Controls(d.Player, target) && !destroyOKInv {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -102,11 +105,23 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 			return
 		}
 	}
-	if obj.HasFlag(gamedb.FlagSafe) && !HasSwitch(switches, "override") {
-		g.Notify(d.Player, "That object is SAFE. Use @set to remove the SAFE flag first, or use @destroy/override.")
+	// C TinyMUSH: SAFE check — DESTROY_OK bypasses SAFE (no /override needed)
+	destroyOK := obj.HasFlag(gamedb.FlagDestroyOK)
+	if obj.HasFlag(gamedb.FlagSafe) && !HasSwitch(switches, "override") &&
+		!(obj.ObjType() == gamedb.TypeThing && destroyOK) {
+		g.Notify(d.Player, "Sorry, that object is protected. Use @destroy/override to destroy it.")
 		return
 	}
 	instant := HasSwitch(switches, "instant")
+
+	// C TinyMUSH: instant_recycle config — DESTROY_OK things (or things owned
+	// by DESTROY_OK owners) skip GOING and destroy immediately
+	if !instant && g.Conf.InstantRecycle {
+		ownerObj, ownerOK := g.DB.Objects[obj.Owner]
+		if destroyOK || (ownerOK && ownerObj.HasFlag(gamedb.FlagDestroyOK)) {
+			instant = true
+		}
+	}
 
 	// Already going?
 	if obj.IsGoing() {
