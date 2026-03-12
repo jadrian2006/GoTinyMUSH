@@ -206,6 +206,57 @@ func (cs *Comsys) RemoveChannel(name string) ([]*gamedb.ChanAlias, error) {
 	return removed, nil
 }
 
+// okChanPerms implements C TinyMUSH's ok_chanperms() macro.
+// Checks whether obj can perform an action on a channel based on type-specific flags
+// and an optional lock expression. Comm_All power always passes.
+func (g *Game) okChanPerms(obj gamedb.DBRef, ch *gamedb.Channel, pFlag, oFlag int, lockStr string) bool {
+	// Comm_All always bypasses
+	o, ok := g.DB.Objects[obj]
+	if !ok {
+		return false
+	}
+	if o.HasPower(0, gamedb.PowCommAll) || Wizard(g, obj) {
+		return true
+	}
+
+	// Check type-specific flag
+	switch o.ObjType() {
+	case gamedb.TypePlayer:
+		if ch.Flags&pFlag != 0 {
+			return true
+		}
+	case gamedb.TypeThing:
+		if ch.Flags&oFlag != 0 {
+			return true
+		}
+	default:
+		// Only players and things on channels
+		return false
+	}
+
+	// No flag match — try the lock expression
+	if lockStr == "" {
+		return false
+	}
+	// Channel locks are evaluated with respect to the channel owner (C behavior)
+	return g.EvalLockStr(obj, ch.Owner, obj, lockStr)
+}
+
+// okJoinChannel checks if obj can join a channel.
+func (g *Game) okJoinChannel(obj gamedb.DBRef, ch *gamedb.Channel) bool {
+	return g.okChanPerms(obj, ch, gamedb.ChanPJoin, gamedb.ChanOJoin, ch.JoinLock)
+}
+
+// okSendChannel checks if obj can transmit on a channel.
+func (g *Game) okSendChannel(obj gamedb.DBRef, ch *gamedb.Channel) bool {
+	return g.okChanPerms(obj, ch, gamedb.ChanPTrans, gamedb.ChanOTrans, ch.TransLock)
+}
+
+// okRecvChannel checks if obj can receive on a channel.
+func (g *Game) okRecvChannel(obj gamedb.DBRef, ch *gamedb.Channel) bool {
+	return g.okChanPerms(obj, ch, gamedb.ChanPRecv, gamedb.ChanORecv, ch.RecvLock)
+}
+
 // SendToChannel broadcasts a message to all listening, connected players on a channel.
 // It emits structured EvChannel events via the event bus.
 func (g *Game) SendToChannel(channelName string, sender gamedb.DBRef, msg string) {
@@ -215,24 +266,31 @@ func (g *Game) SendToChannel(channelName string, sender gamedb.DBRef, msg string
 	listeners := g.Comsys.ChannelListeners(channelName)
 	// Deduplicate by player — a player may have multiple aliases for the
 	// same channel but should only receive each message once.
+	// Look up channel for receive lock check
+	ch := g.Comsys.GetChannel(channelName)
 	seen := make(map[gamedb.DBRef]bool)
 	for _, ca := range listeners {
 		if seen[ca.Player] {
 			continue
 		}
 		seen[ca.Player] = true
-		if g.Conns.IsConnected(ca.Player) {
-			g.EmitEvent(ca.Player, channelName, events.Event{
-				Type:    events.EvChannel,
-				Source:  sender,
-				Channel: channelName,
-				Text:    msg,
-				Data: map[string]any{
-					"channel": channelName,
-					"message": msg,
-				},
-			})
+		if !g.Conns.IsConnected(ca.Player) {
+			continue
 		}
+		// C: ok_recvchannel — check receive permission (flag or lock)
+		if ch != nil && !g.okRecvChannel(ca.Player, ch) {
+			continue
+		}
+		g.EmitEvent(ca.Player, channelName, events.Event{
+			Type:    events.EvChannel,
+			Source:  sender,
+			Channel: channelName,
+			Text:    msg,
+			Data: map[string]any{
+				"channel": channelName,
+				"message": msg,
+			},
+		})
 	}
 }
 
@@ -284,6 +342,12 @@ func (g *Game) ComsysProcessAlias(d *Descriptor, ca *gamedb.ChanAlias, args stri
 
 	if !ca.IsListening {
 		d.Send(fmt.Sprintf("You must turn on channel %s first.", ch.Name))
+		return
+	}
+
+	// C: ok_sendchannel — check transmit permission (flag or lock)
+	if !g.okSendChannel(d.Player, ch) {
+		d.Send("Sorry, you can't transmit on that channel.")
 		return
 	}
 

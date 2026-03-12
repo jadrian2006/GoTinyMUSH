@@ -796,6 +796,11 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
+		// C TinyMUSH: non-wizards need nearby || Controls
+		if !Wizard(g, d.Player) && !Controls(g, d.Player, target) && !g.Nearby(d.Player, target) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
 		for _, cur := range g.DB.SafeContents(target) {
 			g.SendMarkedToPlayer(cur, "EMIT", message)
 			g.CheckPemitListen(cur, d.Player, message)
@@ -832,6 +837,11 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 	}
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "Emit to whom?")
+		return
+	}
+	// C TinyMUSH: non-wizards need nearby || Controls || Long_Fingers
+	if !Wizard(g, d.Player) && !Controls(g, d.Player, target) && !g.Nearby(d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	g.SendMarkedToPlayer(target, "EMIT", message)
@@ -1237,6 +1247,11 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 		dest = g.ResolveRef(d.Player, strings.TrimSpace(parts[1]))
 	}
 	loc := g.PlayerLocation(d.Player)
+	// C TinyMUSH: must control the room to open an exit in it
+	if !Controls(g, d.Player, loc) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	exitRef := g.CreateExit(exitName, loc, dest, d.Player)
 	if exitRef == gamedb.Nothing {
 		return
@@ -1285,11 +1300,26 @@ func cmdRename(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
+	if !Controls(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	if newName == "" {
 		g.Notify(d.Player, "Give it what new name?")
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
+		// C TinyMUSH: player name validation
+		if obj.ObjType() == gamedb.TypePlayer {
+			trimmed := strings.TrimSpace(newName)
+			if !strings.EqualFold(trimmed, obj.Name) {
+				existing := LookupPlayer(g.DB, trimmed)
+				if existing != gamedb.Nothing {
+					g.Notify(d.Player, "That name is already in use.")
+					return
+				}
+			}
+		}
 		oldName := obj.Name
 		obj.Name = newName
 		g.PersistObject(obj)
@@ -3657,11 +3687,14 @@ func cmdGive(g *Game, d *Descriptor, args string, _ []string) {
 			return
 		}
 		playerObj := g.DB.Objects[d.Player]
-		if playerObj.Pennies < amount {
-			g.Notify(d.Player, fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
-			return
+		// C TinyMUSH: wizards and FREE_MONEY bypass the balance check
+		if !Wizard(g, d.Player) && !playerObj.HasPower(0, gamedb.PowFreeMoney) {
+			if playerObj.Pennies < amount {
+				g.Notify(d.Player, fmt.Sprintf("You don't have that many %s.", g.MoneyName(2)))
+				return
+			}
+			playerObj.Pennies -= amount
 		}
-		playerObj.Pennies -= amount
 		targetObj.Pennies += amount
 		g.PersistObjects(playerObj, targetObj)
 		g.Notify(d.Player, fmt.Sprintf("You give %d %s to %s.", amount, g.MoneyName(amount), DisplayName(targetObj.Name)))
@@ -3869,6 +3902,11 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	if obj.ObjType() != gamedb.TypeThing && obj.ObjType() != gamedb.TypeRoom {
 		g.Notify(d.Player, "You can't enter that.")
+		return
+	}
+	// C TinyMUSH: can't enter yourself
+	if target == d.Player {
+		g.Notify(d.Player, "You can't enter yourself!")
 		return
 	}
 	if !obj.HasFlag(gamedb.FlagEnterOK) && !g.Controls(d.Player, target) {

@@ -85,11 +85,37 @@ func qidxChar(ch byte) int {
 
 // Side-effect functions (stubs - record notifications but don't execute)
 
+// isNearby returns true if two objects are in the same location, or one contains the other.
+func isNearby(ctx *eval.EvalContext, a, b gamedb.DBRef) bool {
+	o1, ok1 := ctx.DB.Objects[a]
+	o2, ok2 := ctx.DB.Objects[b]
+	if !ok1 || !ok2 {
+		return false
+	}
+	loc1 := o1.Location
+	if o1.ObjType() == gamedb.TypeExit {
+		loc1 = o1.Exits
+	}
+	loc2 := o2.Location
+	if o2.ObjType() == gamedb.TypeExit {
+		loc2 = o2.Exits
+	}
+	return a == b || loc1 == loc2 || loc1 == b || loc2 == a
+}
+
 func fnPemit(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 {
 		return
 	}
 	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing {
+		return
+	}
+	// C TinyMUSH: non-wizards need nearby || Controls
+	if ctx.GameState != nil && !ctx.GameState.IsWizard(ctx.Player) &&
+		!ctx.GameState.Controls(ctx.Player, ref) && !isNearby(ctx, ctx.Player, ref) {
+		return
+	}
 	ctx.Notifications = append(ctx.Notifications, eval.Notification{
 		Target:  ref,
 		Message: args[1],
@@ -101,6 +127,14 @@ func fnRemit(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		return
 	}
 	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing {
+		return
+	}
+	// C TinyMUSH: non-wizards need nearby || Controls
+	if ctx.GameState != nil && !ctx.GameState.IsWizard(ctx.Player) &&
+		!ctx.GameState.Controls(ctx.Player, ref) && !isNearby(ctx, ctx.Player, ref) {
+		return
+	}
 	ctx.Notifications = append(ctx.Notifications, eval.Notification{
 		Target:  ref,
 		Message: args[1],
@@ -1411,6 +1445,11 @@ func fnOemit(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if len(args) < 2 { return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { return }
+	// C TinyMUSH: non-wizards need nearby || Controls
+	if ctx.GameState != nil && !ctx.GameState.IsWizard(ctx.Player) &&
+		!ctx.GameState.Controls(ctx.Player, ref) && !isNearby(ctx, ctx.Player, ref) {
+		return
+	}
 	ctx.Notifications = append(ctx.Notifications, eval.Notification{
 		Target:  ref,
 		Message: args[1],

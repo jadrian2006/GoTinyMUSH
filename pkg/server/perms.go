@@ -441,6 +441,26 @@ func StripPrivFlags(g *Game, obj gamedb.DBRef) {
 	g.PersistObject(o)
 }
 
+// Nearby returns true if obj1 and obj2 are "nearby" each other.
+// Matches C TinyMUSH's nearby(): same location, one contains the other,
+// or one is the other's location.
+func (g *Game) Nearby(obj1, obj2 gamedb.DBRef) bool {
+	o1, ok1 := g.DB.Objects[obj1]
+	o2, ok2 := g.DB.Objects[obj2]
+	if !ok1 || !ok2 {
+		return false
+	}
+	loc1 := o1.Location
+	if o1.ObjType() == gamedb.TypeExit {
+		loc1 = o1.Exits
+	}
+	loc2 := o2.Location
+	if o2.ObjType() == gamedb.TypeExit {
+		loc2 = o2.Exits
+	}
+	return loc1 == loc2 || loc1 == obj2 || loc2 == obj1 || obj1 == obj2
+}
+
 // PassLocks returns true if player has the POW_PASS_LOCKS power.
 // Unlike C TinyMUSH (which includes Wizard(x)), we require the explicit
 // pass_locks power so wizards don't silently bypass all locks.

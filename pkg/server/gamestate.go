@@ -634,8 +634,26 @@ func (g *Game) ChannelInfo(player gamedb.DBRef, name, field string) string {
 		if ch.Flags&gamedb.ChanLoud != 0 {
 			flags = append(flags, "Loud")
 		}
-		if ch.Flags&gamedb.ChanObject != 0 {
-			flags = append(flags, "Objects")
+		if ch.Flags&gamedb.ChanSpoof != 0 {
+			flags = append(flags, "Spoof")
+		}
+		if ch.Flags&gamedb.ChanPJoin != 0 {
+			flags = append(flags, "P_Join")
+		}
+		if ch.Flags&gamedb.ChanPTrans != 0 {
+			flags = append(flags, "P_Trans")
+		}
+		if ch.Flags&gamedb.ChanPRecv != 0 {
+			flags = append(flags, "P_Recv")
+		}
+		if ch.Flags&gamedb.ChanOJoin != 0 {
+			flags = append(flags, "O_Join")
+		}
+		if ch.Flags&gamedb.ChanOTrans != 0 {
+			flags = append(flags, "O_Trans")
+		}
+		if ch.Flags&gamedb.ChanORecv != 0 {
+			flags = append(flags, "O_Recv")
 		}
 		if ch.Flags&gamedb.ChanNoTitles != 0 {
 			flags = append(flags, "NoTitles")
@@ -974,6 +992,201 @@ func (g *Game) InstanceVehicle(room gamedb.DBRef) gamedb.DBRef {
 		return o.Location
 	}
 	return gamedb.Nothing
+}
+
+// ChannelList returns visible channel names for player (public, owned, or comm_all).
+func (g *Game) ChannelList(player gamedb.DBRef) []string {
+	if g.Comsys == nil {
+		return nil
+	}
+	hasCommAll := false
+	if pObj, ok := g.DB.Objects[player]; ok {
+		hasCommAll = pObj.HasPower(0, gamedb.PowCommAll) || Wizard(g, player)
+	}
+	var result []string
+	for _, ch := range g.Comsys.AllChannels() {
+		if ch.Flags&gamedb.ChanPublic != 0 || hasCommAll || ch.Owner == player {
+			result = append(result, ch.Name)
+		}
+	}
+	return result
+}
+
+// ChannelWho returns connected, listening players on a channel.
+// Respects Hidden flag (only See_Hidden/wizards see hidden players).
+func (g *Game) ChannelWho(player gamedb.DBRef, channelName string) []gamedb.DBRef {
+	if g.Comsys == nil {
+		return nil
+	}
+	ch := g.Comsys.GetChannel(channelName)
+	if ch == nil {
+		return nil // signals channel not found
+	}
+	canSeeHidden := Wizard(g, player)
+	if !canSeeHidden {
+		if pObj, ok := g.DB.Objects[player]; ok {
+			canSeeHidden = pObj.HasPower(0, gamedb.PowSeeHidden)
+		}
+	}
+	listeners := g.Comsys.ChannelListeners(channelName)
+	seen := make(map[gamedb.DBRef]bool)
+	var result []gamedb.DBRef
+	for _, ca := range listeners {
+		if seen[ca.Player] {
+			continue
+		}
+		seen[ca.Player] = true
+		if !g.Conns.IsConnected(ca.Player) {
+			continue
+		}
+		// Hidden player check
+		if pObj, ok := g.DB.Objects[ca.Player]; ok {
+			if pObj.HasFlag(gamedb.FlagDark) && !canSeeHidden {
+				continue
+			}
+		}
+		result = append(result, ca.Player)
+	}
+	return result
+}
+
+// ChannelWhoAll returns all subscribers on a channel (connected or not).
+func (g *Game) ChannelWhoAll(player gamedb.DBRef, channelName string) []gamedb.DBRef {
+	if g.Comsys == nil {
+		return nil
+	}
+	ch := g.Comsys.GetChannel(channelName)
+	if ch == nil {
+		return nil
+	}
+	subs := g.Comsys.ChannelSubscribers(channelName)
+	seen := make(map[gamedb.DBRef]bool)
+	var result []gamedb.DBRef
+	for _, ca := range subs {
+		if seen[ca.Player] {
+			continue
+		}
+		seen[ca.Player] = true
+		result = append(result, ca.Player)
+	}
+	_ = ch
+	return result
+}
+
+// ChannelOwner returns the owner dbref of a channel, or Nothing.
+func (g *Game) ChannelOwner(channelName string) gamedb.DBRef {
+	if g.Comsys == nil {
+		return gamedb.Nothing
+	}
+	ch := g.Comsys.GetChannel(channelName)
+	if ch == nil {
+		return gamedb.Nothing
+	}
+	return ch.Owner
+}
+
+// ChannelDesc returns the description of a channel.
+func (g *Game) ChannelDesc(channelName string) string {
+	if g.Comsys == nil {
+		return ""
+	}
+	ch := g.Comsys.GetChannel(channelName)
+	if ch == nil {
+		return ""
+	}
+	return ch.Description
+}
+
+// ChannelHeader returns the header of a channel.
+func (g *Game) ChannelHeader(channelName string) string {
+	if g.Comsys == nil {
+		return ""
+	}
+	ch := g.Comsys.GetChannel(channelName)
+	if ch == nil {
+		return ""
+	}
+	return ch.Header
+}
+
+// PlayerComAliases returns space-separated alias names for a player.
+// Requires Controls or Comm_All (C: Comsys_User macro).
+func (g *Game) PlayerComAliases(player, target gamedb.DBRef) string {
+	if g.Comsys == nil {
+		return "#-1 CHANNEL SYSTEM DISABLED"
+	}
+	if !g.canComsysUser(player, target) {
+		return "#-1 NO PERMISSION TO USE"
+	}
+	aliases := g.Comsys.PlayerAliases(target)
+	parts := make([]string, len(aliases))
+	for i, a := range aliases {
+		parts[i] = a.Alias
+	}
+	return strings.Join(parts, " ")
+}
+
+// PlayerComInfo returns the channel name for a player's alias.
+// Requires Controls or Comm_All.
+func (g *Game) PlayerComInfo(player, target gamedb.DBRef, alias string) string {
+	if g.Comsys == nil {
+		return "#-1 CHANNEL SYSTEM DISABLED"
+	}
+	if !g.canComsysUser(player, target) {
+		return "#-1 NO PERMISSION TO USE"
+	}
+	ca := g.Comsys.LookupAlias(target, alias)
+	if ca == nil {
+		return "#-1 ALIAS NOT FOUND"
+	}
+	return ca.Channel
+}
+
+// PlayerComTitle returns the title for a player's alias.
+// Requires Controls or Comm_All.
+func (g *Game) PlayerComTitle(player, target gamedb.DBRef, alias string) string {
+	if g.Comsys == nil {
+		return "#-1 CHANNEL SYSTEM DISABLED"
+	}
+	if !g.canComsysUser(player, target) {
+		return "#-1 NO PERMISSION TO USE"
+	}
+	ca := g.Comsys.LookupAlias(target, alias)
+	if ca == nil {
+		return "#-1 ALIAS NOT FOUND"
+	}
+	return ca.Title
+}
+
+// ChannelEmit sends a message to a channel. Returns "" on success, error on failure.
+func (g *Game) ChannelEmit(player gamedb.DBRef, channelName, message string) string {
+	if g.Comsys == nil {
+		return "#-1 CHANNEL SYSTEM DISABLED"
+	}
+	ch := g.Comsys.GetChannel(channelName)
+	if ch == nil {
+		return "#-1 CHANNEL NOT FOUND"
+	}
+	header := ch.Header
+	if header == "" {
+		header = fmt.Sprintf("[%s]", ch.Name)
+	}
+	msg := fmt.Sprintf("%s %s", header, message)
+	ch.NumSent++
+	g.SendToChannel(channelName, player, msg)
+	return ""
+}
+
+// canComsysUser checks the C Comsys_User macro equivalent:
+// Controls(player, target) || Comm_All(player)
+func (g *Game) canComsysUser(player, target gamedb.DBRef) bool {
+	if Controls(g, player, target) {
+		return true
+	}
+	if pObj, ok := g.DB.Objects[player]; ok {
+		return pObj.HasPower(0, gamedb.PowCommAll) || Wizard(g, player)
+	}
+	return false
 }
 
 // AddrLog returns connection log IP addresses for a player.

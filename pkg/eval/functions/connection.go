@@ -248,6 +248,13 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		typeFilter = strings.TrimSpace(args[2])
 	}
 
+	// C TinyMUSH: player must control the looker object (or be the looker)
+	if looker != ctx.Player && ctx.GameState != nil &&
+		!ctx.GameState.Controls(ctx.Player, looker) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
+
 	// Handle empty name
 	if name == "" {
 		buf.WriteString("#-1 NOT FOUND")

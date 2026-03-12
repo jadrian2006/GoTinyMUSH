@@ -28,11 +28,11 @@ type FlagDef struct {
 var FlagTable = map[string]*FlagDef{
 	// Flag word 0 — permissions from C flags.c gen_flags[]
 	"WIZARD":       {Name: "WIZARD", Word: 0, Bit: gamedb.FlagWizard, Perm: FlagPermGod},
-	"DARK":         {Name: "DARK", Word: 0, Bit: gamedb.FlagDark},           // fh_dark_bit (special, treated as fh_any for now)
+	"DARK":         {Name: "DARK", Word: 0, Bit: gamedb.FlagDark},           // fh_dark_bit: non-wiz can only set on exits
 	"HAVEN":        {Name: "HAVEN", Word: 0, Bit: gamedb.FlagHaven},
 	"HALT":         {Name: "HALT", Word: 0, Bit: gamedb.FlagHalt},
 	"SAFE":         {Name: "SAFE", Word: 0, Bit: gamedb.FlagSafe},
-	"INHERIT":      {Name: "INHERIT", Word: 0, Bit: gamedb.FlagInherit},     // fh_inherit (special, treated as fh_any for now)
+	"INHERIT":      {Name: "INHERIT", Word: 0, Bit: gamedb.FlagInherit},     // fh_inherit: setter must Inherits()
 	"NOSPOOF":      {Name: "NOSPOOF", Word: 0, Bit: gamedb.FlagNoSpoof},
 	"VISUAL":       {Name: "VISUAL", Word: 0, Bit: gamedb.FlagVisual},
 	"OPAQUE":       {Name: "OPAQUE", Word: 0, Bit: gamedb.FlagOpaque},
@@ -165,6 +165,42 @@ func (g *Game) SetFlag(target gamedb.DBRef, flagStr string, player ...gamedb.DBR
 			}
 		case FlagPermWizRoy:
 			if !Wizard(g, p) && !Royalty(g, p) {
+				return SetFlagDenied
+			}
+		}
+	}
+
+	// Special flag handlers (matching C TinyMUSH fh_* in flags.c)
+	if len(player) > 0 {
+		p := player[0]
+
+		// fh_dark_bit: non-wizards can only set DARK on exits
+		if def.Bit == gamedb.FlagDark && def.Word == 0 && !clear {
+			if !Wizard(g, p) && obj.ObjType() != gamedb.TypeExit {
+				return SetFlagDenied
+			}
+		}
+
+		// fh_going_bit: GOING can only be CLEARED by God, never set directly
+		if def.Bit == gamedb.FlagGoing && def.Word == 0 {
+			if !clear {
+				return SetFlagDenied // nobody can set GOING directly
+			}
+			if !IsGod(g, p) {
+				return SetFlagDenied
+			}
+		}
+
+		// fh_inherit: setter must themselves Inherit (be wizard or have INHERIT)
+		if def.Bit == gamedb.FlagInherit && def.Word == 0 && !clear {
+			if !Inherits(g, p) {
+				return SetFlagDenied
+			}
+		}
+
+		// fh_player_bit: ROBOT can only be set on players
+		if def.Bit == gamedb.FlagRobot && def.Word == 0 && !clear {
+			if obj.ObjType() != gamedb.TypePlayer {
 				return SetFlagDenied
 			}
 		}

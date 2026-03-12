@@ -27,6 +27,11 @@ func fnMail(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 			buf.WriteString("#-1 NO SUCH PLAYER")
 			return
 		}
+		// C TinyMUSH: only wizards can query another player's mail
+		if player != ctx.Player && !ctx.GameState.IsWizard(ctx.Player) {
+			buf.WriteString("#-1 PERMISSION DENIED")
+			return
+		}
 	}
 
 	total, unread, cleared := ctx.GameState.MailCount(player)

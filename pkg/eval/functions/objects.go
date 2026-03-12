@@ -9,6 +9,40 @@ import (
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
+// gsExaminable checks if player can examine target via GameState.Examinable().
+// C TinyMUSH: Examinable(player, it) — VISUAL flag, same owner, SeeAll, or zone control.
+// Also allows if player is inside the target (location check) or target is the player.
+func gsExaminable(ctx *eval.EvalContext, player, target gamedb.DBRef) bool {
+	if player == target {
+		return true
+	}
+	if ctx.GameState != nil {
+		return ctx.GameState.Examinable(player, target)
+	}
+	// Fallback: same owner check when GameState unavailable
+	if pObj, ok := ctx.DB.Objects[player]; ok {
+		if tObj, ok := ctx.DB.Objects[target]; ok {
+			return pObj.Owner == tObj.Owner
+		}
+	}
+	return false
+}
+
+// gsExaminableOrInside checks Examinable OR player is inside target.
+// C TinyMUSH: con(), exit(), next(), lcon(), lexits() allow if player is in the object.
+func gsExaminableOrInside(ctx *eval.EvalContext, player, target gamedb.DBRef) bool {
+	if gsExaminable(ctx, player, target) {
+		return true
+	}
+	// Player is inside the target
+	if pObj, ok := ctx.DB.Objects[player]; ok {
+		if pObj.Location == target {
+			return true
+		}
+	}
+	return false
+}
+
 // --- Pronoun functions ---
 // These read the SEX attribute (attr #7) and return appropriate pronouns.
 
@@ -90,17 +124,20 @@ func fnLastcreate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _,
 	if len(args) < 1 { buf.WriteString("-1"); return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("-1"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("-1"); return }
 	text := getAttrByName(ctx, ref, "CREATED_TIME")
 	if text == "" { buf.WriteString("-1"); return }
 	buf.WriteString(text)
 }
 
 // fnObjmem — returns rough memory size of an object.
+// C TinyMUSH: requires Examinable.
 func fnObjmem(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("0"); return }
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	size := 128 + len(obj.Name) // base struct + name
 	for _, attr := range obj.Attrs {
 		size += 16 + len(attr.Value) // overhead + value
@@ -401,6 +438,8 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1 NO MATCH"); return }
+	// C TinyMUSH: requires Examinable to see flags on other objects
+	if !gsExaminable(ctx, ctx.Player, ref) { return }
 
 	// Type letter first
 	switch obj.ObjType() {
@@ -540,6 +579,7 @@ func fnHasflag(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	flagName := strings.ToUpper(strings.TrimSpace(args[1]))
 	buf.WriteString(boolToStr(objHasFlag(obj, flagName)))
 }
@@ -549,6 +589,7 @@ func fnHasattr(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	attrName := strings.ToUpper(strings.TrimSpace(args[1]))
 	// Look up attr number
 	if def, ok := ctx.DB.AttrByName[attrName]; ok {
@@ -666,6 +707,7 @@ func fnDefault(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 func fnCon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
+	if !gsExaminableOrInside(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		buf.WriteString(fmt.Sprintf("#%d", obj.Contents))
 	} else { buf.WriteString("#-1") }
@@ -674,6 +716,7 @@ func fnCon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 func fnExit(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
+	if !gsExaminableOrInside(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		buf.WriteString(fmt.Sprintf("#%d", obj.Exits))
 	} else { buf.WriteString("#-1") }
@@ -683,6 +726,8 @@ func fnNext(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
 	if obj, ok := ctx.DB.Objects[ref]; ok {
+		// C TinyMUSH: must examine the LOCATION of the object
+		if !gsExaminableOrInside(ctx, ctx.Player, obj.Location) { buf.WriteString("#-1"); return }
 		buf.WriteString(fmt.Sprintf("#%d", obj.Next))
 	} else { buf.WriteString("#-1") }
 }
@@ -690,6 +735,7 @@ func fnNext(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 func fnLcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
+	if !gsExaminableOrInside(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
 	var refs []string
@@ -705,6 +751,7 @@ func fnLcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 
 func fnLexits(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	ref := resolveDBRef(ctx, args[0])
+	if !gsExaminableOrInside(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
 	var refs []string
@@ -732,6 +779,7 @@ func fnLattr(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	}
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
+	if !gsExaminable(ctx, ctx.Player, ref) { return }
 	var names []string
 	for _, attr := range obj.Attrs {
 		name := ctx.DB.GetAttrName(attr.Number)
@@ -746,6 +794,8 @@ func fnLattr(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 func fnNattr(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("0"); return }
 	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		writeInt(buf, len(obj.Attrs))
 	} else { buf.WriteString("0") }
@@ -756,6 +806,7 @@ func fnHome(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	switch obj.ObjType() {
 	case gamedb.TypeExit:
 		// For exits, home() returns the source room (Exits field)
@@ -772,6 +823,8 @@ func fnHome(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 func fnParent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("#-1"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		buf.WriteString(fmt.Sprintf("#%d", obj.Parent))
 	} else { buf.WriteString("#-1") }
@@ -780,6 +833,8 @@ func fnParent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 func fnZone(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("#-1"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	if obj, ok := ctx.DB.Objects[ref]; ok {
 		buf.WriteString(fmt.Sprintf("#%d", obj.Zone))
 	} else { buf.WriteString("#-1") }
@@ -789,10 +844,16 @@ func fnControls(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if len(args) < 2 { buf.WriteString("0"); return }
 	controller := resolveDBRef(ctx, args[0])
 	target := resolveDBRef(ctx, args[1])
+	if controller == gamedb.Nothing || target == gamedb.Nothing { buf.WriteString("0"); return }
+	// Use full Controls() via GameState if available
+	if ctx.GameState != nil {
+		buf.WriteString(boolToStr(ctx.GameState.Controls(controller, target)))
+		return
+	}
+	// Fallback: simplified check
 	cObj, ok1 := ctx.DB.Objects[controller]
 	tObj, ok2 := ctx.DB.Objects[target]
 	if !ok1 || !ok2 { buf.WriteString("0"); return }
-	// Simplified: you control it if you own it or you're a wizard
 	if cObj.HasFlag(gamedb.FlagWizard) || tObj.Owner == controller || controller == target {
 		buf.WriteString("1")
 	} else {
@@ -803,6 +864,8 @@ func fnControls(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 func fnRoom(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("#-1"); return }
+	if !locatable(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	// Walk up locations until we find a room
 	for i := 0; i < 100; i++ {
 		obj, ok := ctx.DB.Objects[ref]
@@ -892,6 +955,11 @@ func fnElock(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		buf.WriteString("0")
 		return
 	}
+	// C TinyMUSH: caller must control the object to test its locks
+	if ctx.GameState != nil && !ctx.GameState.Controls(ctx.Player, obj) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
 	if ctx.GameState != nil {
 		if ctx.GameState.EvalObjLock(player, obj, lockAttr) {
 			buf.WriteString("1")
@@ -928,6 +996,11 @@ func fnLockFn(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		buf.WriteString("#-1 NOT FOUND")
 		return
 	}
+	// C TinyMUSH: requires Examinable to read lock text
+	if !gsExaminable(ctx, ctx.Player, ref) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
 	if ctx.GameState != nil {
 		text := ctx.GameState.GetAttrTextGS(ref, lockAttr)
 		// Fall back to obj.Lock (header BoolExp) when attr 42 is empty
@@ -955,6 +1028,7 @@ func fnHasattrp(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if len(args) < 2 { buf.WriteString("0"); return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	attrName := strings.ToUpper(strings.TrimSpace(args[1]))
 	text := getAttrByName(ctx, ref, attrName)
 	buf.WriteString(boolToStr(text != ""))
@@ -1023,12 +1097,14 @@ func fnEdefault(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 }
 
 // fnMoney — returns object's money/pennies.
+// C TinyMUSH: requires Examinable.
 func fnMoney(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("0"); return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1 NOT FOUND"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	writeInt(buf, obj.Pennies)
 }
 
@@ -1049,6 +1125,7 @@ func grepHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, case
 	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1 NOT FOUND"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("#-1 PERMISSION DENIED"); return }
 
 	attrPattern := args[1]
 	searchPattern := args[2]
@@ -1091,6 +1168,7 @@ func pgrepHelper(ctx *eval.EvalContext, args []string, buf *strings.Builder, cas
 	if len(args) < 3 { return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("#-1 PERMISSION DENIED"); return }
 
 	attrPattern := args[1]
 	searchPattern := args[2]
@@ -1160,6 +1238,7 @@ func fnAndflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if ref == gamedb.Nothing { buf.WriteString("0"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	flagStr := args[1]
 	for _, ch := range flagStr {
 		negate := false
@@ -1186,6 +1265,7 @@ func fnOrflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	if ref == gamedb.Nothing { buf.WriteString("0"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	flagStr := args[1]
 	for _, ch := range flagStr {
 		if ch == '!' { continue }
@@ -1279,6 +1359,7 @@ func fnHasflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if ref == gamedb.Nothing { buf.WriteString("0"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 
 	flagStr := strings.TrimSpace(args[1])
 	if flagStr == "" { buf.WriteString("1"); return }
@@ -1338,12 +1419,14 @@ var knownPowers = map[string][2]int{
 }
 
 // fnHaspower — test if object has a power.
+// C TinyMUSH: requires Examinable to query powers on other objects.
 func fnHaspower(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("0"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	powerName := strings.ToUpper(strings.TrimSpace(args[1]))
 	info, ok := knownPowers[powerName]
 	if !ok { buf.WriteString("0"); return }
@@ -1401,14 +1484,29 @@ func fnSees(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 }
 
 // fnVisible — returns 1 if <looker> can examine <target>.
+// C TinyMUSH: caller must control the looker. Uses full Examinable() check.
 func fnVisible(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
 	looker := resolveDBRef(ctx, args[0])
 	target := resolveDBRef(ctx, args[1])
 	if looker == gamedb.Nothing || target == gamedb.Nothing { buf.WriteString("0"); return }
+	// Caller must control the looker
+	if ctx.GameState != nil && looker != ctx.Player && !ctx.GameState.Controls(ctx.Player, looker) {
+		buf.WriteString("0")
+		return
+	}
+	// Use full Examinable check via GameState if available
+	if ctx.GameState != nil {
+		if ctx.GameState.Examinable(looker, target) {
+			buf.WriteString("1")
+		} else {
+			buf.WriteString("0")
+		}
+		return
+	}
+	// Fallback: owner, wizard, or VISUAL
 	tObj, ok := ctx.DB.Objects[target]
 	if !ok { buf.WriteString("0"); return }
-	// Owner, wizard, or VISUAL flag
 	if lObj, ok := ctx.DB.Objects[looker]; ok {
 		if tObj.Owner == looker || objHasFlag(lObj, "WIZARD") || objHasFlag(tObj, "VISUAL") {
 			buf.WriteString("1")
@@ -1419,10 +1517,12 @@ func fnVisible(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 }
 
 // fnWhere — returns "true" location: Location for players/things, source room for exits, self for rooms.
+// C TinyMUSH: requires locatable.
 func fnWhere(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("#-1"); return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	if !locatable(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1 NOT FOUND"); return }
 	switch obj.ObjType() {
@@ -1437,10 +1537,12 @@ func fnWhere(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 }
 
 // fnXcon — list contents recursively.
+// C TinyMUSH: requires Examinable or player inside target.
 func fnXcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
 	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	if !gsExaminableOrInside(ctx, ctx.Player, ref) { buf.WriteString("#-1"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { return }
 	var results []string
@@ -1481,6 +1583,7 @@ func fnInzone(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	ref := resolveDBRef(ctx, args[0])
 	zone := resolveDBRef(ctx, args[1])
 	if ref == gamedb.Nothing || zone == gamedb.Nothing { buf.WriteString("0"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
 	buf.WriteString(boolToStr(obj.Zone == zone))
@@ -1534,6 +1637,7 @@ func fnLcmds(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if !ok {
 		buf.WriteString("#-1 NOT FOUND"); return
 	}
+	if !gsExaminable(ctx, ctx.Player, target) { return }
 	delim := " "
 	if len(args) > 1 && args[1] != "" { delim = args[1] }
 	cmdChar := "$"
@@ -1571,6 +1675,7 @@ func fnAttrcnt(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	if !ok {
 		buf.WriteString("#-1 NOT FOUND"); return
 	}
+	if !gsExaminable(ctx, ctx.Player, target) { buf.WriteString("0"); return }
 	count := 0
 	for _, attr := range obj.Attrs {
 		name := ""
@@ -1642,6 +1747,7 @@ func fnLrooms(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	if start == gamedb.Nothing {
 		buf.WriteString("#-1 NOT FOUND"); return
 	}
+	if !gsExaminable(ctx, ctx.Player, start) { buf.WriteString("#-1 PERMISSION DENIED"); return }
 	maxDepth := 1
 	if len(args) > 1 { maxDepth = toInt(args[1]) }
 	if maxDepth < 1 { maxDepth = 1 }
@@ -1687,6 +1793,8 @@ func fnZones(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		return
 	}
 	ref := resolveDBRef(ctx, args[0])
+	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("#-1 PERMISSION DENIED"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok {
 		buf.WriteString("#-1 NOT FOUND")
@@ -1708,7 +1816,9 @@ func fnIsinstance(ctx *eval.EvalContext, args []string, buf *strings.Builder, _,
 		buf.WriteString("0")
 		return
 	}
-	if ctx.GameState != nil && ctx.GameState.IsInstance(resolveDBRef(ctx, args[0])) {
+	ref := resolveDBRef(ctx, args[0])
+	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
+	if ctx.GameState != nil && ctx.GameState.IsInstance(ref) {
 		buf.WriteString("1")
 	} else {
 		buf.WriteString("0")

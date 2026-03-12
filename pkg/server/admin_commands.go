@@ -82,6 +82,26 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
+	// C TinyMUSH: destroyable() — protect #0 and God
+	if target == 0 {
+		g.Notify(d.Player, "You can't destroy that!")
+		return
+	}
+	if IsGod(g, target) {
+		g.Notify(d.Player, "You can't destroy that!")
+		return
+	}
+	// Player destruction checks (matches C TinyMUSH can_destroy_player)
+	if obj.ObjType() == gamedb.TypePlayer {
+		if !g.IsWizard(d.Player) {
+			g.Notify(d.Player, "Sorry, no suicide allowed.")
+			return
+		}
+		if g.IsWizard(target) {
+			g.Notify(d.Player, "Even you can't do that!")
+			return
+		}
+	}
 	if obj.HasFlag(gamedb.FlagSafe) && !HasSwitch(switches, "override") {
 		g.Notify(d.Player, "That object is SAFE. Use @set to remove the SAFE flag first, or use @destroy/override.")
 		return
@@ -337,6 +357,11 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	if obj, ok := g.DB.Objects[target]; ok {
+		// C TinyMUSH: Controls() check for player/thing/room; exits check in link_exit
+		if !Controls(g, d.Player, target) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
 		switch obj.ObjType() {
 		case gamedb.TypeExit:
 			// For exits, destination is stored in Location
@@ -406,6 +431,26 @@ func cmdParent(g *Game, d *Descriptor, args string, _ []string) {
 			return
 		}
 	}
+	// C TinyMUSH: Controls() check
+	if !Controls(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	// C TinyMUSH: Verify no circular parent reference
+	if parent != gamedb.Nothing {
+		curr := parent
+		for i := 0; i < 100; i++ { // depth limit to prevent infinite loops
+			if curr == target {
+				g.Notify(d.Player, "You can't have yourself as a parent!")
+				return
+			}
+			parentObj, ok := g.DB.Objects[curr]
+			if !ok || parentObj.Parent == gamedb.Nothing {
+				break
+			}
+			curr = parentObj.Parent
+		}
+	}
 	if obj, ok := g.DB.Objects[target]; ok {
 		obj.Parent = parent
 		g.PersistObject(obj)
@@ -461,7 +506,7 @@ func (g *Game) PropagateParentAttrs(parent, child gamedb.DBRef) int {
 	return count
 }
 
-func cmdChown(g *Game, d *Descriptor, args string, _ []string) {
+func cmdChown(g *Game, d *Descriptor, args string, switches []string) {
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		g.Notify(d.Player, "Usage: @chown object = player")
@@ -474,16 +519,60 @@ func cmdChown(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
+	tObj, ok := g.DB.Objects[target]
+	if !ok {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+
+	// C TinyMUSH: can't chown God objects
+	if IsGod(g, target) && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
+	// C TinyMUSH: can't chown players (players always own themselves)
+	if tObj.ObjType() == gamedb.TypePlayer && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "Players always own themselves.")
+		return
+	}
+
+	// Must control the target
+	if !Controls(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
 	owner := g.ResolveRef(d.Player, ownerStr)
+	if owner == gamedb.Nothing {
+		owner = LookupPlayer(g.DB, ownerStr)
+	}
 	if owner == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that player.")
 		return
 	}
-	if obj, ok := g.DB.Objects[target]; ok {
-		obj.Owner = owner
-		g.PersistObject(obj)
-		g.Notify(d.Player, fmt.Sprintf("Owner of %s(#%d) changed to %s(#%d).", obj.Name, target, g.ObjName(owner), owner))
+	// New owner must be a player
+	if ownerObj, ok := g.DB.Objects[owner]; !ok || ownerObj.ObjType() != gamedb.TypePlayer {
+		g.Notify(d.Player, "Owner must be a player.")
+		return
 	}
+
+	// Set the new owner
+	tObj.Owner = owner
+
+	// C TinyMUSH: strip privilege flags after chown (unless /nostrip by God)
+	nostrip := HasSwitch(switches, "nostrip") && IsGod(g, d.Player)
+	if !nostrip && tObj.ObjType() != gamedb.TypePlayer {
+		// Strip CHOWN_OK
+		tObj.Flags[0] &^= gamedb.FlagChownOK
+		// Strip privilege flags and powers
+		StripPrivFlags(g, target)
+		// Set HALT to stop queued commands running under old permissions
+		tObj.Flags[0] |= gamedb.FlagHalt
+	}
+
+	g.PersistObject(tObj)
+	g.Notify(d.Player, fmt.Sprintf("Owner of %s(#%d) changed to %s(#%d).", tObj.Name, target, g.ObjName(owner), owner))
 }
 
 func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
@@ -497,6 +586,16 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	srcObj, ok := g.DB.Objects[target]
 	if !ok {
 		g.Notify(d.Player, "No such object.")
+		return
+	}
+	// C TinyMUSH: Examinable() check — lets players clone VISUAL objects
+	if !Examinable(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	// C TinyMUSH: Cannot clone players
+	if srcObj.ObjType() == gamedb.TypePlayer {
+		g.Notify(d.Player, "You cannot clone players!")
 		return
 	}
 	newName := srcObj.Name
@@ -558,6 +657,11 @@ func cmdWipe(g *Game, d *Descriptor, args string, _ []string) {
 	target := g.MatchObject(d.Player, objStr)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	// C TinyMUSH: Controls() check
+	if !Controls(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	obj, ok := g.DB.Objects[target]
@@ -710,6 +814,10 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "I don't see that here.")
 		return
 	}
+	if !Controls(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	lockAttrNum := aLock // A_LOCK = 42
 	if HasSwitch(switches, "enter") || HasSwitch(switches, "enterlock") {
 		lockAttrNum = aLEnter // A_LENTER = 59
@@ -744,6 +852,10 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 	target := g.MatchObject(d.Player, args)
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	if !Controls(g, d.Player, target) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	lockAttrNum := aLock // A_LOCK = 42
@@ -808,6 +920,39 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 		return
 	}
 
+	// Get the master attribute definition flags
+	masterFlags := 0
+	if wkf, ok := gamedb.WellKnownAttrFlags[attrNum]; ok {
+		masterFlags = wkf
+	} else if def, ok := g.DB.AttrByName[attrName]; ok {
+		masterFlags = def.Flags
+	}
+
+	// C: Lock_attr check — can't lock internal, lock-type, or constant attrs
+	if masterFlags&(gamedb.AFInternal|gamedb.AFIsLock|gamedb.AFConst) != 0 {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	// Can't lock attrs on God objects (unless you're God)
+	if IsGod(g, target) && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	// Can't lock attrs on CONSTANT objects
+	if obj.HasFlag2(gamedb.Flag2ConstAttrs) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	// AF_WIZARD/AF_GOD attrs: need Wizard (AF_GOD: need God)
+	if masterFlags&gamedb.AFGod != 0 && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	if masterFlags&gamedb.AFWizard != 0 && !WizRoy(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
 	for i, attr := range obj.Attrs {
 		if attr.Number == attrNum {
 			info := ParseAttrInfo(attr.Value)
@@ -815,6 +960,15 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 			owner := info.Owner
 			if owner == gamedb.Nothing {
 				owner = obj.Owner
+			}
+			// C: must be Wizard or own the attribute
+			playerOwner := d.Player
+			if po, ok := g.DB.Objects[d.Player]; ok {
+				playerOwner = po.Owner
+			}
+			if !Wizard(g, d.Player) && owner != playerOwner {
+				g.Notify(d.Player, "Permission denied.")
+				return
 			}
 			if lock {
 				info.Flags |= gamedb.AFLock
@@ -878,6 +1032,11 @@ func cmdVerb(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	if actor == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	// C TinyMUSH: must control the actor
+	if !Controls(g, d.Player, actor) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -994,14 +1153,33 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	}
 
 	// Permission checks (matching C TinyMUSH do_teleport):
-	// 1. Must control the victim OR be wizard
-	if !Controls(g, d.Player, victim) && !Wizard(g, d.Player) {
+
+	// C: FIXED flag blocks teleport for non-wizards
+	if pObj, ok := g.DB.Objects[d.Player]; ok {
+		if pObj.HasFlag2(gamedb.Flag2Fixed) && !Wizard(g, d.Player) &&
+			!pObj.HasPower(0, gamedb.PowTelAnywhr) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+	}
+
+	// 1. Must control the victim OR be wizard OR have TEL_ANYTHING power
+	hasTelAnything := false
+	if pObj, ok := g.DB.Objects[d.Player]; ok {
+		hasTelAnything = pObj.HasPower(0, gamedb.PowTelUnrst)
+	}
+	if !Controls(g, d.Player, victim) && !Wizard(g, d.Player) && !hasTelAnything {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
-	// 2. Destination must be JUMP_OK or player must control dest or be wizard
+
+	// 2. Destination must be JUMP_OK or player must control dest or be wizard/TEL_ANYWHERE
+	hasTelAnywhere := false
+	if pObj, ok := g.DB.Objects[d.Player]; ok {
+		hasTelAnywhere = pObj.HasPower(0, gamedb.PowTelAnywhr)
+	}
 	if destObj, ok := g.DB.Objects[dest]; ok {
-		if !Wizard(g, d.Player) && !Controls(g, d.Player, dest) {
+		if !Wizard(g, d.Player) && !Controls(g, d.Player, dest) && !hasTelAnywhere {
 			if !destObj.HasFlag(gamedb.FlagJumpOK) {
 				g.Notify(d.Player, "You can't teleport there!")
 				return
@@ -1196,6 +1374,13 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "No match.")
 		return
 	}
+	// C TinyMUSH: controls(player, thing) || Link_ok(thing)
+	if !Controls(g, d.Player, target) {
+		if tObj, ok := g.DB.Objects[target]; !ok || !tObj.HasFlag(gamedb.FlagLinkOK) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+	}
 
 	attr := gamedb.A_SEMAPHORE // Default to A_SEMAPHORE (47), matching C TinyMUSH
 	if len(parts) > 1 {
@@ -1216,6 +1401,11 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 	if HasSwitch(switches, "all") {
+		// C TinyMUSH: Can_Halt (wizard) check for /all
+		if !Wizard(g, d.Player) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
 		// @halt/all - halt all objects' queue entries
 		removed := g.Queue.HaltAll()
 		if removed == 1 {
@@ -1232,6 +1422,11 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 			g.Notify(d.Player, "I don't see that here.")
 			return
 		}
+		// C TinyMUSH: Controls() check for halting another object
+		if !Controls(g, d.Player, target) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
 	}
 	removed := g.Queue.HaltPlayer(target)
 	// Note: C TinyMUSH's @halt only clears queue entries — it does NOT set
@@ -1246,9 +1441,24 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 }
 
 func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
+	// C TinyMUSH: requires Can_Boot power (wizard-level)
+	if !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	target := LookupPlayer(g.DB, strings.TrimSpace(args))
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "No such player.")
+		return
+	}
+	// C: God protection — can't boot God
+	if IsGod(g, target) && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "You cannot boot that player!")
+		return
+	}
+	// C: can't boot yourself
+	if target == d.Player {
+		g.Notify(d.Player, "You cannot boot yourself!")
 		return
 	}
 	descs := g.Conns.GetByPlayer(target)
@@ -1315,6 +1525,11 @@ func cmdFixAll(g *Game, d *Descriptor, args string, _ []string) {
 }
 
 func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {
+	// C TinyMUSH: CA_WIZARD — only wizards can change other players' passwords
+	if !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		g.Notify(d.Player, "Usage: @newpassword player = password")
@@ -1488,6 +1703,13 @@ func cmdFind(g *Game, d *Descriptor, args string, _ []string) {
 		if obj.IsGoing() {
 			continue
 		}
+		// C TinyMUSH: only show objects the player controls
+		if !Controls(g, d.Player, obj.DBRef) {
+			continue
+		}
+		if obj.ObjType() == gamedb.TypeExit {
+			continue // C TinyMUSH: @find skips exits
+		}
 		if wildMatchSimple(pattern, strings.ToLower(obj.Name)) {
 			g.Notify(d.Player, fmt.Sprintf("  %s(#%d%s) Owner: %s(#%d)",
 				obj.Name, obj.DBRef, typeChar(obj.ObjType()),
@@ -1539,10 +1761,15 @@ func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
 }
 
 func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
+	// C TinyMUSH: @ps/all requires wizard
+	showAll := HasSwitch(switches, "all")
+	if showAll && !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	// C format: show entries by queue type with headers, then Totals line
 	entries := g.Queue.Peek(200)
 	owner := ResolveOwner(g, d.Player)
-	showAll := HasSwitch(switches, "all")
 
 	// Categorize entries
 	var playerQ, objectQ, waitQ, semQ []*QueueEntry
@@ -2047,6 +2274,10 @@ func (g *Game) SetAttrByNameChecked(player, obj gamedb.DBRef, attrName string, v
 // Delegates to the full permission model in perms.go.
 func (g *Game) Controls(player, target gamedb.DBRef) bool {
 	return Controls(g, player, target)
+}
+
+func (g *Game) Examinable(player, target gamedb.DBRef) bool {
+	return Examinable(g, player, target)
 }
 
 // --- Utility ---
@@ -3071,51 +3302,53 @@ func (g *Game) StartAutoSave(intervalMinutes int) {
 
 // powerEntry maps a power name to its word index and bit.
 type powerEntry struct {
-	Word int
-	Bit  int
+	Word    int
+	Bit     int
+	GodOnly bool // ph_god in C: only God may set/clear
 }
 
 // powerTable maps power name strings to their (word, bit) pairs.
+// GodOnly matches C's ph_god handler — only God can set/clear these powers.
 var powerTable = map[string]powerEntry{
-	"change_quotas":  {0, gamedb.PowChgQuotas},
-	"chown_anything": {0, gamedb.PowChownAny},
-	"announce":       {0, gamedb.PowAnnounce},
-	"boot":           {0, gamedb.PowBoot},
-	"halt":           {0, gamedb.PowHalt},
-	"control_all":    {0, gamedb.PowControlAll},
-	"wizard_who":     {0, gamedb.PowWizardWho},
-	"see_all":        {0, gamedb.PowExamAll},
-	"find_unfindable": {0, gamedb.PowFindUnfind},
-	"free_money":     {0, gamedb.PowFreeMoney},
-	"free_quota":     {0, gamedb.PowFreeQuota},
-	"hide":           {0, gamedb.PowHide},
-	"idle":           {0, gamedb.PowIdle},
-	"search":         {0, gamedb.PowSearch},
-	"long_fingers":   {0, gamedb.PowLongfingers},
-	"prog":           {0, gamedb.PowProg},
-	"mdark_attr":     {0, gamedb.PowMdarkAttr},
-	"wiz_attr":       {0, gamedb.PowWizAttr},
-	"comm_all":       {0, gamedb.PowCommAll},
-	"see_queue":      {0, gamedb.PowSeeQueue},
-	"see_hidden":     {0, gamedb.PowSeeHidden},
-	"watch":          {0, gamedb.PowWatch},
-	"poll":           {0, gamedb.PowPoll},
-	"no_destroy":     {0, gamedb.PowNoDestroy},
-	"guest":          {0, gamedb.PowGuest},
-	"pass_locks":     {0, gamedb.PowPassLocks},
-	"stat_any":       {0, gamedb.PowStatAny},
-	"steal":          {0, gamedb.PowSteal},
-	"tel_anywhere":   {0, gamedb.PowTelAnywhr},
-	"tel_unrestricted": {0, gamedb.PowTelUnrst},
-	"unkillable":     {0, gamedb.PowUnkillable},
-	"builder":        {1, gamedb.Pow2Builder},
-	"link_variable":  {1, gamedb.Pow2LinkVar},
-	"link_to_anything": {1, gamedb.Pow2LinkToAny},
-	"open_anywhere":  {1, gamedb.Pow2OpenAnyLoc},
-	"use_sql":        {1, gamedb.Pow2UseSQL},
-	"link_any_home":  {1, gamedb.Pow2LinkHome},
-	"cloak":          {1, gamedb.Pow2Cloak},
-	"bot":            {1, gamedb.Pow2Bot},
+	"change_quotas":    {Word: 0, Bit: gamedb.PowChgQuotas},
+	"chown_anything":   {Word: 0, Bit: gamedb.PowChownAny},
+	"announce":         {Word: 0, Bit: gamedb.PowAnnounce},
+	"boot":             {Word: 0, Bit: gamedb.PowBoot},
+	"halt":             {Word: 0, Bit: gamedb.PowHalt},
+	"control_all":      {Word: 0, Bit: gamedb.PowControlAll, GodOnly: true},
+	"wizard_who":       {Word: 0, Bit: gamedb.PowWizardWho},
+	"see_all":          {Word: 0, Bit: gamedb.PowExamAll},
+	"find_unfindable":  {Word: 0, Bit: gamedb.PowFindUnfind},
+	"free_money":       {Word: 0, Bit: gamedb.PowFreeMoney},
+	"free_quota":       {Word: 0, Bit: gamedb.PowFreeQuota},
+	"hide":             {Word: 0, Bit: gamedb.PowHide},
+	"idle":             {Word: 0, Bit: gamedb.PowIdle},
+	"search":           {Word: 0, Bit: gamedb.PowSearch},
+	"long_fingers":     {Word: 0, Bit: gamedb.PowLongfingers},
+	"prog":             {Word: 0, Bit: gamedb.PowProg},
+	"mdark_attr":       {Word: 0, Bit: gamedb.PowMdarkAttr},
+	"wiz_attr":         {Word: 0, Bit: gamedb.PowWizAttr},
+	"comm_all":         {Word: 0, Bit: gamedb.PowCommAll},
+	"see_queue":        {Word: 0, Bit: gamedb.PowSeeQueue},
+	"see_hidden":       {Word: 0, Bit: gamedb.PowSeeHidden},
+	"watch":            {Word: 0, Bit: gamedb.PowWatch},
+	"poll":             {Word: 0, Bit: gamedb.PowPoll},
+	"no_destroy":       {Word: 0, Bit: gamedb.PowNoDestroy},
+	"guest":            {Word: 0, Bit: gamedb.PowGuest, GodOnly: true},
+	"pass_locks":       {Word: 0, Bit: gamedb.PowPassLocks},
+	"stat_any":         {Word: 0, Bit: gamedb.PowStatAny},
+	"steal":            {Word: 0, Bit: gamedb.PowSteal},
+	"tel_anywhere":     {Word: 0, Bit: gamedb.PowTelAnywhr},
+	"tel_unrestricted": {Word: 0, Bit: gamedb.PowTelUnrst},
+	"unkillable":       {Word: 0, Bit: gamedb.PowUnkillable},
+	"builder":          {Word: 1, Bit: gamedb.Pow2Builder},
+	"link_variable":    {Word: 1, Bit: gamedb.Pow2LinkVar},
+	"link_to_anything": {Word: 1, Bit: gamedb.Pow2LinkToAny},
+	"open_anywhere":    {Word: 1, Bit: gamedb.Pow2OpenAnyLoc},
+	"use_sql":          {Word: 1, Bit: gamedb.Pow2UseSQL, GodOnly: true},
+	"link_any_home":    {Word: 1, Bit: gamedb.Pow2LinkHome},
+	"cloak":            {Word: 1, Bit: gamedb.Pow2Cloak, GodOnly: true},
+	"bot":              {Word: 1, Bit: gamedb.Pow2Bot},
 }
 
 // --- @apikey command ---
@@ -3335,6 +3568,12 @@ func cmdPower(g *Game, d *Descriptor, args string, _ []string) {
 	pe, ok := powerTable[powName]
 	if !ok {
 		g.Notify(d.Player, "I don't know that power.")
+		return
+	}
+
+	// God-only powers (ph_god in C): control_all, cloak, guest, use_sql
+	if pe.GodOnly && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 

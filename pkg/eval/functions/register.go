@@ -591,6 +591,16 @@ func RegisterAll(ctx *eval.EvalContext) {
 
 	// Channel/Comsys functions
 	ctx.RegisterFunction("CINFO", fnCinfo, 2, 0)
+	ctx.RegisterFunction("COMLIST", fnComlist, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("CWHO", fnCwho, 1, 0)
+	ctx.RegisterFunction("CWHOALL", fnCwhoall, 1, 0)
+	ctx.RegisterFunction("COMOWNER", fnComowner, 1, 0)
+	ctx.RegisterFunction("COMDESC", fnComdesc, 1, 0)
+	ctx.RegisterFunction("COMHEADER", fnComheader, 1, 0)
+	ctx.RegisterFunction("COMALIAS", fnComalias, 1, 0)
+	ctx.RegisterFunction("COMINFO", fnCominfo, 2, 0)
+	ctx.RegisterFunction("COMTITLE", fnComtitle, 2, 0)
+	ctx.RegisterFunction("CEMIT", fnCemit, 2, 0)
 
 	// Attribute definition functions
 	ctx.RegisterFunction("LATTRDEF", fnLattrdef, 0, eval.FnVarArgs)

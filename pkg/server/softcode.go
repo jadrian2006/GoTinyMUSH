@@ -884,7 +884,7 @@ func (g *Game) evalAndDispatch(ctx *eval.EvalContext, entry *QueueEntry, descs [
 		return
 	}
 
-	evaluated := ctx.Exec(rawCmd, eval.EvFCheck|eval.EvEval, entry.Args)
+	evaluated := ctx.Exec(rawCmd, eval.EvFCheck|eval.EvEval|eval.EvFCheckPersist, entry.Args)
 	evaluated = strings.TrimSpace(evaluated)
 	DebugLog("DISPATCH player=#%d raw=%q eval=%q", entry.Player, truncDebug(rawCmd, 200), truncDebug(evaluated, 200))
 	if evaluated == "" {
@@ -1299,6 +1299,11 @@ func (g *Game) DoTrigger(player, cause gamedb.DBRef, args string) bool {
 		DebugLog("TRIGGER player=#%d target=%q RESOLVE FAILED", player, parts[0])
 		return false
 	}
+	// C TinyMUSH: controls(player, thing) check
+	if !Controls(g, player, target) {
+		g.Notify(player, "Permission denied.")
+		return false
+	}
 
 	attrName := strings.ToUpper(strings.TrimSpace(parts[1]))
 	attrNum := g.ResolveAttrNum(attrName)
@@ -1360,6 +1365,11 @@ func (g *Game) DoTriggerNow(player, cause gamedb.DBRef, args string) {
 
 	target := g.ResolveRef(player, parts[0])
 	if target == gamedb.Nothing {
+		return
+	}
+	// C TinyMUSH: controls(player, thing) check
+	if !Controls(g, player, target) {
+		g.Notify(player, "Permission denied.")
 		return
 	}
 
@@ -1453,6 +1463,13 @@ func (g *Game) DoWait(player, cause gamedb.DBRef, args string) {
 		g.Notify(player, "I don't see that here.")
 		g.Notify(player, "No match.")
 		return
+	}
+	// C TinyMUSH: controls(player, thing) || Link_ok(thing)
+	if !Controls(g, player, target) {
+		if tObj, ok := g.DB.Objects[target]; !ok || !tObj.HasFlag(gamedb.FlagLinkOK) {
+			g.Notify(player, "Permission denied.")
+			return
+		}
 	}
 
 	if command == "" {

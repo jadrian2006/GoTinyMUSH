@@ -25,13 +25,19 @@ type ChanAlias struct {
 	IsListening bool   // Currently tuned in
 }
 
-// Channel flag constants (from TinyMUSH comsys).
+// Channel flag constants — matches C TinyMUSH 3.3 comsys flag values.
 const (
-	ChanPublic  = 0x00000010 // Anyone can join
-	ChanLoud    = 0x00000020 // Show connect/disconnect
-	ChanPJoin   = 0x00000040 // Per-player join lock
-	ChanPTrans  = 0x00000080 // Per-player transmit lock
-	ChanPRecv   = 0x00000100 // Per-player receive lock
-	ChanObject  = 0x00000200 // Objects can join
-	ChanNoTitles = 0x00000400 // Suppress titles
+	ChanPublic   = 0x00000010 // Anyone can join
+	ChanLoud     = 0x00000020 // Show connect/disconnect
+	ChanPJoin    = 0x00000040 // Players can join (flag-based)
+	ChanPTrans   = 0x00000080 // Players can transmit (flag-based)
+	ChanPRecv    = 0x00000100 // Players can receive (flag-based)
+	ChanOJoin    = 0x00000200 // Objects can join (flag-based)
+	ChanOTrans   = 0x00000400 // Objects can transmit (flag-based)
+	ChanORecv    = 0x00000800 // Objects can receive (flag-based)
+	ChanSpoof    = 0x00001000 // Allow spoofing on channel
+	ChanNoTitles = 0x00010000 // Suppress titles (Go extension, above C range)
+
+	// Legacy alias — ChanObject mapped to ChanOJoin for backwards compatibility
+	ChanObject = ChanOJoin
 )

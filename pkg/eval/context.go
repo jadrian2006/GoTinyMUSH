@@ -224,6 +224,37 @@ type GameState interface {
 	EventBusQueueList() string
 	EventBusQueueInfo(queueName, mode string) string
 
+	// Examinable returns true if player can examine target.
+	// True if: VISUAL flag, SeeAll, same owner, or zone control.
+	Examinable(player, target gamedb.DBRef) bool
+
+	// Comsys softcode function support
+
+	// ChannelList returns visible channel names for player (public, owned, or comm_all).
+	ChannelList(player gamedb.DBRef) []string
+	// ChannelWho returns connected, listening players on a channel.
+	// Respects Hidden flag (only See_Hidden/wizards see hidden players).
+	ChannelWho(player gamedb.DBRef, channelName string) []gamedb.DBRef
+	// ChannelWhoAll returns all subscribers on a channel (connected or not).
+	ChannelWhoAll(player gamedb.DBRef, channelName string) []gamedb.DBRef
+	// ChannelOwner returns the owner dbref of a channel, or Nothing.
+	ChannelOwner(channelName string) gamedb.DBRef
+	// ChannelDesc returns the description of a channel.
+	ChannelDesc(channelName string) string
+	// ChannelHeader returns the header of a channel.
+	ChannelHeader(channelName string) string
+	// PlayerComAliases returns space-separated alias names for a player.
+	// Requires Controls or Comm_All.
+	PlayerComAliases(player, target gamedb.DBRef) string
+	// PlayerComInfo returns the channel name for a player's alias.
+	// Requires Controls or Comm_All.
+	PlayerComInfo(player, target gamedb.DBRef, alias string) string
+	// PlayerComTitle returns the title for a player's alias.
+	// Requires Controls or Comm_All.
+	PlayerComTitle(player, target gamedb.DBRef, alias string) string
+	// ChannelEmit sends a message to a channel. Returns "" on success, error on failure.
+	ChannelEmit(player gamedb.DBRef, channelName, message string) string
+
 	// IsInstance returns true if obj has the Flag3Instance flag.
 	IsInstance(obj gamedb.DBRef) bool
 

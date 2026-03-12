@@ -8,6 +8,21 @@ import (
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
 
+// isChannelAdmin checks the C check_owned_channel macro equivalent:
+// Comm_All(player) || Wizard(player) || (player == channel.Owner)
+func (g *Game) isChannelAdmin(player gamedb.DBRef, ch *gamedb.Channel) bool {
+	if ch.Owner == player {
+		return true
+	}
+	if Wizard(g, player) {
+		return true
+	}
+	if pObj, ok := g.DB.Objects[player]; ok {
+		return pObj.HasPower(0, gamedb.PowCommAll)
+	}
+	return false
+}
+
 // cmdAddcom handles "addcom alias=channel" — subscribe and set alias.
 func cmdAddcom(g *Game, d *Descriptor, args string, _ []string) {
 	if g.Comsys == nil {
@@ -29,6 +44,12 @@ func cmdAddcom(g *Game, d *Descriptor, args string, _ []string) {
 	ch := g.Comsys.GetChannel(chanName)
 	if ch == nil {
 		g.Notify(d.Player, fmt.Sprintf("Channel %q not found.", chanName))
+		return
+	}
+
+	// C: ok_joinchannel — check join permission (flag or lock)
+	if !g.okJoinChannel(d.Player, ch) {
+		g.Notify(d.Player, "Sorry, you can't join that channel.")
 		return
 	}
 
@@ -201,10 +222,12 @@ func cmdCcreate(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "Usage: @ccreate <channel name>")
 		return
 	}
+	// C default: all 6 type flags on (P_JOIN|P_TRANS|P_RECV|O_JOIN|O_TRANS|O_RECV)
 	ch := &gamedb.Channel{
-		Name:      name,
-		Owner:     d.Player,
-		Flags:     gamedb.ChanPublic,
+		Name:  name,
+		Owner: d.Player,
+		Flags: gamedb.ChanPJoin | gamedb.ChanPTrans | gamedb.ChanPRecv |
+			gamedb.ChanOJoin | gamedb.ChanOTrans | gamedb.ChanORecv,
 		Mogrifier: gamedb.Nothing,
 	}
 	if err := g.Comsys.AddChannel(ch); err != nil {
@@ -223,13 +246,19 @@ func cmdCdestroy(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "The channel system is not enabled.")
 		return
 	}
-	if !Wizard(g, d.Player) {
-		g.Notify(d.Player, "Permission denied.")
-		return
-	}
 	name := strings.TrimSpace(args)
 	if name == "" {
 		g.Notify(d.Player, "Usage: @cdestroy <channel name>")
+		return
+	}
+	ch := g.Comsys.GetChannel(name)
+	if ch == nil {
+		g.Notify(d.Player, fmt.Sprintf("Channel %q not found.", name))
+		return
+	}
+	// C: check_owned_channel — requires owner or Comm_All
+	if !g.isChannelAdmin(d.Player, ch) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	removed, err := g.Comsys.RemoveChannel(name)
@@ -285,6 +314,11 @@ func cmdCwho(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, fmt.Sprintf("Channel %q not found.", name))
 		return
 	}
+	// C: check_owned_channel — requires owner or Comm_All
+	if !g.isChannelAdmin(d.Player, ch) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 	g.showChannelWho(d, ch)
 }
 
@@ -292,10 +326,6 @@ func cmdCwho(g *Game, d *Descriptor, args string, _ []string) {
 func cmdCboot(g *Game, d *Descriptor, args string, _ []string) {
 	if g.Comsys == nil {
 		g.Notify(d.Player, "The channel system is not enabled.")
-		return
-	}
-	if !Wizard(g, d.Player) {
-		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	eqIdx := strings.IndexByte(args, '=')
@@ -309,6 +339,11 @@ func cmdCboot(g *Game, d *Descriptor, args string, _ []string) {
 	ch := g.Comsys.GetChannel(chanName)
 	if ch == nil {
 		g.Notify(d.Player, fmt.Sprintf("Channel %q not found.", chanName))
+		return
+	}
+	// C: check_owned_channel — requires owner or Comm_All
+	if !g.isChannelAdmin(d.Player, ch) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 	target := LookupPlayer(g.DB, playerName)
@@ -353,6 +388,11 @@ func cmdCemit(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, fmt.Sprintf("Channel %q not found.", chanName))
 		return
 	}
+	// C: check_owned_channel — requires Comm_All power or channel owner
+	if !g.isChannelAdmin(d.Player, ch) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
 
 	header := ch.Header
 	if header == "" {
@@ -368,10 +408,6 @@ func cmdCset(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "The channel system is not enabled.")
 		return
 	}
-	if !Wizard(g, d.Player) {
-		g.Notify(d.Player, "Permission denied.")
-		return
-	}
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		g.Notify(d.Player, "Usage: @cset <channel>=<option>")
@@ -384,6 +420,11 @@ func cmdCset(g *Game, d *Descriptor, args string, _ []string) {
 	ch := g.Comsys.GetChannel(chanName)
 	if ch == nil {
 		g.Notify(d.Player, fmt.Sprintf("Channel %q not found.", chanName))
+		return
+	}
+	// C: check_owned_channel — requires owner or Comm_All
+	if !g.isChannelAdmin(d.Player, ch) {
+		g.Notify(d.Player, "Permission denied.")
 		return
 	}
 
@@ -422,8 +463,75 @@ func cmdCset(g *Game, d *Descriptor, args string, _ []string) {
 	case lower == "nomogrifier":
 		ch.Mogrifier = gamedb.Nothing
 		g.Notify(d.Player, fmt.Sprintf("Channel %s mogrifier cleared.", ch.Name))
+	// C-compatible per-type permission flags
+	case lower == "p_join":
+		ch.Flags |= gamedb.ChanPJoin
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: player join flag set.", ch.Name))
+	case lower == "!p_join":
+		ch.Flags &^= gamedb.ChanPJoin
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: player join flag cleared.", ch.Name))
+	case lower == "p_trans":
+		ch.Flags |= gamedb.ChanPTrans
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: player transmit flag set.", ch.Name))
+	case lower == "!p_trans":
+		ch.Flags &^= gamedb.ChanPTrans
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: player transmit flag cleared.", ch.Name))
+	case lower == "p_recv":
+		ch.Flags |= gamedb.ChanPRecv
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: player receive flag set.", ch.Name))
+	case lower == "!p_recv":
+		ch.Flags &^= gamedb.ChanPRecv
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: player receive flag cleared.", ch.Name))
+	case lower == "o_join":
+		ch.Flags |= gamedb.ChanOJoin
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: object join flag set.", ch.Name))
+	case lower == "!o_join":
+		ch.Flags &^= gamedb.ChanOJoin
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: object join flag cleared.", ch.Name))
+	case lower == "o_trans":
+		ch.Flags |= gamedb.ChanOTrans
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: object transmit flag set.", ch.Name))
+	case lower == "!o_trans":
+		ch.Flags &^= gamedb.ChanOTrans
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: object transmit flag cleared.", ch.Name))
+	case lower == "o_recv":
+		ch.Flags |= gamedb.ChanORecv
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: object receive flag set.", ch.Name))
+	case lower == "!o_recv":
+		ch.Flags &^= gamedb.ChanORecv
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: object receive flag cleared.", ch.Name))
+	case lower == "spoof":
+		ch.Flags |= gamedb.ChanSpoof
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: spoof flag set.", ch.Name))
+	case lower == "!spoof":
+		ch.Flags &^= gamedb.ChanSpoof
+		g.Notify(d.Player, fmt.Sprintf("Channel %s: spoof flag cleared.", ch.Name))
+	// Lock expressions
+	case strings.HasPrefix(lower, "joinlock "):
+		ch.JoinLock = strings.TrimSpace(option[9:])
+		g.Notify(d.Player, fmt.Sprintf("Channel %s join lock set.", ch.Name))
+	case lower == "joinlock":
+		ch.JoinLock = ""
+		g.Notify(d.Player, fmt.Sprintf("Channel %s join lock cleared.", ch.Name))
+	case strings.HasPrefix(lower, "translock "):
+		ch.TransLock = strings.TrimSpace(option[10:])
+		g.Notify(d.Player, fmt.Sprintf("Channel %s transmit lock set.", ch.Name))
+	case lower == "translock":
+		ch.TransLock = ""
+		g.Notify(d.Player, fmt.Sprintf("Channel %s transmit lock cleared.", ch.Name))
+	case strings.HasPrefix(lower, "recvlock "):
+		ch.RecvLock = strings.TrimSpace(option[9:])
+		g.Notify(d.Player, fmt.Sprintf("Channel %s receive lock set.", ch.Name))
+	case lower == "recvlock":
+		ch.RecvLock = ""
+		g.Notify(d.Player, fmt.Sprintf("Channel %s receive lock cleared.", ch.Name))
 	default:
-		g.Notify(d.Player, "Unknown option. Options: description <text>, header <text>, public, private, loud, quiet, mogrifier <obj>, nomogrifier")
+		g.Notify(d.Player, "Unknown option.")
+		g.Notify(d.Player, "Options: description <text>, header <text>, public, private, loud, quiet,")
+		g.Notify(d.Player, "  p_join, !p_join, p_trans, !p_trans, p_recv, !p_recv,")
+		g.Notify(d.Player, "  o_join, !o_join, o_trans, !o_trans, o_recv, !o_recv,")
+		g.Notify(d.Player, "  spoof, !spoof, joinlock [expr], translock [expr], recvlock [expr],")
+		g.Notify(d.Player, "  mogrifier <obj>, nomogrifier")
 		return
 	}
 	if g.Store != nil {
@@ -457,7 +565,7 @@ func cmdCinfo(g *Game, d *Descriptor, args string, _ []string) {
 	g.Notify(d.Player, fmt.Sprintf("  Description: %s", ch.Description))
 	g.Notify(d.Player, fmt.Sprintf("  Header:      %s", ch.Header))
 	g.Notify(d.Player, fmt.Sprintf("  Messages:    %d", ch.NumSent))
-	// Flags
+	// Flags — C-compatible display (PLS JXR jxr format)
 	var flags []string
 	if ch.Flags&gamedb.ChanPublic != 0 {
 		flags = append(flags, "Public")
@@ -467,8 +575,26 @@ func cmdCinfo(g *Game, d *Descriptor, args string, _ []string) {
 	if ch.Flags&gamedb.ChanLoud != 0 {
 		flags = append(flags, "Loud")
 	}
-	if ch.Flags&gamedb.ChanObject != 0 {
-		flags = append(flags, "Objects")
+	if ch.Flags&gamedb.ChanSpoof != 0 {
+		flags = append(flags, "Spoof")
+	}
+	if ch.Flags&gamedb.ChanPJoin != 0 {
+		flags = append(flags, "P_Join")
+	}
+	if ch.Flags&gamedb.ChanPTrans != 0 {
+		flags = append(flags, "P_Trans")
+	}
+	if ch.Flags&gamedb.ChanPRecv != 0 {
+		flags = append(flags, "P_Recv")
+	}
+	if ch.Flags&gamedb.ChanOJoin != 0 {
+		flags = append(flags, "O_Join")
+	}
+	if ch.Flags&gamedb.ChanOTrans != 0 {
+		flags = append(flags, "O_Trans")
+	}
+	if ch.Flags&gamedb.ChanORecv != 0 {
+		flags = append(flags, "O_Recv")
 	}
 	if ch.Flags&gamedb.ChanNoTitles != 0 {
 		flags = append(flags, "NoTitles")

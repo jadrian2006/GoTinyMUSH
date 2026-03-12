@@ -47,6 +47,12 @@ func fnSubscribe(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, 
 		return
 	}
 
+	// Must control the target object to subscribe it
+	if !ctx.GameState.Controls(ctx.Player, obj) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
+
 	attr := strings.ToUpper(strings.TrimSpace(parts[1]))
 	queueName := strings.TrimSpace(args[1])
 
@@ -88,6 +94,12 @@ func fnUnsubscribe(ctx *eval.EvalContext, args []string, buf *strings.Builder, _
 	obj := resolveDBRef(ctx, parts[0])
 	if obj == gamedb.Nothing {
 		buf.WriteString("#-1 INVALID OBJECT")
+		return
+	}
+
+	// Must control the target object to unsubscribe it
+	if !ctx.GameState.Controls(ctx.Player, obj) {
+		buf.WriteString("#-1 PERMISSION DENIED")
 		return
 	}
 

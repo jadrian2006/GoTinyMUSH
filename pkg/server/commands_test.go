@@ -536,11 +536,11 @@ func TestGivePennies(t *testing.T) {
 		t.Errorf("give: expected give confirmation, got: %s", out)
 	}
 
-	// Verify pennies transferred
+	// Verify pennies transferred — wizards create money from nothing (C behavior)
 	wizard := env.game.DB.Objects[1]
 	bob := env.game.DB.Objects[3]
-	if wizard.Pennies != 950 {
-		t.Errorf("give: wizard should have 950 pennies, has %d", wizard.Pennies)
+	if wizard.Pennies != 1000 {
+		t.Errorf("give: wizard should still have 1000 pennies (not deducted), has %d", wizard.Pennies)
 	}
 	if bob.Pennies != 150 {
 		t.Errorf("give: bob should have 150 pennies, has %d", bob.Pennies)
