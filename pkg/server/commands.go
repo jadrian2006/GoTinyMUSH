@@ -1019,7 +1019,27 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 		exitRef = exitObj.Next
 	}
 
-	// C: If no local exit matched, check master room exits as a fallback.
+	// C TinyMUSH: If no local exit matched, check zone exits.
+	// match_zone_exit(): if location's zone is a ROOM, check its exits.
+	if locObj.Zone != gamedb.Nothing {
+		if zoneObj, ok := g.DB.Objects[locObj.Zone]; ok && zoneObj.ObjType() == gamedb.TypeRoom {
+			seenExits = make(map[gamedb.DBRef]bool)
+			exitRef = zoneObj.Exits
+			for exitRef != gamedb.Nothing && !seenExits[exitRef] {
+				seenExits[exitRef] = true
+				exitObj, ok := g.DB.Objects[exitRef]
+				if !ok {
+					break
+				}
+				if matchExit(exitObj) {
+					return doExit(exitRef, exitObj)
+				}
+				exitRef = exitObj.Next
+			}
+		}
+	}
+
+	// C: If no local or zone exit matched, check master room exits as a fallback.
 	masterRoom := g.MasterRoomRef()
 	if masterRoom != gamedb.Nothing && masterRoom != loc {
 		if masterObj, ok := g.DB.Objects[masterRoom]; ok {

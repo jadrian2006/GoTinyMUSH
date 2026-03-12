@@ -1845,6 +1845,75 @@ func fnZones(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	buf.WriteString(strings.Join(parts, " "))
 }
 
+// fnScanZone — scan_zone(zone, type) — returns all objects in a zone of a given type.
+// C TinyMUSH: scan_zone(zone, TYPE) — requires control of zone or WizRoy.
+// Type: ROOMS, EXITS, THINGS, PLAYERS, or empty for all.
+func fnScanZone(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 1 {
+		buf.WriteString("#-1 TOO FEW ARGUMENTS")
+		return
+	}
+	zone := resolveDBRef(ctx, args[0])
+	if zone == gamedb.Nothing {
+		buf.WriteString("#-1 NOT FOUND")
+		return
+	}
+	// C: requires control of zone or WizRoy
+	canAccess := false
+	if ctx.GameState != nil {
+		canAccess = ctx.GameState.Controls(ctx.Player, zone)
+	} else if pObj, ok := ctx.DB.Objects[ctx.Player]; ok {
+		canAccess = pObj.HasFlag(gamedb.FlagWizard) || pObj.HasFlag(gamedb.FlagRoyalty)
+	}
+	if !canAccess {
+		// Check WizRoy fallback
+		if pObj, ok := ctx.DB.Objects[ctx.Player]; ok {
+			if pObj.HasFlag(gamedb.FlagWizard) || pObj.HasFlag(gamedb.FlagRoyalty) {
+				canAccess = true
+			}
+		}
+	}
+	if !canAccess {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
+
+	// Parse type filter
+	typeFilter := -1
+	if len(args) > 1 {
+		switch strings.ToUpper(strings.TrimSpace(args[1])) {
+		case "ROOMS", "ROOM":
+			typeFilter = int(gamedb.TypeRoom)
+		case "EXITS", "EXIT":
+			typeFilter = int(gamedb.TypeExit)
+		case "THINGS", "THING":
+			typeFilter = int(gamedb.TypeThing)
+		case "PLAYERS", "PLAYER":
+			typeFilter = int(gamedb.TypePlayer)
+		case "":
+			typeFilter = -1 // all types
+		default:
+			buf.WriteString("#-1 INVALID TYPE")
+			return
+		}
+	}
+
+	var results []string
+	for ref, obj := range ctx.DB.Objects {
+		if obj.Zone != zone {
+			continue
+		}
+		if obj.IsGoing() {
+			continue
+		}
+		if typeFilter >= 0 && int(obj.ObjType()) != typeFilter {
+			continue
+		}
+		results = append(results, fmt.Sprintf("#%d", ref))
+	}
+	buf.WriteString(strings.Join(results, " "))
+}
+
 // --- Instance functions ---
 
 // fnIsinstance — isinstance(obj) — returns 1 if obj has Flag3Instance, 0 otherwise.

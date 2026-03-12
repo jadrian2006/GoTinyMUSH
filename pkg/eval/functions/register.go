@@ -672,6 +672,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 
 	// Multi-zone function
 	ctx.RegisterFunction("ZONES", fnZones, 1, 0)
+	ctx.RegisterFunction("SCAN_ZONE", fnScanZone, 1, eval.FnVarArgs)
 
 	// Event Bus
 	ctx.RegisterFunction("PUBLISH", fnPublish, 2, 0)
