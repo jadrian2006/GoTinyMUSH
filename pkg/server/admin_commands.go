@@ -2131,7 +2131,7 @@ func cmdSwitch(g *Game, d *Descriptor, args string, switches []string) {
 			// Strip braces, replace #$ with expr, dispatch as command(s).
 			raw := stripOuterBraces(strings.TrimSpace(parts[i+1]))
 			raw = strings.ReplaceAll(raw, "#$", expr)
-			dispatchSwitchActionDesc(g, d, raw)
+			dispatchSwitchActionDesc(g, d, ctx, raw)
 			matched = true
 			if !matchAll {
 				return
@@ -2142,12 +2142,16 @@ func cmdSwitch(g *Game, d *Descriptor, args string, switches []string) {
 	if len(parts)%2 == 1 && !matched {
 		raw := stripOuterBraces(strings.TrimSpace(parts[len(parts)-1]))
 		raw = strings.ReplaceAll(raw, "#$", expr)
-		dispatchSwitchActionDesc(g, d, raw)
+		dispatchSwitchActionDesc(g, d, ctx, raw)
 	}
 }
 
 // dispatchSwitchActionDesc executes a @switch action body for a connected player.
-func dispatchSwitchActionDesc(g *Game, d *Descriptor, action string) {
+// In C TinyMUSH, action bodies go through process_cmdline which evaluates
+// bracket expressions and % substitutions before dispatching. Without this,
+// commands like &ATTR obj=[get(foo)] store the literal text instead of the
+// evaluated result.
+func dispatchSwitchActionDesc(g *Game, d *Descriptor, ctx *eval.EvalContext, action string) {
 	cmds := splitSemicolonRespectingBraces(action)
 	for _, cmd := range cmds {
 		cmd = strings.TrimSpace(cmd)
@@ -2155,6 +2159,14 @@ func dispatchSwitchActionDesc(g *Game, d *Descriptor, action string) {
 			continue
 		}
 		cmd = stripOuterBraces(cmd)
+		// Evaluate bracket expressions and % substitutions before dispatch.
+		// Braces inside the command protect their contents from evaluation,
+		// so nested @switch/@dolist bodies are preserved correctly.
+		cmd = ctx.Exec(cmd, eval.EvFCheck|eval.EvEval|eval.EvFCheckPersist, nil)
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
+		}
 		DispatchCommand(g, d, cmd)
 	}
 }
@@ -2717,8 +2729,13 @@ func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 		cmd = strings.ReplaceAll(cmd, "#@", fmt.Sprintf("%d", i+1))
 
 		if immediate {
-			// Execute immediately via DispatchCommand
-			DispatchCommand(g, d, cmd)
+			// Execute immediately — evaluate brackets before dispatch
+			evCmd := ctx.Exec(cmd, eval.EvFCheck|eval.EvEval|eval.EvFCheckPersist, nil)
+			evCmd = strings.TrimSpace(evCmd)
+			if evCmd == "" {
+				continue
+			}
+			DispatchCommand(g, d, evCmd)
 		} else {
 			entry := &QueueEntry{
 				Player:  d.Player,

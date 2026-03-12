@@ -857,6 +857,45 @@ func TestNestedSwitchRegisters(t *testing.T) {
 	}
 }
 
+// TestSwitchEvalBrackets verifies that bracket expressions in @switch action
+// bodies are evaluated before dispatch. This is the fix for the +skim bug:
+// "&ATTR obj=[get(foo)]" inside @switch was storing the literal [get(foo)]
+// instead of the evaluated result.
+func TestSwitchEvalBrackets(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set a known attr value to read back
+	env.game.SetAttrByName(2, "TESTVAL", "hello_world")
+
+	// Test 1: &ATTR inside @switch should evaluate [get()]
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "@switch 1=1,{&RESULT me=[get(#2/TESTVAL)]}")
+	out := getOutput(env.player)
+	if !strings.Contains(out, "Set.") {
+		t.Errorf("switch &attr: expected 'Set.', got: %q", out)
+	}
+	result := env.game.GetAttrTextByName(1, "RESULT")
+	if result != "hello_world" {
+		t.Errorf("switch &attr eval: expected 'hello_world', got %q (literal brackets not evaluated)", result)
+	}
+
+	// Test 2: @dolist/now with &ATTR should also evaluate
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "@dolist/now x=&DOLIST_RESULT me=[get(#2/TESTVAL)]_##")
+	result = env.game.GetAttrTextByName(1, "DOLIST_RESULT")
+	if result != "hello_world_x" {
+		t.Errorf("dolist/now &attr eval: expected 'hello_world_x', got %q", result)
+	}
+
+	// Test 3: Nested @switch — inner body braces should protect brackets
+	clearOutput(env.player)
+	DispatchCommand(env.game, env.player, "@switch 1=1,{@switch 2=2,{&NESTED me=[get(#2/TESTVAL)]}}")
+	result = env.game.GetAttrTextByName(1, "NESTED")
+	if result != "hello_world" {
+		t.Errorf("nested switch &attr eval: expected 'hello_world', got %q", result)
+	}
+}
+
 // --- Help System ---
 
 func TestHelpNoFiles(t *testing.T) {
