@@ -1035,7 +1035,7 @@ func (g *Game) ChannelWho(player gamedb.DBRef, channelName string) []gamedb.DBRe
 	}
 	listeners := g.Comsys.ChannelListeners(channelName)
 	seen := make(map[gamedb.DBRef]bool)
-	var result []gamedb.DBRef
+	result := make([]gamedb.DBRef, 0) // non-nil empty = channel exists, no listeners
 	for _, ca := range listeners {
 		if seen[ca.Player] {
 			continue
@@ -1066,7 +1066,7 @@ func (g *Game) ChannelWhoAll(player gamedb.DBRef, channelName string) []gamedb.D
 	}
 	subs := g.Comsys.ChannelSubscribers(channelName)
 	seen := make(map[gamedb.DBRef]bool)
-	var result []gamedb.DBRef
+	result := make([]gamedb.DBRef, 0) // non-nil empty = channel exists, no subscribers
 	for _, ca := range subs {
 		if seen[ca.Player] {
 			continue
@@ -1142,7 +1142,7 @@ func (g *Game) PlayerComInfo(player, target gamedb.DBRef, alias string) string {
 	}
 	ca := g.Comsys.LookupAlias(target, alias)
 	if ca == nil {
-		return "#-1 ALIAS NOT FOUND"
+		return "#-1 NO SUCH ALIAS"
 	}
 	return ca.Channel
 }
@@ -1158,7 +1158,7 @@ func (g *Game) PlayerComTitle(player, target gamedb.DBRef, alias string) string 
 	}
 	ca := g.Comsys.LookupAlias(target, alias)
 	if ca == nil {
-		return "#-1 ALIAS NOT FOUND"
+		return "#-1 NO SUCH ALIAS"
 	}
 	return ca.Title
 }

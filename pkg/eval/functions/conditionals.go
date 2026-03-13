@@ -223,33 +223,27 @@ func fnIfzero(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller
 	}
 }
 
-// fnUsetrue — u(attr, args) if condition is true, else empty
-func fnUsetrue(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
-	if len(args) < 2 { return }
-	cond := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
-	if isTrue(cond) {
-		attrSpec := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval, nil)
-		var uargs []string
-		for _, a := range args[2:] {
-			uargs = append(uargs, ctx.Exec(a, eval.EvFCheck|eval.EvEval, nil))
-		}
-		result := ctx.CallUFun(attrSpec, uargs)
-		buf.WriteString(result)
+// fnUsetrue — if condition is true, return it; otherwise return the second arg
+func fnUsetrue(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 {
+		return
+	}
+	if isTrue(args[0]) {
+		buf.WriteString(args[0])
+	} else {
+		buf.WriteString(args[1])
 	}
 }
 
-// fnUsefalse — u(attr, args) if condition is false, else empty
-func fnUsefalse(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
-	if len(args) < 2 { return }
-	cond := ctx.Exec(args[0], eval.EvFCheck|eval.EvEval, nil)
-	if !isTrue(cond) {
-		attrSpec := ctx.Exec(args[1], eval.EvFCheck|eval.EvEval, nil)
-		var uargs []string
-		for _, a := range args[2:] {
-			uargs = append(uargs, ctx.Exec(a, eval.EvFCheck|eval.EvEval, nil))
-		}
-		result := ctx.CallUFun(attrSpec, uargs)
-		buf.WriteString(result)
+// fnUsefalse — if condition is false, return it; otherwise return the second arg
+func fnUsefalse(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 {
+		return
+	}
+	if !isTrue(args[0]) {
+		buf.WriteString(args[0])
+	} else {
+		buf.WriteString(args[1])
 	}
 }
 

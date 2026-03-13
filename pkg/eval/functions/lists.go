@@ -555,10 +555,11 @@ func fnLadd(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 }
 
 func fnLand(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 1 { buf.WriteString("1"); return }
+	if len(args) < 1 || args[0] == "" { buf.WriteString("0"); return }
 	delim := " "
 	if len(args) > 1 && args[1] != "" { delim = args[1] }
 	words := splitList(args[0], delim)
+	if len(words) == 0 { buf.WriteString("0"); return }
 	for _, w := range words {
 		if toInt(w) == 0 { buf.WriteString("0"); return }
 	}

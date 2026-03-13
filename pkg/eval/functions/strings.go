@@ -311,10 +311,20 @@ func fnAnsi(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 	if len(args) < 2 { return }
 	codes := args[0]
 	text := args[1]
+
+	// Collect SGR numbers for simple codes, emit extended specs immediately
+	var sgrNums []string
 	i := 0
 	for i < len(codes) {
-		// Check for extended color spec: <...> or /<...>
+		// Check for extended color spec: /<...> (background)
 		if codes[i] == '/' && i+1 < len(codes) && codes[i+1] == '<' {
+			// Flush any accumulated simple codes first
+			if len(sgrNums) > 0 {
+				buf.WriteString("\033[")
+				buf.WriteString(strings.Join(sgrNums, ";"))
+				buf.WriteByte('m')
+				sgrNums = sgrNums[:0]
+			}
 			end := strings.IndexByte(codes[i+2:], '>')
 			if end >= 0 {
 				spec := codes[i+2 : i+2+end]
@@ -326,7 +336,14 @@ func fnAnsi(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 				continue
 			}
 		}
+		// Check for extended color spec: <...> (foreground)
 		if codes[i] == '<' {
+			if len(sgrNums) > 0 {
+				buf.WriteString("\033[")
+				buf.WriteString(strings.Join(sgrNums, ";"))
+				buf.WriteByte('m')
+				sgrNums = sgrNums[:0]
+			}
 			end := strings.IndexByte(codes[i+1:], '>')
 			if end >= 0 {
 				spec := codes[i+1 : i+1+end]
@@ -338,11 +355,17 @@ func fnAnsi(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 				continue
 			}
 		}
-		code := eval.AnsiCode(codes[i])
-		if code != "" {
-			buf.WriteString(code)
+		num := eval.AnsiCodeNum(codes[i])
+		if num != "" {
+			sgrNums = append(sgrNums, num)
 		}
 		i++
+	}
+	// Emit combined SGR sequence
+	if len(sgrNums) > 0 {
+		buf.WriteString("\033[")
+		buf.WriteString(strings.Join(sgrNums, ";"))
+		buf.WriteByte('m')
 	}
 	buf.WriteString(text)
 	buf.WriteString("\033[0m")
@@ -550,12 +573,13 @@ func fnArt(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb
 	}
 }
 
-// fnNescape escapes characters but NOT the first character (unlike escape()).
+// fnNescape escapes the first character with backslash (like escape()) but does
+// NOT escape special characters at other positions (unlike escape()).
 func fnNescape(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	s := args[0]
 	for i, ch := range s {
-		if i > 0 && (ch == '%' || ch == '\\' || ch == '[' || ch == ']' || ch == '{' || ch == '}' || ch == ';') {
+		if i == 0 {
 			buf.WriteByte('\\')
 		}
 		buf.WriteRune(ch)
@@ -577,12 +601,15 @@ func fnNsecure(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 }
 
 // fnWordpos returns the word number containing a given character position.
+// C TinyMUSH uses 1-based character positions.
 func fnWordpos(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("#-1"); return }
 	s := args[0]
 	charPos := toInt(args[1])
 	delim := " "
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
+	// C uses 1-based positions; convert to 0-based
+	charPos--
 	if charPos < 0 || charPos >= len(s) {
 		buf.WriteString("#-1")
 		return
@@ -829,12 +856,17 @@ func borderHelper(args []string, buf *strings.Builder, align string) {
 	width := toInt(args[1])
 	if width <= 0 { width = 78 }
 	// Optional prefix character (3rd arg) — C prepends a single char, not fill
+	prefixLen := 0
 	if len(args) > 2 && args[2] != "" {
 		buf.WriteString(args[2])
+		prefixLen = len(args[2])
 	}
-	// C behavior: border = ljust, cborder = center, rborder = rjust with spaces
+	// C behavior: cborder subtracts prefix from width; border/rborder don't
 	textLen := len(stripAnsiStr(text))
 	remaining := width - textLen
+	if align == "center" {
+		remaining -= prefixLen
+	}
 	if remaining < 0 { remaining = 0 }
 	switch align {
 	case "center":

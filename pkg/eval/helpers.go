@@ -337,3 +337,37 @@ func AnsiCode(ch byte) string {
 	}
 	return ""
 }
+
+// AnsiCodeNum maps a single character code to its SGR number string.
+// Used by fnAnsi to combine multiple codes into one escape sequence.
+func AnsiCodeNum(ch byte) string {
+	switch ch {
+	case 'n', 'N':
+		return "0"
+	case 'h', 'H':
+		return "1"
+	case 'i', 'I':
+		return "7"
+	case 'f', 'F':
+		return "5"
+	case 'u', 'U':
+		return "4"
+	case 'x', 'X':
+		return "30"
+	case 'r', 'R':
+		return "31"
+	case 'g', 'G':
+		return "32"
+	case 'y', 'Y':
+		return "33"
+	case 'b', 'B':
+		return "34"
+	case 'm', 'M':
+		return "35"
+	case 'c', 'C':
+		return "36"
+	case 'w', 'W':
+		return "37"
+	}
+	return ""
+}

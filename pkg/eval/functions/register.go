@@ -82,8 +82,8 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("NCOMP", fnNcomp, 2, 0)
 
 	// Logic
-	ctx.RegisterFunction("AND", fnAnd, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("OR", fnOr, 0, eval.FnVarArgs)
+	ctx.RegisterFunctionV("AND", fnAnd, 1, 0, 0)
+	ctx.RegisterFunctionV("OR", fnOr, 1, 0, 0)
 	ctx.RegisterFunction("XOR", fnXor, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("NOT", fnNot, 1, 0)
 	ctx.RegisterFunction("NOTBOOL", fnNotBool, 1, 0)
@@ -110,8 +110,8 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("IFFALSE", fnIffalse, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("IFTRUE", fnIftrue, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("IFZERO", fnIfzero, 0, eval.FnVarArgs|eval.FnNoEval)
-	ctx.RegisterFunction("USETRUE", fnUsetrue, 0, eval.FnVarArgs|eval.FnNoEval)
-	ctx.RegisterFunction("USEFALSE", fnUsefalse, 0, eval.FnVarArgs|eval.FnNoEval)
+	ctx.RegisterFunction("USETRUE", fnUsetrue, 2, 0)
+	ctx.RegisterFunction("USEFALSE", fnUsefalse, 2, 0)
 	ctx.RegisterFunction("ISFALSE", fnIsfalse, 1, 0)
 	ctx.RegisterFunction("ISTRUE", fnIstrue, 1, 0)
 	ctx.RegisterFunction("UDEFAULT", fnUdefault, 2, eval.FnVarArgs|eval.FnNoEval)
@@ -365,7 +365,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("VISIBLE", fnVisible, 2, 0)
 	ctx.RegisterFunction("WHERE", fnWhere, 1, 0)
 	ctx.RegisterFunction("XCON", fnXcon, 1, 0)
-	ctx.RegisterFunction("INZONE", fnInzone, 2, 0)
+	ctx.RegisterFunctionV("INZONE", fnInzone, 1, 0, 0)
 	ctx.RegisterFunction("ZWHO", fnZwho, 1, 0)
 	ctx.RegisterFunction("ZFUN", fnZfun, 0, eval.FnVarArgs)
 

@@ -516,8 +516,8 @@ func fnConvsecs(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		buf.WriteString("#-1 INVALID ARGUMENT")
 		return
 	}
-	t := time.Unix(secs, 0)
-	buf.WriteString(t.Format("Mon Jan 02 15:04:05 2006"))
+	t := time.Unix(secs, 0).UTC()
+	buf.WriteString(t.Format("Mon Jan _2 15:04:05 2006"))
 }
 
 func fnConvtime(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -533,7 +533,7 @@ func fnConvtime(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		time.RFC1123Z,
 	}
 	for _, layout := range layouts {
-		t, err := time.Parse(layout, strings.TrimSpace(args[0]))
+		t, err := time.ParseInLocation(layout, strings.TrimSpace(args[0]), time.UTC)
 		if err == nil {
 			buf.WriteString(strconv.FormatInt(t.Unix(), 10))
 			return
@@ -547,11 +547,11 @@ func fnTimefmt(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		return
 	}
 	format := args[0]
-	t := time.Now()
+	t := time.Now().UTC()
 	if len(args) > 1 {
 		secs, err := strconv.ParseInt(strings.TrimSpace(args[1]), 10, 64)
 		if err == nil {
-			t = time.Unix(secs, 0)
+			t = time.Unix(secs, 0).UTC()
 		}
 	}
 	// Convert strftime-style format to Go format
@@ -559,10 +559,11 @@ func fnTimefmt(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 }
 
 // strftimeToGo converts a C-style strftime format string using time.Time
+// Supports both % and $ as format prefixes (C TinyMUSH 3.1 uses $)
 func strftimeToGo(format string, t time.Time) string {
 	var out strings.Builder
 	for i := 0; i < len(format); i++ {
-		if format[i] == '%' && i+1 < len(format) {
+		if (format[i] == '%' || format[i] == '$') && i+1 < len(format) {
 			i++
 			switch format[i] {
 			case 'Y':
@@ -1073,13 +1074,15 @@ func fnToss(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb
 
 // --- Misc functions ---
 
-// fnRestarttime — returns the server restart time (same as start for us).
+// fnRestarttime — returns the server restart time as formatted string (matching C).
 func fnRestarttime(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	var t time.Time
 	if ctx.StartTime > 0 {
-		buf.WriteString(strconv.FormatInt(ctx.StartTime, 10))
+		t = time.Unix(ctx.StartTime, 0).UTC()
 	} else {
-		buf.WriteString(strconv.FormatInt(time.Now().Unix(), 10))
+		t = time.Now().UTC()
 	}
+	buf.WriteString(t.Format("Mon Jan _2 15:04:05 2006"))
 }
 
 // fnPorts — returns ports a player is connected from.
@@ -1713,7 +1716,12 @@ func fnCcount(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ game
 // fnCdepth — returns the current function nesting depth.
 // cdepth() → integer
 func fnCdepth(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	buf.WriteString(strconv.Itoa(ctx.FuncNestLev))
+	// C counts nesting level of the calling context, not including current call
+	depth := ctx.FuncNestLev - 1
+	if depth < 0 {
+		depth = 0
+	}
+	buf.WriteString(strconv.Itoa(depth))
 }
 
 // fnCommand — 0 args: returns current command text. 1+ args: dispatches command.
@@ -1735,6 +1743,9 @@ func fnLvars(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamed
 	if ctx.RData == nil { return }
 	first := true
 	for name := range ctx.RData.XRegs {
+		if strings.HasPrefix(name, "__") {
+			continue // skip internal keys like __stack
+		}
 		if !first { buf.WriteByte(' ') }
 		buf.WriteString(name)
 		first = false

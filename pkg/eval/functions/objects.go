@@ -1657,9 +1657,23 @@ func fnXcon(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	buf.WriteString(strings.Join(results, " "))
 }
 
-// fnInzone — returns 1 if object is in the specified zone.
+// fnInzone — with 1 arg: lists objects in zone. With 2 args: checks zone membership.
 func fnInzone(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 2 { buf.WriteString("0"); return }
+	if len(args) < 1 { return }
+	if len(args) == 1 {
+		// 1-arg mode: list all objects in the zone
+		zone := resolveDBRef(ctx, args[0])
+		if zone == gamedb.Nothing { return }
+		first := true
+		for _, obj := range ctx.DB.Objects {
+			if obj.Zone == zone && !obj.IsGoing() {
+				if !first { buf.WriteByte(' ') }
+				buf.WriteString(fmt.Sprintf("#%d", obj.DBRef))
+				first = false
+			}
+		}
+		return
+	}
 	ref := resolveDBRef(ctx, args[0])
 	zone := resolveDBRef(ctx, args[1])
 	if ref == gamedb.Nothing || zone == gamedb.Nothing { buf.WriteString("0"); return }

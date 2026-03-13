@@ -184,7 +184,7 @@ func fnLparent(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 func fnConnlog(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 || ctx.GameState == nil { return }
 	ref := resolveDBRef(ctx, args[0])
-	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	if ref == gamedb.Nothing { buf.WriteString("#-1"); return }
 	// Permission check: wizard or self
 	if ref != ctx.Player && !ctx.GameState.IsWizard(ctx.Player) {
 		buf.WriteString("#-1 PERMISSION DENIED")
@@ -204,7 +204,7 @@ func fnConnlog(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 func fnAddrlog(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 || ctx.GameState == nil { return }
 	ref := resolveDBRef(ctx, args[0])
-	if ref == gamedb.Nothing { buf.WriteString("#-1 NOT FOUND"); return }
+	if ref == gamedb.Nothing { buf.WriteString("#-1"); return }
 	// Permission check: wizard or self
 	if ref != ctx.Player && !ctx.GameState.IsWizard(ctx.Player) {
 		buf.WriteString("#-1 PERMISSION DENIED")
@@ -236,7 +236,7 @@ func fnEntrances(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, 
 // fnLocate does advanced object matching: locate(looker, name, type)
 func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 {
-		buf.WriteString("#-1 NOT FOUND")
+		buf.WriteString("#-1")
 		return
 	}
 	looker := resolveDBRef(ctx, args[0])
@@ -257,7 +257,7 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 
 	// Handle empty name
 	if name == "" {
-		buf.WriteString("#-1 NOT FOUND")
+		buf.WriteString("#-1")
 		return
 	}
 
@@ -279,7 +279,7 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		if _, ok := ctx.DB.Objects[ref]; ok {
 			buf.WriteString(fmt.Sprintf("#%d", ref))
 		} else {
-			buf.WriteString("#-1 NOT FOUND")
+			buf.WriteString("#-1")
 		}
 		return
 	}
@@ -293,7 +293,7 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	// Search: inventory, location contents, location exits
 	lookerObj, ok := ctx.DB.Objects[looker]
 	if !ok {
-		buf.WriteString("#-1 NOT FOUND")
+		buf.WriteString("#-1")
 		return
 	}
 
@@ -433,7 +433,7 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		return
 	}
 
-	buf.WriteString("#-1 NOT FOUND")
+	buf.WriteString("#-1")
 }
 
 // fnRloc returns the room containing an object (walks up locations).
@@ -722,9 +722,52 @@ func fnColumns(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	}
 }
 
-// fnTable is an alias for columns.
-func fnTable(ctx *eval.EvalContext, args []string, buf *strings.Builder, caller, cause gamedb.DBRef) {
-	fnColumns(ctx, args, buf, caller, cause)
+// fnTable formats a list into a table with fixed column widths.
+// table(list, field_width, line_width[, list_sep[, field_sep[, pad]]])
+func fnTable(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
+	if len(args) < 2 { return }
+	listSep := " "
+	if len(args) > 3 && args[3] != "" { listSep = args[3] }
+	items := splitList(args[0], listSep)
+	colWidth := toInt(args[1])
+	if colWidth < 1 { colWidth = 10 }
+	lineWidth := 78
+	if len(args) > 2 {
+		lw := toInt(args[2])
+		if lw > 0 { lineWidth = lw }
+	}
+	fieldSep := " "
+	if len(args) > 4 && args[4] != "" { fieldSep = args[4] }
+	pad := " "
+	if len(args) > 5 && args[5] != "" { pad = args[5] }
+
+	effectiveWidth := colWidth + len(fieldSep)
+	colsPerRow := lineWidth / effectiveWidth
+	if colsPerRow < 1 { colsPerRow = 1 }
+
+	for i, item := range items {
+		if i > 0 && i%colsPerRow == 0 {
+			buf.WriteString("\r\n")
+		}
+		// Truncate to column width if needed
+		visItem := item
+		if len(visItem) > colWidth {
+			visItem = visItem[:colWidth]
+		}
+		buf.WriteString(visItem)
+		isLastCol := (i%colsPerRow == colsPerRow-1) || (i == len(items)-1)
+		// Pad to column width
+		padding := colWidth - len(visItem)
+		if padding > 0 {
+			for p := 0; p < padding; p++ {
+				buf.WriteString(pad)
+			}
+		}
+		// Add field separator between columns (not after last column on row)
+		if !isLastCol {
+			buf.WriteString(fieldSep)
+		}
+	}
 }
 
 // fnTables implements tables(list, field_widths[, lead_str[, trail_str[, list_sep[, field_sep[, pad]]]]])
@@ -818,8 +861,8 @@ func processTables(args []string, buf *strings.Builder, just int) {
 				buf.WriteString(strings.Repeat(padChar, padding))
 			}
 			buf.WriteString(word)
-		case 2: // center
-			leftPad := padding / 2
+		case 2: // center (C rounds up for left pad)
+			leftPad := (padding + 1) / 2
 			rightPad := padding - leftPad
 			if leftPad > 0 {
 				buf.WriteString(strings.Repeat(padChar, leftPad))
