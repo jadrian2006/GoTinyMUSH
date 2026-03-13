@@ -3632,8 +3632,9 @@ func (g *Game) SetAttrByName(obj gamedb.DBRef, attrName string, value string, ex
 		g.SetAttr(obj, num, value, executor...)
 		return
 	}
-	// Look up in user-defined
-	if def, ok := g.DB.AttrByName[attrName]; ok {
+	// Look up in user-defined (AttrByName is keyed by uppercase)
+	upper := strings.ToUpper(attrName)
+	if def, ok := g.DB.AttrByName[upper]; ok {
 		g.SetAttr(obj, def.Number, value, executor...)
 		return
 	}

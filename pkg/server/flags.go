@@ -334,8 +334,9 @@ func (g *Game) GetAttrTextByName(obj gamedb.DBRef, attrName string) string {
 		return ""
 	}
 
-	// Try user-defined attrs
-	if def, ok := g.DB.AttrByName[attrName]; ok {
+	// Try user-defined attrs (AttrByName is keyed by uppercase)
+	upper := strings.ToUpper(attrName)
+	if def, ok := g.DB.AttrByName[upper]; ok {
 		for _, attr := range o.Attrs {
 			if attr.Number == def.Number {
 				return eval.StripAttrPrefix(attr.Value)

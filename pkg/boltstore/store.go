@@ -250,6 +250,9 @@ func (s *Store) LoadAll() error {
 	}
 
 	// Load attribute definitions.
+	// Skip any that collide with well-known (built-in) attrs by name —
+	// the well-known table is authoritative for those attr numbers.
+	var staleAttrKeys [][]byte
 	err = s.bolt.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketAttrDefs)
 		return b.ForEach(func(k, v []byte) error {
@@ -257,11 +260,28 @@ func (s *Store) LoadAll() error {
 			if err != nil {
 				return fmt.Errorf("decode attrdef: %w", err)
 			}
+			if wkNum, _, ok := gamedb.ResolveWellKnownAttr(def.Name); ok && wkNum != def.Number {
+				// This bbolt def has a different number than the well-known attr.
+				// Skip it and mark for cleanup.
+				log.Printf("boltstore: skipping stale attr def %q (bbolt #%d vs well-known #%d)", def.Name, def.Number, wkNum)
+				staleAttrKeys = append(staleAttrKeys, append([]byte{}, k...))
+				return nil
+			}
 			s.cache.AttrNames[def.Number] = def
-			s.cache.AttrByName[def.Name] = def
+			s.cache.AttrByName[strings.ToUpper(def.Name)] = def
 			return nil
 		})
 	})
+	// Clean up stale attr defs from bbolt.
+	if len(staleAttrKeys) > 0 {
+		_ = s.bolt.Update(func(tx *bbolt.Tx) error {
+			b := tx.Bucket(bucketAttrDefs)
+			for _, k := range staleAttrKeys {
+				_ = b.Delete(k)
+			}
+			return nil
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("boltstore: load attrdefs: %w", err)
 	}

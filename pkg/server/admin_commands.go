@@ -894,14 +894,21 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 		newObj.Flags = srcObj.Flags
 	}
 
-	// /location: place clone in the same location as the source, not player's inventory
-	if HasSwitch(switches, "location") {
+	// C TinyMUSH clone placement:
+	//   default: cloner's current location (room)
+	//   /inventory: cloner's inventory
+	//   /location: same location as source object
+	if HasSwitch(switches, "inventory") {
+		newObj.Location = d.Player
+		g.AddToContents(d.Player, ref)
+	} else if HasSwitch(switches, "location") {
 		newObj.Location = srcObj.Location
 		g.AddToContents(srcObj.Location, ref)
 	} else {
-		// Default and /inventory: place in player's inventory
-		newObj.Location = d.Player
-		g.AddToContents(d.Player, ref)
+		// Default: place in cloner's current room
+		room := g.PlayerLocation(d.Player)
+		newObj.Location = room
+		g.AddToContents(room, ref)
 	}
 
 	g.PersistObjects(newObj, playerObj)

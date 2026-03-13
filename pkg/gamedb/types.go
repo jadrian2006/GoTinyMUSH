@@ -2,6 +2,7 @@ package gamedb
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -447,10 +448,11 @@ func NewDatabase() *Database {
 }
 
 // AddAttrDef registers a user-defined attribute.
+// AttrByName is keyed by uppercase for case-insensitive lookup.
 func (db *Database) AddAttrDef(num int, name string, flags int) {
 	def := &AttrDef{Number: num, Name: name, Flags: flags}
 	db.AttrNames[num] = def
-	db.AttrByName[name] = def
+	db.AttrByName[strings.ToUpper(name)] = def
 }
 
 // StructDef is a named data structure template (persisted to bbolt).
