@@ -77,6 +77,13 @@ type GameConf struct {
 	ThingQuota       int  `yaml:"thing_quota"`        // Quota cost per thing (default 1)
 	PlayerQuota      int  `yaml:"player_quota"`       // Quota cost per robot player (default 1)
 
+	// --- Default flags for new objects (C: player_flags, room_flags, etc.) ---
+	PlayerDefaultFlags [3]int `yaml:"player_default_flags"` // Default flags for new players
+	RoomDefaultFlags   [3]int `yaml:"room_default_flags"`   // Default flags for new rooms
+	ExitDefaultFlags   [3]int `yaml:"exit_default_flags"`   // Default flags for new exits
+	ThingDefaultFlags  [3]int `yaml:"thing_default_flags"`  // Default flags for new things
+	RobotDefaultFlags  [3]int `yaml:"robot_default_flags"`  // Default flags for new robots
+
 	// --- Object destruction ---
 	InstantRecycle bool `yaml:"instant_recycle"` // DESTROY_OK things skip GOING, destroy immediately (default true, matches C)
 

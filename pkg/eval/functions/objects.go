@@ -1494,6 +1494,12 @@ var knownPowers = map[string][2]int{
 	"USE_SQL": {1, gamedb.Pow2UseSQL}, "WATCH_LOGINS": {0, gamedb.PowWatch},
 	"LINK_TO_ANYTHING": {1, gamedb.Pow2LinkToAny}, "OPEN_ANYWHERE": {1, gamedb.Pow2OpenAnyLoc},
 	"BOT": {1, gamedb.Pow2Bot},
+	"ATTR_READ": {0, gamedb.PowMdarkAttr}, "ATTR_WRITE": {0, gamedb.PowWizAttr},
+	"LINK_ANY_HOME": {1, gamedb.Pow2LinkHome}, "LINK_VARIABLE": {1, gamedb.Pow2LinkVar},
+	"CLOAK": {1, gamedb.Pow2Cloak}, "POLL": {0, gamedb.PowPoll},
+	"WIZARD_WHO": {0, gamedb.PowWizardWho}, "CHANGE_QUOTAS": {0, gamedb.PowChgQuotas},
+	"WATCH": {0, gamedb.PowWatch}, "STEAL": {0, gamedb.PowSteal},
+	"TEL_UNRESTRICTED": {0, gamedb.PowTelUnrst},
 }
 
 // fnHaspower — test if object has a power.

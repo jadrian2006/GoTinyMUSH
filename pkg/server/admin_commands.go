@@ -870,10 +870,21 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 		}
 	}
 
-	// Place in player's inventory (default and /inventory behavior)
+	// /preserve: copy flags from source object
+	if HasSwitch(switches, "preserve") {
+		newObj.Flags = srcObj.Flags
+	}
+
+	// /location: place clone in the same location as the source, not player's inventory
 	playerObj := g.DB.Objects[d.Player]
-	newObj.Location = d.Player
-	g.AddToContents(d.Player, ref)
+	if HasSwitch(switches, "location") {
+		newObj.Location = srcObj.Location
+		g.AddToContents(srcObj.Location, ref)
+	} else {
+		// Default and /inventory: place in player's inventory
+		newObj.Location = d.Player
+		g.AddToContents(d.Player, ref)
+	}
 
 	g.PersistObjects(newObj, playerObj)
 	// C format: "Name cloned, new copy is object #N." or with rename:
@@ -1355,7 +1366,7 @@ func cmdVerb(g *Game, d *Descriptor, args string, _ []string) {
 	}
 }
 
-func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
+func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 	// @tel dest  OR  @tel victim = dest
 	// Evaluate args (C TinyMUSH evaluates function calls before dispatch)
 	ctx := MakeEvalContextWithGame(g, d.Player, func(c *eval.EvalContext) {
@@ -1470,6 +1481,13 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	if obj, ok := g.DB.Objects[victim]; ok {
 		oldLoc := obj.Location
 		isDark := obj.HasFlag(gamedb.FlagDark)
+		// @teleport/quiet: suppress all enter/leave messages (C: HUSH_ENTER|HUSH_LEAVE)
+		// @teleport/loud: force messages even for DARK objects
+		if HasSwitch(switches, "quiet") {
+			isDark = true
+		} else if HasSwitch(switches, "loud") {
+			isDark = false
+		}
 
 		// Step 1: OXTPORT to old room (before move)
 		g.DidIt(victim, victim, 0, aOXTPort, 0)
@@ -1550,8 +1568,9 @@ func cmdTeleport(g *Game, d *Descriptor, args string, _ []string) {
 	}
 }
 
-func cmdForce(g *Game, d *Descriptor, args string, _ []string) {
-	// C: CS_TWO_ARG — splits at =. No = → targetStr=args, command=""
+func cmdForce(g *Game, d *Descriptor, args string, switches []string) {
+	// @force[/now] obj = command
+	// /now: execute immediately instead of queueing
 	var targetStr, command string
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
@@ -1570,12 +1589,26 @@ func cmdForce(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
-	if command != "" {
+	if command == "" {
+		return
+	}
+	if HasSwitch(switches, "now") {
+		// Execute immediately: find victim's descriptor or create synthetic one
+		victimDesc := g.findDescriptor(target)
+		if victimDesc != nil {
+			DispatchCommand(g, victimDesc, command)
+		} else {
+			// Non-connected object: use synthetic descriptor
+			synth := &Descriptor{Player: target, Conn: nil}
+			DispatchCommand(g, synth, command)
+		}
+	} else {
 		g.DoForce(d.Player, target, command)
 	}
 }
 
 func cmdTriggerCmd(g *Game, d *Descriptor, args string, switches []string) {
+	// @trigger[/now][/quiet] obj/attr [= arg0, arg1, ...]
 	var ok bool
 	if HasSwitch(switches, "now") {
 		g.DoTriggerNow(d.Player, d.Player, args)
@@ -1587,15 +1620,21 @@ func cmdTriggerCmd(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "No match.")
 		return
 	}
-	g.Notify(d.Player, "Triggered.")
+	// @trigger/quiet: suppress "Triggered." feedback (C: TRIG_QUIET)
+	if !HasSwitch(switches, "quiet") {
+		pObj, pok := g.DB.Objects[d.Player]
+		if !pok || !pObj.HasFlag(gamedb.FlagQuiet) {
+			g.Notify(d.Player, "Triggered.")
+		}
+	}
 }
 
 func cmdWaitCmd(g *Game, d *Descriptor, args string, _ []string) {
 	g.DoWait(d.Player, d.Player, args)
 }
 
-func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
-	// @notify obj[/attr] [= count]
+func cmdNotify(g *Game, d *Descriptor, args string, switches []string) {
+	// @notify[/all|/first] obj[/attr] [= count]
 	var objAttr, countStr string
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 		objAttr = strings.TrimSpace(args[:eqIdx])
@@ -1625,15 +1664,20 @@ func cmdNotify(g *Game, d *Descriptor, args string, _ []string) {
 		attr = g.ResolveAttrNum(parts[1])
 	}
 
-	count := 1
-	if countStr != "" {
-		count = toIntSimple(countStr)
+	if HasSwitch(switches, "all") {
+		// @notify/all: wake ALL waiting entries on this semaphore
+		g.semaphoreNotify(target, attr, 1<<30)
+	} else {
+		// @notify or @notify/first: wake count entries (default 1)
+		count := 1
+		if countStr != "" {
+			count = toIntSimple(countStr)
+		}
+		if count < 1 {
+			count = 1
+		}
+		g.semaphoreNotify(target, attr, count)
 	}
-	if count < 1 {
-		count = 1
-	}
-
-	g.semaphoreNotify(target, attr, count)
 	g.Notify(d.Player, "Notified.")
 }
 
@@ -1680,12 +1724,47 @@ func cmdHalt(g *Game, d *Descriptor, args string, switches []string) {
 	}
 }
 
-func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
-	// C TinyMUSH: requires Can_Boot power
+func cmdBoot(g *Game, d *Descriptor, args string, switches []string) {
+	// @boot[/port][/quiet] player|port
+	// /port: boot by port number instead of player name
+	// /quiet: suppress "You have been booted" message to victim
 	if !CanBoot(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
+
+	quiet := HasSwitch(switches, "quiet")
+
+	if HasSwitch(switches, "port") {
+		// Boot by port number
+		portNum := toIntSimple(strings.TrimSpace(args))
+		if portNum <= 0 {
+			g.Notify(d.Player, "Invalid port number.")
+			return
+		}
+		// Find descriptor by ID (port number)
+		found := false
+		for _, dd := range g.Conns.AllDescriptors() {
+			if dd.ID == portNum {
+				if IsGod(g, dd.Player) && !IsGod(g, d.Player) {
+					g.Notify(d.Player, "You cannot boot that player!")
+					return
+				}
+				if !quiet {
+					dd.Send("You have been booted.")
+				}
+				g.DisconnectPlayer(dd)
+				g.Notify(d.Player, fmt.Sprintf("Booted port %d.", portNum))
+				found = true
+				break
+			}
+		}
+		if !found {
+			g.Notify(d.Player, "No such port.")
+		}
+		return
+	}
+
 	target := LookupPlayer(g.DB, strings.TrimSpace(args))
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "No such player.")
@@ -1707,13 +1786,15 @@ func cmdBoot(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	for _, dd := range descs {
-		dd.Send("You have been booted.")
+		if !quiet {
+			dd.Send("You have been booted.")
+		}
 		g.DisconnectPlayer(dd)
 	}
 	g.Notify(d.Player, fmt.Sprintf("Booted %s.", g.ObjName(target)))
 }
 
-func cmdWall(g *Game, d *Descriptor, args string, _ []string) {
+func cmdWall(g *Game, d *Descriptor, args string, switches []string) {
 	if !CanAnnounce(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
@@ -1721,12 +1802,35 @@ func cmdWall(g *Game, d *Descriptor, args string, _ []string) {
 	if args == "" {
 		return
 	}
+
+	// C TinyMUSH: @wall/wizard — wizard-only shout, @wall/admin — wizard+royalty
+	wizOnly := HasSwitch(switches, "wizard")
+	adminOnly := HasSwitch(switches, "admin")
+
 	name := g.PlayerName(d.Player)
-	msg := fmt.Sprintf("## %s shouts: %s", name, args)
+	var msg string
+	switch {
+	case HasSwitch(switches, "emit"):
+		// @wall/emit — raw emit to all (no "## Name shouts:" prefix)
+		msg = args
+	case HasSwitch(switches, "pose"):
+		// @wall/pose — pose format
+		msg = fmt.Sprintf("## %s %s", name, args)
+	default:
+		msg = fmt.Sprintf("## %s shouts: %s", name, args)
+	}
+
 	for _, dd := range g.Conns.AllDescriptors() {
-		if dd.State == ConnConnected {
-			dd.Send(msg)
+		if dd.State != ConnConnected {
+			continue
 		}
+		if wizOnly && !Wizard(g, dd.Player) {
+			continue
+		}
+		if adminOnly && !Wizard(g, dd.Player) && !Royalty(g, dd.Player) {
+			continue
+		}
+		dd.Send(msg)
 	}
 }
 
@@ -1966,14 +2070,37 @@ func cmdFind(g *Game, d *Descriptor, args string, _ []string) {
 	g.Notify(d.Player, fmt.Sprintf("%d object(s) found.", count))
 }
 
-func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
+func cmdStats(g *Game, d *Descriptor, args string, switches []string) {
 	// C TinyMUSH: @stats requires wizard or stat_any power
+	// @stats/all — same as @stats (full DB stats)
+	// @stats/me — show stats for objects owned by the player
+	// @stats/player <name> — show stats for objects owned by specified player
 	if !Wizard(g, d.Player) && !CanStatAny(g, d.Player) {
-		g.Notify(d.Player, "Permission denied.")
-		return
+		// Non-wizards can only use @stats/me
+		if !HasSwitch(switches, "me") {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
 	}
+
+	// Determine owner filter
+	var filterOwner gamedb.DBRef = gamedb.Nothing
+	if HasSwitch(switches, "me") {
+		filterOwner = ResolveOwner(g, d.Player)
+	} else if HasSwitch(switches, "player") {
+		target := LookupPlayer(g.DB, strings.TrimSpace(args))
+		if target == gamedb.Nothing {
+			g.Notify(d.Player, "No such player.")
+			return
+		}
+		filterOwner = target
+	}
+
 	rooms, things, exits, players, garbage := 0, 0, 0, 0, 0
 	for _, obj := range g.DB.Objects {
+		if filterOwner != gamedb.Nothing && obj.Owner != filterOwner {
+			continue
+		}
 		switch obj.ObjType() {
 		case gamedb.TypeRoom:
 			rooms++
@@ -1997,14 +2124,22 @@ func cmdStats(g *Game, d *Descriptor, _ string, _ []string) {
 			}
 		}
 	}
-	g.Notify(d.Player, fmt.Sprintf("Database statistics:"))
+
+	if filterOwner != gamedb.Nothing {
+		g.Notify(d.Player, fmt.Sprintf("Statistics for %s:", g.ObjName(filterOwner)))
+	} else {
+		g.Notify(d.Player, "Database statistics:")
+	}
 	g.Notify(d.Player, fmt.Sprintf("  %d rooms, %d things, %d exits, %d players, %d garbage",
 		rooms, things, exits, players, garbage))
-	g.Notify(d.Player, fmt.Sprintf("  %d total objects", len(g.DB.Objects)))
-	g.Notify(d.Player, fmt.Sprintf("  %d attribute definitions", len(g.DB.AttrNames)))
-	imm, wait, sem := g.Queue.Stats()
-	g.Notify(d.Player, fmt.Sprintf("  Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
-	g.Notify(d.Player, fmt.Sprintf("  %d active connections", g.Conns.Count()))
+	total := rooms + things + exits + players + garbage
+	g.Notify(d.Player, fmt.Sprintf("  %d total objects", total))
+	if filterOwner == gamedb.Nothing {
+		g.Notify(d.Player, fmt.Sprintf("  %d attribute definitions", len(g.DB.AttrNames)))
+		imm, wait, sem := g.Queue.Stats()
+		g.Notify(d.Player, fmt.Sprintf("  Queue: %d immediate, %d waiting, %d semaphore", imm, wait, sem))
+		g.Notify(d.Player, fmt.Sprintf("  %d active connections", g.Conns.Count()))
+	}
 }
 
 func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
@@ -2098,6 +2233,9 @@ func cmdPs(g *Game, d *Descriptor, _ string, switches []string) {
 func cmdSwitch(g *Game, d *Descriptor, args string, switches []string) {
 	// @switch expr = pattern1, action1 [, pattern2, action2, ...] [, default]
 	// @switch/all fires ALL matching cases (not just first)
+	// @switch/first — stop at first match (default behavior)
+	// @switch/now — execute immediately (default in Go; C queues by default)
+	// @switch/default — use server default (first-match in Go)
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		g.Notify(d.Player, "Usage: @switch expression = pattern1, action1, ...")
@@ -2340,7 +2478,10 @@ func stripBraces(s string) string {
 	return s
 }
 
-func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
+func cmdSet(g *Game, d *Descriptor, args string, switches []string) {
+	// @set/quiet — suppress "Set." / "Cleared." confirmation messages
+	quiet := HasSwitch(switches, "quiet")
+
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
 		// C: CS_TWO_ARG — no = means match against full args (usually empty → "I don't see that here.")
@@ -2384,7 +2525,7 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 		ok, errMsg := g.SetAttrByNameChecked(d.Player, target, attrName, attrValue)
 		if !ok {
 			g.Notify(d.Player, errMsg)
-		} else {
+		} else if !quiet {
 			g.Notify(d.Player, "Set.")
 		}
 		return
@@ -2397,10 +2538,12 @@ func cmdSet(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	switch g.SetFlag(target, value, d.Player) {
 	case SetFlagOK:
-		if strings.HasPrefix(value, "!") {
-			g.Notify(d.Player, "Cleared.")
-		} else {
-			g.Notify(d.Player, "Set.")
+		if !quiet {
+			if strings.HasPrefix(value, "!") {
+				g.Notify(d.Player, "Cleared.")
+			} else {
+				g.Notify(d.Player, "Set.")
+			}
 		}
 	case SetFlagDenied:
 		g.Notify(d.Player, "Permission denied.")
@@ -2666,9 +2809,12 @@ func cmdBackup(g *Game, d *Descriptor, args string, _ []string) {
 func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 	// @dolist <list> = <command>
 	// @dolist/delimit <sep> <list> = <command>
+	// @dolist/space — use literal space delimiter (vs Fields which collapses whitespace)
+	// @dolist/notify — queue @notify me after loop completes
 	// ## in command is replaced with current element
 	// #@ is the iteration number (1-based)
-	delim := "" // empty = split on whitespace
+	delim := "" // empty = split on whitespace (Fields)
+	useSpace := HasSwitch(switches, "space")
 	if HasSwitch(switches, "delimit") {
 		// First space-delimited token in args is the delimiter
 		spIdx := strings.IndexByte(strings.TrimSpace(args), ' ')
@@ -2677,6 +2823,8 @@ func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 			delim = trimmed[:spIdx]
 			args = strings.TrimSpace(trimmed[spIdx+1:])
 		}
+	} else if useSpace {
+		delim = " "
 	}
 
 	eqIdx := strings.IndexByte(args, '=')
@@ -2733,12 +2881,24 @@ func cmdDolist(g *Game, d *Descriptor, args string, switches []string) {
 			g.Queue.Add(entry)
 		}
 	}
+
+	// @dolist/notify: queue @notify me after loop completes (C: semaphore sync)
+	if HasSwitch(switches, "notify") {
+		entry := &QueueEntry{
+			Player:  d.Player,
+			Cause:   d.Player,
+			Caller:  d.Player,
+			Command: fmt.Sprintf("@notify me"),
+		}
+		g.Queue.Add(entry)
+	}
 }
 
 // --- Communication Commands ---
 
-func cmdOemit(g *Game, d *Descriptor, args string, _ []string) {
+func cmdOemit(g *Game, d *Descriptor, args string, switches []string) {
 	// @oemit target = message — emits to target's room, excluding target
+	// @oemit/noeval — skip evaluation of message text
 	// CS_TWO_ARG: no = means target=args, msg=""
 	var targetStr, message string
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
@@ -2759,7 +2919,9 @@ func cmdOemit(g *Game, d *Descriptor, args string, _ []string) {
 	if loc == gamedb.Nothing {
 		loc = g.PlayerLocation(d.Player)
 	}
-	message = evalExpr(g, d.Player, message)
+	if !HasSwitch(switches, "noeval") {
+		message = evalExpr(g, d.Player, message)
+	}
 	g.SendMarkedToRoomExcept(loc, target, "EMIT", message)
 }
 
@@ -3396,7 +3558,7 @@ var decompileAttrCmd = map[int]string{
 	222: "Nameformat",
 }
 
-func cmdDecompile(g *Game, d *Descriptor, args string, _ []string) {
+func cmdDecompile(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		g.Notify(d.Player, "Decompile what?")
 		return
@@ -3515,10 +3677,15 @@ func cmdDecompile(g *Game, d *Descriptor, args string, _ []string) {
 		}
 	}
 
+	pretty := HasSwitch(switches, "pretty")
+
 	if openMarker != "" {
 		g.Notify(d.Player, openMarker)
 	}
-	for _, line := range lines {
+	for i, line := range lines {
+		if pretty && i > 0 {
+			g.Notify(d.Player, "")
+		}
 		g.Notify(d.Player, line)
 	}
 	if closeMarker != "" {
@@ -3599,6 +3766,14 @@ var powerTable = map[string]powerEntry{
 	"link_any_home":    {Word: 1, Bit: gamedb.Pow2LinkHome},
 	"cloak":            {Word: 1, Bit: gamedb.Pow2Cloak, GodOnly: true},
 	"bot":              {Word: 1, Bit: gamedb.Pow2Bot},
+	// C-compatible aliases (same bits, different names)
+	"attr_read":        {Word: 0, Bit: gamedb.PowMdarkAttr},  // C name for mdark_attr
+	"attr_write":       {Word: 0, Bit: gamedb.PowWizAttr},    // C name for wiz_attr
+	"expanded_who":     {Word: 0, Bit: gamedb.PowWizardWho},  // C name for wizard_who
+	"quota":            {Word: 0, Bit: gamedb.PowChgQuotas},  // C name for change_quotas
+	"steal_money":      {Word: 0, Bit: gamedb.PowSteal},      // C name for steal
+	"tel_anything":     {Word: 0, Bit: gamedb.PowTelUnrst},   // C name for tel_unrestricted
+	"watch_logins":     {Word: 0, Bit: gamedb.PowWatch},      // C name for watch
 }
 
 // --- @apikey command ---
@@ -5052,7 +5227,7 @@ func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
 func cmdList(g *Game, d *Descriptor, args string, _ []string) {
 	option := strings.ToLower(strings.TrimSpace(args))
 	if option == "" {
-		g.Notify(d.Player, "Options: functions, commands, flags, powers, attributes, switches, user_attributes, options, default_flags, permissions, func_permissions")
+		g.Notify(d.Player, "Options: functions, commands, flags, powers, attributes, switches, user_attributes, options, default_flags, permissions, func_permissions, costs, db_stats, globals")
 		return
 	}
 
@@ -5097,8 +5272,20 @@ func cmdList(g *Game, d *Descriptor, args string, _ []string) {
 		cmdListDefaultFlags(g, d)
 	case "costs":
 		cmdListCosts(g, d)
+	case "db_stats":
+		if !Wizard(g, d.Player) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		cmdListDBStats(g, d)
+	case "globals":
+		if !Wizard(g, d.Player) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		cmdListGlobals(g, d)
 	default:
-		g.Notify(d.Player, fmt.Sprintf("Unknown option '%s'. Options: functions, commands, flags, powers, attributes, switches, user_attributes, options, default_flags, permissions, func_permissions, costs", option))
+		g.Notify(d.Player, fmt.Sprintf("Unknown option '%s'. Options: functions, commands, flags, powers, attributes, switches, user_attributes, options, default_flags, permissions, func_permissions, costs, db_stats, globals", option))
 	}
 }
 
@@ -5246,20 +5433,34 @@ func cmdListFlags(g *Game, d *Descriptor) {
 }
 
 func cmdListPowers(g *Game, d *Descriptor) {
-	names := make([]string, 0, len(powerTable))
-	for name := range powerTable {
-		names = append(names, name)
+	// Dedup by word:bit — pick one canonical name per power
+	type pwInfo struct {
+		name    string
+		word    int
+		bit     int
+		godOnly bool
 	}
-	sort.Strings(names)
+	best := make(map[string]*pwInfo) // "word:bit" -> best entry
+	for name, pe := range powerTable {
+		key := fmt.Sprintf("%d:%d", pe.Word, pe.Bit)
+		if existing, ok := best[key]; !ok || len(name) < len(existing.name) {
+			best[key] = &pwInfo{name: name, word: pe.Word, bit: pe.Bit, godOnly: pe.GodOnly}
+		}
+	}
 
-	g.Notify(d.Player, fmt.Sprintf("Powers (%d):", len(names)))
-	for _, name := range names {
-		pe := powerTable[name]
+	entries := make([]*pwInfo, 0, len(best))
+	for _, e := range best {
+		entries = append(entries, e)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+
+	g.Notify(d.Player, fmt.Sprintf("Powers (%d):", len(entries)))
+	for _, e := range entries {
 		god := ""
-		if pe.GodOnly {
+		if e.godOnly {
 			god = " (god-only)"
 		}
-		g.Notify(d.Player, fmt.Sprintf("  %-25s word=%d bit=0x%08x%s", name, pe.Word, pe.Bit, god))
+		g.Notify(d.Player, fmt.Sprintf("  %-25s word=%d bit=0x%08x%s", e.name, e.word, e.bit, god))
 	}
 }
 
@@ -5313,9 +5514,59 @@ func cmdListUserAttrs(g *Game, d *Descriptor) {
 	}
 }
 
+// commandSwitches is the central switch registry, matching C TinyMUSH @list switches.
+var commandSwitches = map[string][]string{
+	"@boot":       {"port", "quiet"},
+	"@chown":      {"nostrip"},
+	"@clone":      {"cost", "inherit", "inventory", "location", "nostrip", "parent", "preserve"},
+	"@decompile":  {"pretty"},
+	"@destroy":    {"instant", "override"},
+	"@dig":        {"teleport"},
+	"@doing":      {"header", "message", "poll", "quiet"},
+	"@dolist":     {"delimit", "notify", "now", "space"},
+	"@dump":       {"flatfile", "structure", "text"},
+	"@emit":       {"here", "noeval", "room"},
+	"@force":      {"now"},
+	"@halt":       {"all"},
+	"@lock":       {"chownlock", "controllock", "darklock", "defaultlock", "droplock", "enterlock", "givelock", "heardlock", "hearslock", "knownlock", "knowslock", "leavelock", "linklock", "movedlock", "moveslock", "pagelock", "parentlock", "receivelock", "speechlock", "teloutlock", "tportlock", "uselock", "userlock"},
+	"@notify":     {"all", "first"},
+	"@oemit":      {"noeval", "speech"},
+	"@open":       {"inventory", "location"},
+	"@pemit":      {"contents", "list", "noeval", "object", "silent", "speech"},
+	"@ps":         {"all", "brief", "long", "summary"},
+	"@set":        {"quiet"},
+	"@shutdown":   {"abort"},
+	"@stats":      {"all", "me", "player"},
+	"@sweep":      {"commands", "connected", "exits", "here", "inventory", "listeners", "players"},
+	"@switch":     {"all", "default", "first", "now"},
+	"@teleport":   {"loud", "quiet"},
+	"@trigger":    {"now", "quiet"},
+	"@unlock":     {"chownlock", "controllock", "darklock", "defaultlock", "droplock", "enterlock", "givelock", "heardlock", "hearslock", "knownlock", "knowslock", "leavelock", "linklock", "movedlock", "moveslock", "pagelock", "parentlock", "receivelock", "speechlock", "teloutlock", "tportlock", "uselock", "userlock"},
+	"@wall":       {"admin", "emit", "no_prefix", "pose", "wizard"},
+	"drop":        {"quiet"},
+	"enter":       {"quiet"},
+	"examine":     {"brief", "debug", "full", "owner", "pairs", "parent", "pretty"},
+	"get":         {"quiet"},
+	"give":        {"quiet"},
+	"goto":        {"quiet"},
+	"leave":       {"quiet"},
+	"look":        {"outside"},
+	"page":        {"noeval"},
+	"pose":        {"default", "noeval", "nospace"},
+	"say":         {"noeval"},
+}
+
 func cmdListSwitches(g *Game, d *Descriptor) {
-	g.Notify(d.Player, "Command switches are not tracked in a separate table.")
-	g.Notify(d.Player, "Use 'help <command>' for switch information.")
+	names := make([]string, 0, len(commandSwitches))
+	for name := range commandSwitches {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		sw := commandSwitches[name]
+		g.Notify(d.Player, fmt.Sprintf("%s: %s", name, strings.Join(sw, " ")))
+	}
 }
 
 func cmdListPermissions(g *Game, d *Descriptor) {
@@ -5374,35 +5625,162 @@ func cmdListOptions(g *Game, d *Descriptor) {
 		g.Notify(d.Player, "No configuration loaded.")
 		return
 	}
-	g.Notify(d.Player, "Server options:")
-	g.Notify(d.Player, fmt.Sprintf("  mud_name:            %s", g.Conf.MudName))
-	g.Notify(d.Player, fmt.Sprintf("  port:                %d", g.Conf.Port))
-	g.Notify(d.Player, fmt.Sprintf("  player_starting_room: #%d", g.Conf.PlayerStartingRoom))
-	g.Notify(d.Player, fmt.Sprintf("  player_starting_home: #%d", g.Conf.PlayerStartingHome))
-	g.Notify(d.Player, fmt.Sprintf("  iter_limit:          %d", g.Conf.IterLimit))
-	g.Notify(d.Player, fmt.Sprintf("  func_invk_limit:     %d", g.Conf.FunctionInvocationLimit))
-	g.Notify(d.Player, fmt.Sprintf("  eval_output_limit:   %d", g.Conf.EvalOutputLimit))
-	g.Notify(d.Player, fmt.Sprintf("  cmd_invk_limit:      %d", g.Conf.CommandInvocationLimit))
-	if g.Conf.MasterRoom >= 0 {
-		g.Notify(d.Player, fmt.Sprintf("  master_room:         #%d", g.Conf.MasterRoom))
+	c := g.Conf
+	yn := func(b bool) string {
+		if b {
+			return "Y"
+		}
+		return "N"
 	}
+	opt := func(name, val, desc string) {
+		g.Notify(d.Player, fmt.Sprintf("%-30s %s %s", name, val, desc))
+	}
+
+	// Boolean options (matching C @list options format)
+	opt("dark_sleepers", yn(true), "Disconnected players not shown in room contents?")
+	opt("examine_public_attrs", yn(c.ExaminePublicAttrs), "examine shows public attributes?")
+	opt("have_zones", yn(true), "Multiple control via ControlLocks is permitted?")
+	opt("idle_wiz_dark", yn(c.IdleWizDark), "Wizards who idle are set DARK?")
+	opt("instant_recycle", yn(c.InstantRecycle), "DESTROY_OK things skip GOING, destroy immediately?")
+	opt("match_own_commands", yn(c.MatchOwnCommands), "Non-players can match $-commands on themselves?")
+	opt("pemit_far_players", yn(c.PemitFarPlayers), "@pemit targets can be players in other locations?")
+	opt("pemit_any_object", yn(c.PemitAnyObject), "@pemit targets can be objects in other locations?")
+	opt("player_match_own_commands", yn(c.PlayerMatchOwnCommands), "Players can match $-commands on themselves?")
+	opt("public_flags", yn(c.PublicFlags), "Flag information is public?")
+	opt("quotas", yn(c.Quotas), "Quotas are enforced?")
+	opt("read_remote_name", yn(c.ReadRemoteName), "Names are public, even to players not nearby?")
+	opt("require_cmds_flag", yn(c.RequireCmdsFlag), "Only objects with COMMANDS flag are searched for $-commands?")
+	opt("space_compress", yn(true), "Multiple spaces are compressed to a single space?")
+	opt("sql_reconnect", yn(c.SQLReconnect), "SQL queries re-initiate dropped connections?")
+	opt("sweep_dark", yn(c.SweepDark), "@sweep works on Dark locations?")
+	opt("switch_default_all", yn(c.SwitchDefaultAll), "@switch default is /all, not /first?")
+	opt("trace_topdown", yn(c.TraceTopdown), "Trace output is top-down?")
+	opt("typed_quotas", yn(c.TypedQuotas), "Quotas are enforced per object type?")
+
+	// Numeric/string options
+	g.Notify(d.Player, "")
+	g.Notify(d.Player, "Server parameters:")
+	g.Notify(d.Player, fmt.Sprintf("  mud_name:              %s", c.MudName))
+	g.Notify(d.Player, fmt.Sprintf("  port:                  %d", c.Port))
+	g.Notify(d.Player, fmt.Sprintf("  player_starting_room:  #%d", c.PlayerStartingRoom))
+	g.Notify(d.Player, fmt.Sprintf("  player_starting_home:  #%d", c.PlayerStartingHome))
+	g.Notify(d.Player, fmt.Sprintf("  default_home:          #%d", c.DefaultHome))
+	if c.MasterRoom >= 0 {
+		g.Notify(d.Player, fmt.Sprintf("  master_room:           #%d", c.MasterRoom))
+	}
+	g.Notify(d.Player, fmt.Sprintf("  money_name_singular:   %s", c.MoneyNameSingular))
+	g.Notify(d.Player, fmt.Sprintf("  money_name_plural:     %s", c.MoneyNamePlural))
+	g.Notify(d.Player, fmt.Sprintf("  starting_money:        %d", c.StartingMoney))
+	g.Notify(d.Player, fmt.Sprintf("  paycheck:              %d", c.Paycheck))
+	g.Notify(d.Player, fmt.Sprintf("  earn_limit:            %d", c.EarnLimit))
+	g.Notify(d.Player, fmt.Sprintf("  idle_timeout:          %d", c.IdleTimeout))
+	g.Notify(d.Player, fmt.Sprintf("  iter_limit:            %d", c.IterLimit))
+	g.Notify(d.Player, fmt.Sprintf("  func_invk_limit:       %d", c.FunctionInvocationLimit))
+	g.Notify(d.Player, fmt.Sprintf("  cmd_invk_limit:        %d", c.CommandInvocationLimit))
+	g.Notify(d.Player, fmt.Sprintf("  eval_output_limit:     %d", c.EvalOutputLimit))
+	g.Notify(d.Player, fmt.Sprintf("  dolist_limit:          %d", c.DolistLimit))
+	g.Notify(d.Player, fmt.Sprintf("  start_quota:           %d", c.StartQuota))
+	g.Notify(d.Player, fmt.Sprintf("  god_dbref:             #%d", c.GodDBRef))
+	g.Notify(d.Player, fmt.Sprintf("  zone_nest_limit:       %d", c.ZoneNestLimit))
 }
 
 func cmdListDefaultFlags(g *Game, d *Descriptor) {
+	// C TinyMUSH: "Default flags: Players...PR  Rooms...RR  Exits...ER  Things...R  Robots...PRr"
+	// Show flag letters for default flag words from config
+	showDefFlags := func(label string, flagWords [3]int) string {
+		if flagWords[0] == 0 && flagWords[1] == 0 && flagWords[2] == 0 {
+			return fmt.Sprintf("  %-10s (none)", label)
+		}
+		letters := ""
+		for name, fd := range FlagTable {
+			if len(name) != 1 {
+				continue
+			}
+			if fd.Word < 3 && flagWords[fd.Word]&fd.Bit != 0 {
+				letters += name
+			}
+		}
+		if letters == "" {
+			letters = "(none)"
+		}
+		return fmt.Sprintf("  %-10s %s", label, letters)
+	}
+
 	g.Notify(d.Player, "Default object flags:")
-	g.Notify(d.Player, "  Rooms:   (none)")
-	g.Notify(d.Player, "  Things:  (none)")
-	g.Notify(d.Player, "  Exits:   (none)")
-	g.Notify(d.Player, "  Players: (none)")
+	g.Notify(d.Player, showDefFlags("Players:", g.Conf.PlayerDefaultFlags))
+	g.Notify(d.Player, showDefFlags("Rooms:", g.Conf.RoomDefaultFlags))
+	g.Notify(d.Player, showDefFlags("Exits:", g.Conf.ExitDefaultFlags))
+	g.Notify(d.Player, showDefFlags("Things:", g.Conf.ThingDefaultFlags))
+	g.Notify(d.Player, showDefFlags("Robots:", g.Conf.RobotDefaultFlags))
 }
 
 func cmdListCosts(g *Game, d *Descriptor) {
-	g.Notify(d.Player, "Command costs:")
-	g.Notify(d.Player, "  @create:  10")
-	g.Notify(d.Player, "  @dig:     10")
-	g.Notify(d.Player, "  @open:    1")
-	g.Notify(d.Player, "  @clone:   10")
-	g.Notify(d.Player, "  kill:     10")
-	g.Notify(d.Player, "  give:     1+")
-	g.Notify(d.Player, "  page:     0")
+	c := g.Conf
+	g.Notify(d.Player, fmt.Sprintf("Digging a room costs %d %s.", c.DigCost, g.MoneyName(c.DigCost)))
+	g.Notify(d.Player, fmt.Sprintf("Opening a new exit costs %d %s.", c.OpenCost, g.MoneyName(c.OpenCost)))
+	g.Notify(d.Player, fmt.Sprintf("Linking an exit, home, or dropto costs %d %s.", c.LinkCost, g.MoneyName(c.LinkCost)))
+	g.Notify(d.Player, fmt.Sprintf("Creating a new thing costs %d %s.", c.CreateMinCost, g.MoneyName(c.CreateMinCost)))
+	g.Notify(d.Player, fmt.Sprintf("Creating a robot costs %d %s.", c.RobotCost, g.MoneyName(c.RobotCost)))
+	g.Notify(d.Player, fmt.Sprintf("Killing costs between %d and %d %s.", c.KillMin, c.KillMax, g.MoneyName(c.KillMax)))
+	if c.KillGuarantee > 0 {
+		g.Notify(d.Player, fmt.Sprintf("You must spend %d %s to guarantee success.", c.KillGuarantee, g.MoneyName(c.KillGuarantee)))
+	}
+	if c.PageCost > 0 {
+		g.Notify(d.Player, fmt.Sprintf("Each page costs %d %s.", c.PageCost, g.MoneyName(c.PageCost)))
+	}
+	if c.WaitCost > 0 {
+		g.Notify(d.Player, fmt.Sprintf("A %d %s deposit is charged for putting a command on the queue.", c.WaitCost, g.MoneyName(c.WaitCost)))
+		g.Notify(d.Player, "The deposit is refunded when the command is run or canceled.")
+	}
+}
+
+func cmdListDBStats(g *Game, d *Descriptor) {
+	// C TinyMUSH: shows cache stats. Go doesn't have a DB cache layer,
+	// but we can show database size and queue stats.
+	g.Notify(d.Player, "Database statistics:")
+	rooms, things, exits, players, garbage := 0, 0, 0, 0, 0
+	totalAttrs := 0
+	for _, obj := range g.DB.Objects {
+		totalAttrs += len(obj.Attrs)
+		switch obj.ObjType() {
+		case gamedb.TypeRoom:
+			rooms++
+		case gamedb.TypeThing:
+			things++
+		case gamedb.TypeExit:
+			exits++
+		case gamedb.TypePlayer:
+			if obj.IsGoing() {
+				garbage++
+			} else {
+				players++
+			}
+		case gamedb.TypeGarbage:
+			garbage++
+		default:
+			if obj.IsGoing() {
+				garbage++
+			} else {
+				things++
+			}
+		}
+	}
+	g.Notify(d.Player, fmt.Sprintf("  Objects:    %d total (%d rooms, %d things, %d exits, %d players, %d garbage)",
+		len(g.DB.Objects), rooms, things, exits, players, garbage))
+	g.Notify(d.Player, fmt.Sprintf("  Attributes: %d defined, %d stored on objects", len(g.DB.AttrNames), totalAttrs))
+	imm, wait, sem := g.Queue.Stats()
+	g.Notify(d.Player, fmt.Sprintf("  Queue:      %d immediate, %d waiting, %d semaphore", imm, wait, sem))
+	g.Notify(d.Player, fmt.Sprintf("  Connections: %d active", g.Conns.Count()))
+}
+
+func cmdListGlobals(g *Game, d *Descriptor) {
+	// C TinyMUSH: "Global parameters: building...enabled; ..."
+	yn := func(b bool) string {
+		if b {
+			return "enabled"
+		}
+		return "disabled"
+	}
+	g.Notify(d.Player, fmt.Sprintf("Global parameters: logins...%s; dequeueing...%s; idlechecking...%s",
+		yn(true), yn(true), yn(g.Conf.IdleTimeout > 0)))
 }

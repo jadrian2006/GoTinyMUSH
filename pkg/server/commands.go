@@ -565,9 +565,11 @@ func evalExpr(g *Game, player gamedb.DBRef, text string) string {
 	return ctx.Exec(text, eval.EvFCheck|eval.EvEval, nil)
 }
 
-func cmdSay(g *Game, d *Descriptor, args string, _ []string) {
+func cmdSay(g *Game, d *Descriptor, args string, switches []string) {
 	args = strings.TrimSpace(args)
-	args = evalExpr(g, d.Player, args)
+	if !HasSwitch(switches, "noeval") {
+		args = evalExpr(g, d.Player, args)
+	}
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
 
@@ -592,11 +594,18 @@ func cmdSay(g *Game, d *Descriptor, args string, _ []string) {
 	g.AudibleRelay(loc, d.Player, msg)
 }
 
-func cmdPose(g *Game, d *Descriptor, args string, _ []string) {
-	args = evalExpr(g, d.Player, strings.TrimSpace(args))
+func cmdPose(g *Game, d *Descriptor, args string, switches []string) {
+	args = strings.TrimSpace(args)
+	if !HasSwitch(switches, "noeval") {
+		args = evalExpr(g, d.Player, args)
+	}
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
-	msg := fmt.Sprintf("%s %s", playerName, args)
+	sep := " "
+	if HasSwitch(switches, "nospace") {
+		sep = ""
+	}
+	msg := fmt.Sprintf("%s%s%s", playerName, sep, args)
 	g.EmitEventToRoom(loc, "POSE", events.Event{
 		Type:   events.EvPose,
 		Source: d.Player,
@@ -623,11 +632,12 @@ func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
 	g.MatchListenPatterns(loc, d.Player, msg)
 }
 
-func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
+func cmdPage(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		g.Notify(d.Player, "You have not paged anyone.")
 		return
 	}
+	noeval := HasSwitch(switches, "noeval")
 	// Format: page name=message or page name message
 	var targetName, message string
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
@@ -679,7 +689,9 @@ func cmdPage(g *Game, d *Descriptor, args string, _ []string) {
 			Data: pageData,
 		})
 	} else {
-		message = evalExpr(g, d.Player, message)
+		if !noeval {
+			message = evalExpr(g, d.Player, message)
+		}
 		pageData["message"] = message
 		if strings.HasPrefix(message, ":") {
 			pose := strings.TrimPrefix(message, ":")
@@ -754,6 +766,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 	if args == "" {
 		return
 	}
+	noeval := HasSwitch(switches, "noeval")
 
 	if HasSwitch(switches, "room") {
 		// @emit/room target=message — emit to the room containing target
@@ -765,7 +778,9 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 		targetStr := strings.TrimSpace(args[:eqIdx])
 		message := stripEqSep(args[eqIdx+1:])
 		targetStr = evalExpr(g, d.Player, targetStr)
-		message = evalExpr(g, d.Player, message)
+		if !noeval {
+			message = evalExpr(g, d.Player, message)
+		}
 		target := g.ResolveRef(d.Player, targetStr)
 		if target == gamedb.Nothing {
 			target = g.MatchObject(d.Player, targetStr)
@@ -794,7 +809,10 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	args = evalExpr(g, d.Player, args)
+	// /here is the default behavior — emit to player's room
+	if !noeval {
+		args = evalExpr(g, d.Player, args)
+	}
 	loc := g.PlayerLocation(d.Player)
 	g.EmitEventToRoom(loc, "EMIT", events.Event{
 		Type:   events.EvEmit,
@@ -821,7 +839,13 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 	// @pemit target=message
 	// @pemit/contents target=message  (send to all contents of target)
 	// @pemit/list targets=message     (targets is space-separated dbrefs)
+	// @pemit/silent — suppress "You pemit..." feedback (C: PEMIT_NOSEND)
+	// @pemit/noeval — skip evaluation of message text
+	// @pemit/object — treat target as object, not player (allows pemit to things)
 	// CS_TWO_ARG: no = means target=args, message=""
+	noeval := HasSwitch(switches, "noeval")
+	silent := HasSwitch(switches, "silent")
+
 	var targetStr, message string
 	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
 		targetStr = strings.TrimSpace(args[:eqIdx])
@@ -835,7 +859,10 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		functions.RegisterAll(c)
 	})
 	targetStr = ctx.Exec(targetStr, eval.EvFCheck|eval.EvEval, nil)
-	message = ctx.Exec(message, eval.EvFCheck|eval.EvEval, nil)
+	if !noeval {
+		message = ctx.Exec(message, eval.EvFCheck|eval.EvEval, nil)
+	}
+	_ = silent // used below for feedback suppression
 
 	if HasSwitch(switches, "contents") {
 		// @pemit/contents: send to all contents of the target location
@@ -883,8 +910,9 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	// Default: single target
+	// /object: skip player name lookup, match as object
 	target := g.ResolveRef(d.Player, targetStr)
-	if target == gamedb.Nothing {
+	if target == gamedb.Nothing && !HasSwitch(switches, "object") {
 		target = LookupPlayer(g.DB, targetStr)
 	}
 	if target == gamedb.Nothing {
@@ -1149,9 +1177,26 @@ func cmdHome(g *Game, d *Descriptor, _ string, _ []string) {
 
 // --- Information Commands ---
 
-func cmdLook(g *Game, d *Descriptor, args string, _ []string) {
+func cmdLook(g *Game, d *Descriptor, args string, switches []string) {
 	// C TinyMUSH: look has CS_INTERP — evaluate the argument.
 	args = evalExpr(g, d.Player, args)
+
+	// look/outside — look at the room containing the player's current location
+	// (useful from inside vehicles/containers)
+	if HasSwitch(switches, "outside") {
+		loc := g.PlayerLocation(d.Player)
+		if loc != gamedb.Nothing {
+			if locObj, ok := g.DB.Objects[loc]; ok {
+				outer := locObj.Location
+				if outer != gamedb.Nothing {
+					g.ShowRoom(d, outer)
+					return
+				}
+			}
+		}
+		g.Notify(d.Player, "You can't see outside.")
+		return
+	}
 
 	if args == "" || strings.EqualFold(args, "here") {
 		// Look at current room
@@ -1172,7 +1217,7 @@ func cmdLook(g *Game, d *Descriptor, args string, _ []string) {
 	g.ShowObject(d, target)
 }
 
-func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
+func cmdExamine(g *Game, d *Descriptor, args string, switches []string) {
 	// C TinyMUSH: examine has CS_INTERP — evaluate the argument so that
 	// function calls like loc(*player) resolve before object matching.
 	args = evalExpr(g, d.Player, args)
@@ -1255,6 +1300,44 @@ func cmdExamine(g *Game, d *Descriptor, args string, _ []string) {
 		}
 		if !found {
 			g.Notify(d.Player, "No matching attributes found.")
+		}
+		return
+	}
+
+	// examine/brief — show header + attrs only, no description/contents/exits
+	if HasSwitch(switches, "brief") {
+		g.Notify(d.Player, g.unparseObject(d.Player, target))
+		return
+	}
+
+	// examine/parent — show attrs inherited from parent chain
+	if HasSwitch(switches, "parent") {
+		cur := target
+		if obj, ok := g.DB.Objects[cur]; ok {
+			cur = obj.Parent
+		}
+		depth := 0
+		for cur != gamedb.Nothing && depth < 20 {
+			pObj, ok := g.DB.Objects[cur]
+			if !ok {
+				break
+			}
+			g.Notify(d.Player, fmt.Sprintf("Parent: %s", g.unparseObject(d.Player, cur)))
+			for _, attr := range pObj.Attrs {
+				name := g.DB.GetAttrName(attr.Number)
+				if name == "" {
+					name = fmt.Sprintf("ATTR_%d", attr.Number)
+				}
+				info := ParseAttrInfo(attr.Value)
+				def := g.LookupAttrDef(attr.Number)
+				if !CanReadAttr(g, d.Player, cur, def, info.Flags, info.Owner) {
+					continue
+				}
+				text := eval.StripAttrPrefix(attr.Value)
+				g.Notify(d.Player, fmt.Sprintf("  %s: %s", name, text))
+			}
+			cur = pObj.Parent
+			depth++
 		}
 		return
 	}
@@ -1564,6 +1647,18 @@ type Game struct {
 	PeakPlayers int        // Historical peak connected player count
 	StartTime   time.Time  // Server start time
 	Hooks       map[string]*HookSet // Command hooks (uppercase cmd name -> hook set)
+}
+
+// findDescriptor returns the first active descriptor for a player, or nil if not connected.
+func (g *Game) findDescriptor(player gamedb.DBRef) *Descriptor {
+	if g.Conns == nil {
+		return nil
+	}
+	descs := g.Conns.GetByPlayer(player)
+	if len(descs) > 0 {
+		return descs[0]
+	}
+	return nil
 }
 
 // Emit sends an event to the player specified in ev.Player via the event bus.
@@ -3553,6 +3648,21 @@ func (g *Game) CreateObject(name string, objType gamedb.ObjectType, owner gamedb
 	ref := g.NextRef
 	g.NextRef++
 
+	// Apply default flags from config (C: player_flags, room_flags, etc.)
+	var defFlags [3]int
+	if g.Conf != nil {
+		switch objType {
+		case gamedb.TypeRoom:
+			defFlags = g.Conf.RoomDefaultFlags
+		case gamedb.TypeExit:
+			defFlags = g.Conf.ExitDefaultFlags
+		case gamedb.TypeThing:
+			defFlags = g.Conf.ThingDefaultFlags
+		case gamedb.TypePlayer:
+			defFlags = g.Conf.PlayerDefaultFlags
+		}
+	}
+
 	obj := &gamedb.Object{
 		DBRef:    ref,
 		Name:     name,
@@ -3564,7 +3674,7 @@ func (g *Game) CreateObject(name string, objType gamedb.ObjectType, owner gamedb
 		Next:     gamedb.Nothing,
 		Owner:    owner,
 		Parent:   gamedb.Nothing,
-		Flags:    [3]int{int(objType), 0, 0},
+		Flags:    [3]int{int(objType) | defFlags[0], defFlags[1], defFlags[2]},
 	}
 	g.DB.Objects[ref] = obj
 	g.PersistObject(obj)

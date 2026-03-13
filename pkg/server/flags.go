@@ -66,7 +66,7 @@ var FlagTable = map[string]*FlagDef{
 	"LIGHT":        {Name: "LIGHT", Word: 1, Bit: gamedb.Flag2Light},
 	"HAS_LISTEN":   {Name: "HAS_LISTEN", Word: 1, Bit: gamedb.Flag2HasListen},
 	"AUDITORIUM":   {Name: "AUDITORIUM", Word: 1, Bit: gamedb.Flag2Auditorium},
-	"OOB":          {Name: "OOB", Word: 1, Bit: gamedb.Flag2OOB},
+	"OOB":          {Name: "AUDITORIUM", Word: 1, Bit: gamedb.Flag2OOB}, // Go alias for AUDITORIUM
 	"ANSI":         {Name: "ANSI", Word: 1, Bit: gamedb.Flag2Ansi},
 	"HEAD":         {Name: "HEAD", Word: 1, Bit: gamedb.Flag2HeadFlag},
 	"FIXED":        {Name: "FIXED", Word: 1, Bit: gamedb.Flag2Fixed},
