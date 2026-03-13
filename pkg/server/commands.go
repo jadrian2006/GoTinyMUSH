@@ -590,15 +590,15 @@ func cmdSay(g *Game, d *Descriptor, args string, switches []string) {
 		Text:   fmt.Sprintf("You say \"%s\"", args),
 		Data:   map[string]any{"message": args, "speaker": playerName},
 	})
-	// Emit structured event to room (except speaker)
+	// Emit structured event to room (except speaker), with presence filtering
 	msg := fmt.Sprintf("%s says \"%s\"", playerName, args)
-	g.EmitEventToRoomExcept(loc, d.Player, "SAY", events.Event{
+	g.EmitEventToRoomPresence(loc, d.Player, d.Player, "SAY", events.Event{
 		Type:   events.EvSay,
 		Source: d.Player,
 		Room:   loc,
 		Text:   msg,
 		Data:   map[string]any{"message": args, "speaker": playerName},
-	})
+	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, msg)
 	g.AudibleRelay(loc, d.Player, msg)
 }
@@ -621,13 +621,13 @@ func cmdPose(g *Game, d *Descriptor, args string, switches []string) {
 		sep = ""
 	}
 	msg := fmt.Sprintf("%s%s%s", playerName, sep, args)
-	g.EmitEventToRoom(loc, "POSE", events.Event{
+	g.EmitEventToRoomPresenceAll(loc, d.Player, "POSE", events.Event{
 		Type:   events.EvPose,
 		Source: d.Player,
 		Room:   loc,
 		Text:   msg,
 		Data:   map[string]any{"pose": args, "player": playerName},
-	})
+	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, msg)
 	g.AudibleRelay(loc, d.Player, msg)
 }
@@ -643,13 +643,13 @@ func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	msg := fmt.Sprintf("%s%s", playerName, args)
-	g.EmitEventToRoom(loc, "POSE", events.Event{
+	g.EmitEventToRoomPresenceAll(loc, d.Player, "POSE", events.Event{
 		Type:   events.EvPose,
 		Source: d.Player,
 		Room:   loc,
 		Text:   msg,
 		Data:   map[string]any{"pose": args, "player": playerName, "nospace": true},
-	})
+	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, msg)
 }
 
@@ -688,6 +688,12 @@ func cmdPage(g *Game, d *Descriptor, args string, switches []string) {
 	// C TinyMUSH: check PageLock on target — blocks pages to that player
 	if !CouldDoIt(g, d.Player, target, aLPage) {
 		g.Notify(d.Player, "That player is not accepting pages.")
+		return
+	}
+
+	// C TinyMUSH: presence lock check for page (HeardLock/HearsLock)
+	if !CanPerceive(g, d.Player, target, MsgSpeech) {
+		g.Notify(d.Player, "You can't page that player.")
 		return
 	}
 
@@ -847,12 +853,12 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "You may not speak in this room.")
 		return
 	}
-	g.EmitEventToRoom(loc, "EMIT", events.Event{
+	g.EmitEventToRoomPresenceAll(loc, d.Player, "EMIT", events.Event{
 		Type:   events.EvEmit,
 		Source: d.Player,
 		Room:   loc,
 		Text:   args,
-	})
+	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, args)
 	g.AudibleRelay(loc, d.Player, args)
 }
@@ -1057,8 +1063,8 @@ func tryMoveByExit(g *Game, d *Descriptor, name string) bool {
 				})
 				msg := ctx.Exec(osucc, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 				if msg != "" {
-					g.Conns.SendToRoomExcept(g.DB, loc, d.Player,
-						DisplayName(pObj.Name)+" "+msg)
+					g.NotifyRoomExcept(loc, d.Player, d.Player,
+						DisplayName(pObj.Name)+" "+msg, MsgMove)
 				}
 			}
 		}
@@ -1881,12 +1887,12 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 				})
 				msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 				if msg != "" {
-					g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
-						DisplayName(playerObj.Name)+" "+msg)
+					g.NotifyRoomExcept(oldLoc, player, player,
+						DisplayName(playerObj.Name)+" "+msg, MsgMove)
 				}
 			} else {
-				g.Conns.SendToRoomExcept(g.DB, oldLoc, player,
-					fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)))
+				g.NotifyRoomExcept(oldLoc, player, player,
+					fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)), MsgMove)
 			}
 		}
 		g.RemoveFromContents(oldLoc, player)
@@ -1900,8 +1906,8 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 
 	// Announce arrival (default, before ShowRoom evaluates OSUCC)
 	if !isDark {
-		g.Conns.SendToRoomExcept(g.DB, dest, player,
-			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
+		g.NotifyRoomExcept(dest, player, player,
+			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)), MsgMove)
 	}
 
 	// Persist moved player and affected rooms
@@ -1929,8 +1935,8 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 			})
 			msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
 			if msg != "" {
-				g.Conns.SendToRoomExcept(g.DB, dest, player,
-					DisplayName(playerObj.Name)+" "+msg)
+				g.NotifyRoomExcept(dest, player, player,
+					DisplayName(playerObj.Name)+" "+msg, MsgMove)
 			}
 		}
 
@@ -2050,16 +2056,20 @@ func (g *Game) visibleContents(room, looker gamedb.DBRef) []gamedb.DBRef {
 		visible := false
 		if obj.ObjType() == gamedb.TypePlayer {
 			if g.Conns.IsConnected(next) {
-				if obj.HasFlag(gamedb.FlagDark) && !SeeAll(g, looker) && !Controls(g, looker, next) {
+				if Darkened(g, looker, next) && !SeeAll(g, looker) && !Controls(g, looker, next) {
 					// DARK player hidden
 				} else {
 					visible = true
 				}
 			}
 		} else if obj.ObjType() == gamedb.TypeThing {
-			if !obj.HasFlag(gamedb.FlagDark) || SeeAll(g, looker) || Controls(g, looker, next) {
+			if !Darkened(g, looker, next) || SeeAll(g, looker) || Controls(g, looker, next) {
 				visible = true
 			}
+		}
+		// C TinyMUSH Can_See: UNREAL objects need presence lock check
+		if visible && !CanPerceive(g, next, looker, MsgPresence) {
+			visible = false
 		}
 		if visible {
 			refs = append(refs, next)
@@ -2074,7 +2084,7 @@ func (g *Game) visibleExits(room, looker gamedb.DBRef) []gamedb.DBRef {
 	if !ok {
 		return nil
 	}
-	roomIsDark := roomObj.HasFlag(gamedb.FlagDark)
+	roomIsDark := Darkened(g, looker, room)
 	exitFmt := g.GetAttrText(room, 215) // A_LEXITS_FMT
 	var refs []gamedb.DBRef
 	exitRef := roomObj.Exits
@@ -2084,7 +2094,7 @@ func (g *Game) visibleExits(room, looker gamedb.DBRef) []gamedb.DBRef {
 			break
 		}
 		canSee := true
-		if exitObj.HasFlag(gamedb.FlagDark) {
+		if Darkened(g, looker, exitRef) {
 			canSee = false
 		} else if roomIsDark && exitFmt == "" && !exitObj.HasFlag2(gamedb.Flag2Light) {
 			canSee = false
@@ -2220,16 +2230,20 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 			visible := false
 			if obj.ObjType() == gamedb.TypePlayer {
 				if g.Conns.IsConnected(next) {
-					if obj.HasFlag(gamedb.FlagDark) && !SeeAll(g, d.Player) && !Controls(g, d.Player, next) {
+					if Darkened(g, d.Player, next) && !SeeAll(g, d.Player) && !Controls(g, d.Player, next) {
 						// DARK player hidden
 					} else {
 						visible = true
 					}
 				}
 			} else if obj.ObjType() == gamedb.TypeThing {
-				if !obj.HasFlag(gamedb.FlagDark) || SeeAll(g, d.Player) || Controls(g, d.Player, next) {
+				if !Darkened(g, d.Player, next) || SeeAll(g, d.Player) || Controls(g, d.Player, next) {
 					visible = true
 				}
+			}
+			// C TinyMUSH Can_See: UNREAL objects need presence lock check
+			if visible && !CanPerceive(g, next, d.Player, MsgPresence) {
+				visible = false
 			}
 			if visible {
 				contentRefs = append(contentRefs, next)
@@ -2268,7 +2282,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 	// In a DARK room without EXITFORMAT, only LIGHT exits are visible.
 	// When EXITFORMAT is set, all non-DARK exits are passed to it
 	// (DARK rooms use EXITFORMAT for display, so room darkness is irrelevant).
-	roomIsDark := roomObj.HasFlag(gamedb.FlagDark)
+	roomIsDark := Darkened(g, d.Player, room)
 	exitFmt := g.GetAttrText(room, 215) // A_LEXITS_FMT
 	var exitRefs []gamedb.DBRef
 	exitRef := roomObj.Exits
@@ -2278,7 +2292,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 			break
 		}
 		canSee := true
-		if exitObj.HasFlag(gamedb.FlagDark) {
+		if Darkened(g, d.Player, exitRef) {
 			// DARK exits are always hidden
 			canSee = false
 		} else if roomIsDark && exitFmt == "" && !exitObj.HasFlag2(gamedb.Flag2Light) {

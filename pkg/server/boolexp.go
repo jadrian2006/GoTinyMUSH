@@ -49,6 +49,13 @@ const (
 	aLParent = 98  // A_LPARENT — parent lock
 	aLPage   = 61  // A_LPAGE — page lock (on target)
 	aLSpeech = 209 // A_LSPEECH — speech lock (on room)
+	aLDark   = 219 // A_LDARK — dark lock (who can see through DARK)
+	aLKnown  = 223 // A_LKNOWN — who sees this player? (presence)
+	aLHeard  = 224 // A_LHEARD — who hears this player? (speech)
+	aLMoved  = 225 // A_LMOVED — who notices this player moving?
+	aLKnows  = 226 // A_LKNOWS — who does this player see? (presence)
+	aLHears  = 227 // A_LHEARS — who does this player hear? (speech)
+	aLMoves  = 228 // A_LMOVES — who does this player notice moving?
 	aDFail   = 135 // A_DFAIL — drop fail message
 	aODFail  = 136 // A_ODFAIL — others drop fail message
 	aADFail  = 137 // A_ADFAIL — drop fail action
@@ -59,6 +66,124 @@ const (
 
 // Maximum indirection depth for @-locks to prevent infinite loops.
 const maxIndirDepth = 20
+
+// Darkened returns true if thing appears dark to player.
+// C TinyMUSH: Darkened(p,x) = Dark(x) && (!H_Darklock(x) || could_doit(p,x,A_LDARK))
+// If the object has DARK flag AND either no DarkLock is set (HAS_DARKLOCK flag)
+// or the player passes the DarkLock, then the object is dark to that player.
+// If the player FAILS the DarkLock, the object is NOT dark to them (they see through it).
+func Darkened(g *Game, player, thing gamedb.DBRef) bool {
+	obj, ok := g.DB.Objects[thing]
+	if !ok {
+		return false
+	}
+	if !obj.HasFlag(gamedb.FlagDark) {
+		return false
+	}
+	// No DarkLock set → dark to everyone
+	if !obj.HasFlag3(gamedb.Flag3HasDarkLock) {
+		return true
+	}
+	// Has DarkLock — check if player passes it.
+	// Passing DarkLock means the object IS dark to you.
+	// Failing DarkLock means you see through the dark.
+	return CouldDoIt(g, player, thing, aLDark)
+}
+
+// Message type flags for presence filtering (matches C TinyMUSH MSG_* flags).
+const (
+	MsgSpeech   = 0x01 // Say, pose, emit, page — filtered by HeardLock/HearsLock
+	MsgMove     = 0x02 // Enter, leave, teleport — filtered by MovedLock/MovesLock
+	MsgPresence = 0x04 // Connect, disconnect, look — filtered by KnownLock/KnowsLock
+)
+
+// CanPerceive checks whether target can perceive sender for a given message type.
+// C TinyMUSH: OK_To_Send(sender, target) — both directions checked:
+//   1. If sender has PRESENCE flag: target must pass sender's outbound lock
+//   2. If target has PRESENCE flag: sender must pass target's inbound lock
+// Returns true if the message should be delivered.
+func CanPerceive(g *Game, sender, target gamedb.DBRef, msgType int) bool {
+	sObj, sok := g.DB.Objects[sender]
+	tObj, tok := g.DB.Objects[target]
+	if !sok || !tok {
+		return true
+	}
+
+	// Fast path: neither has PRESENCE flag
+	sUnreal := sObj.HasFlag3(gamedb.Flag3Presence)
+	tUnreal := tObj.HasFlag3(gamedb.Flag3Presence)
+	if !sUnreal && !tUnreal {
+		return true
+	}
+
+	// Sender is UNREAL: target must pass sender's outbound lock
+	if sUnreal {
+		ok := false
+		if msgType&MsgSpeech != 0 {
+			ok = CouldDoIt(g, target, sender, aLHeard) // Check_Heard(target, sender)
+		}
+		if !ok && msgType&MsgMove != 0 {
+			ok = CouldDoIt(g, target, sender, aLMoved) // Check_Noticed(target, sender)
+		}
+		if !ok && msgType&MsgPresence != 0 {
+			ok = CouldDoIt(g, target, sender, aLKnown) // Check_Known(target, sender)
+		}
+		if !ok {
+			return false
+		}
+	}
+
+	// Target is UNREAL: sender must pass target's inbound lock
+	if tUnreal {
+		ok := false
+		if msgType&MsgSpeech != 0 {
+			ok = CouldDoIt(g, sender, target, aLHears) // Check_Hears(sender, target)
+		}
+		if !ok && msgType&MsgMove != 0 {
+			ok = CouldDoIt(g, sender, target, aLMoves) // Check_Notices(sender, target)
+		}
+		if !ok && msgType&MsgPresence != 0 {
+			ok = CouldDoIt(g, sender, target, aLKnows) // Check_Knows(sender, target)
+		}
+		if !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+// NotifyRoomExcept sends msg to all connected players in room except 'except',
+// filtering by presence locks based on message type. sender is the originator.
+func (g *Game) NotifyRoomExcept(room, sender, except gamedb.DBRef, msg string, msgType int) {
+	// Check if sender has PRESENCE — if not, skip presence checks entirely
+	sObj, sok := g.DB.Objects[sender]
+	senderUnreal := sok && sObj.HasFlag3(gamedb.Flag3Presence)
+
+	if room != except {
+		if senderUnreal {
+			if CanPerceive(g, sender, room, msgType) {
+				g.Notify(room, msg)
+			}
+		} else {
+			g.Notify(room, msg)
+		}
+	}
+	for _, next := range g.DB.SafeContents(room) {
+		if next == except {
+			continue
+		}
+		if !g.Conns.IsConnected(next) {
+			continue
+		}
+		if senderUnreal || (g.DB.Objects[next] != nil && g.DB.Objects[next].HasFlag3(gamedb.Flag3Presence)) {
+			if !CanPerceive(g, sender, next, msgType) {
+				continue
+			}
+		}
+		g.Notify(next, msg)
+	}
+}
 
 // ---------- Parser ----------
 

@@ -59,6 +59,24 @@ func (g *Game) SendMarkedToRoomExcept(room gamedb.DBRef, except gamedb.DBRef, ma
 	}
 }
 
+// SendMarkedToRoomPresence sends a marker-wrapped message to all connected
+// players in a room except 'except', filtering by presence locks.
+func (g *Game) SendMarkedToRoomPresence(room, sender, except gamedb.DBRef, markerType string, msg string, msgType int) {
+	if room != except && g.Conns.IsConnected(room) {
+		if CanPerceive(g, sender, room, msgType) {
+			g.SendMarkedToPlayer(room, markerType, msg)
+		}
+	}
+	for _, next := range g.DB.SafeContents(room) {
+		if next == except || !g.Conns.IsConnected(next) {
+			continue
+		}
+		if CanPerceive(g, sender, next, msgType) {
+			g.SendMarkedToPlayer(next, markerType, msg)
+		}
+	}
+}
+
 // EmitEvent sends a structured event to a player via the event bus.
 // The event's Text is marker-wrapped for the recipient.
 func (g *Game) EmitEvent(player gamedb.DBRef, markerType string, ev events.Event) {
@@ -81,6 +99,24 @@ func (g *Game) EmitEventToRoom(room gamedb.DBRef, markerType string, ev events.E
 	}
 }
 
+// EmitEventToRoomPresenceAll sends a structured event to all connected players
+// in a room (including sender), filtering by presence locks based on msgType.
+func (g *Game) EmitEventToRoomPresenceAll(room, sender gamedb.DBRef, markerType string, ev events.Event, msgType int) {
+	if g.Conns.IsConnected(room) {
+		if CanPerceive(g, sender, room, msgType) {
+			g.EmitEvent(room, markerType, ev)
+		}
+	}
+	for _, next := range g.DB.SafeContents(room) {
+		if !g.Conns.IsConnected(next) {
+			continue
+		}
+		if next == sender || CanPerceive(g, sender, next, msgType) {
+			g.EmitEvent(next, markerType, ev)
+		}
+	}
+}
+
 // EmitEventToRoomExcept sends a structured event to all connected players in a
 // location except one. Each player's copy has marker-wrapped text.
 func (g *Game) EmitEventToRoomExcept(room gamedb.DBRef, except gamedb.DBRef, markerType string, ev events.Event) {
@@ -89,6 +125,24 @@ func (g *Game) EmitEventToRoomExcept(room gamedb.DBRef, except gamedb.DBRef, mar
 	}
 	for _, next := range g.DB.SafeContents(room) {
 		if next != except && g.Conns.IsConnected(next) {
+			g.EmitEvent(next, markerType, ev)
+		}
+	}
+}
+
+// EmitEventToRoomPresence sends a structured event to all connected players
+// in a room except 'except', filtering by presence locks based on msgType.
+func (g *Game) EmitEventToRoomPresence(room, sender, except gamedb.DBRef, markerType string, ev events.Event, msgType int) {
+	if room != except && g.Conns.IsConnected(room) {
+		if CanPerceive(g, sender, room, msgType) {
+			g.EmitEvent(room, markerType, ev)
+		}
+	}
+	for _, next := range g.DB.SafeContents(room) {
+		if next == except || !g.Conns.IsConnected(next) {
+			continue
+		}
+		if CanPerceive(g, sender, next, msgType) {
 			g.EmitEvent(next, markerType, ev)
 		}
 	}

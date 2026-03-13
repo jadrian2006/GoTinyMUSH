@@ -5,7 +5,7 @@ import (
 )
 
 // A_LCONTROL is the attribute number for the control lock.
-const aLControl = 129
+const aLControl = 99
 
 // ResolveOwner walks the ownership chain to find the ultimate player owner,
 // matching C TinyMUSH where Owner() always returns a player dbref.

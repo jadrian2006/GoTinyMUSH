@@ -1141,6 +1141,24 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLParent // A_LPARENT = 98
 	} else if HasSwitch(switches, "chown") || HasSwitch(switches, "chownlock") {
 		lockAttrNum = 217 // A_LCHOWN
+	} else if HasSwitch(switches, "dark") || HasSwitch(switches, "darklock") {
+		lockAttrNum = aLDark // A_LDARK = 219
+	} else if HasSwitch(switches, "control") || HasSwitch(switches, "controllock") {
+		lockAttrNum = aLControl // A_LCONTROL = 99 (perms.go)
+	} else if HasSwitch(switches, "known") || HasSwitch(switches, "knownlock") {
+		lockAttrNum = aLKnown // A_LKNOWN = 223
+	} else if HasSwitch(switches, "heard") || HasSwitch(switches, "heardlock") {
+		lockAttrNum = aLHeard // A_LHEARD = 224
+	} else if HasSwitch(switches, "moved") || HasSwitch(switches, "movedlock") {
+		lockAttrNum = aLMoved // A_LMOVED = 225
+	} else if HasSwitch(switches, "knows") || HasSwitch(switches, "knowslock") {
+		lockAttrNum = aLKnows // A_LKNOWS = 226
+	} else if HasSwitch(switches, "hears") || HasSwitch(switches, "hearslock") {
+		lockAttrNum = aLHears // A_LHEARS = 227
+	} else if HasSwitch(switches, "moves") || HasSwitch(switches, "moveslock") {
+		lockAttrNum = aLMoves // A_LMOVES = 228
+	} else if HasSwitch(switches, "user") || HasSwitch(switches, "userlock") {
+		lockAttrNum = 97 // A_LUSER
 	}
 	// Parse lock expression at set time to resolve names (me, here, etc.) to dbrefs.
 	// This matches C TinyMUSH behavior where lock keys are stored as parsed boolexps.
@@ -1149,6 +1167,13 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		lockStr = SerializeBoolExp(parsed)
 	}
 	g.SetAttr(target, lockAttrNum, lockStr)
+	// DarkLock: set HAS_DARKLOCK flag so Darkened() knows to check the lock
+	if lockAttrNum == aLDark {
+		if obj, ok := g.DB.Objects[target]; ok {
+			obj.Flags[2] |= gamedb.Flag3HasDarkLock
+			g.PersistObject(obj)
+		}
+	}
 	g.Notify(d.Player, "Locked.")
 }
 
@@ -1195,8 +1220,33 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLParent // A_LPARENT = 98
 	} else if HasSwitch(switches, "chown") || HasSwitch(switches, "chownlock") {
 		lockAttrNum = 217 // A_LCHOWN
+	} else if HasSwitch(switches, "dark") || HasSwitch(switches, "darklock") {
+		lockAttrNum = aLDark // A_LDARK = 219
+	} else if HasSwitch(switches, "control") || HasSwitch(switches, "controllock") {
+		lockAttrNum = aLControl // A_LCONTROL = 99
+	} else if HasSwitch(switches, "known") || HasSwitch(switches, "knownlock") {
+		lockAttrNum = aLKnown // A_LKNOWN = 223
+	} else if HasSwitch(switches, "heard") || HasSwitch(switches, "heardlock") {
+		lockAttrNum = aLHeard // A_LHEARD = 224
+	} else if HasSwitch(switches, "moved") || HasSwitch(switches, "movedlock") {
+		lockAttrNum = aLMoved // A_LMOVED = 225
+	} else if HasSwitch(switches, "knows") || HasSwitch(switches, "knowslock") {
+		lockAttrNum = aLKnows // A_LKNOWS = 226
+	} else if HasSwitch(switches, "hears") || HasSwitch(switches, "hearslock") {
+		lockAttrNum = aLHears // A_LHEARS = 227
+	} else if HasSwitch(switches, "moves") || HasSwitch(switches, "moveslock") {
+		lockAttrNum = aLMoves // A_LMOVES = 228
+	} else if HasSwitch(switches, "user") || HasSwitch(switches, "userlock") {
+		lockAttrNum = 97 // A_LUSER
 	}
 	g.SetAttr(target, lockAttrNum, "")
+	// DarkLock: clear HAS_DARKLOCK flag
+	if lockAttrNum == aLDark {
+		if obj, ok := g.DB.Objects[target]; ok {
+			obj.Flags[2] &^= gamedb.Flag3HasDarkLock
+			g.PersistObject(obj)
+		}
+	}
 	g.Notify(d.Player, "Unlocked.")
 }
 
