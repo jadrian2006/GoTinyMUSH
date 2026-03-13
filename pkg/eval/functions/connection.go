@@ -446,12 +446,17 @@ func fnRloc(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	maxDepth := 20
 	if len(args) > 1 {
 		maxDepth = toInt(args[1])
-		if maxDepth < 1 {
-			maxDepth = 1
+		if maxDepth < 0 {
+			maxDepth = 0
 		}
 		if maxDepth > 100 {
 			maxDepth = 100
 		}
+	}
+	// rloc(obj,0) returns the object itself (C compat)
+	if maxDepth == 0 {
+		buf.WriteString(fmt.Sprintf("#%d", ref))
+		return
 	}
 	for i := 0; i < maxDepth; i++ {
 		obj, ok := ctx.DB.Objects[ref]
