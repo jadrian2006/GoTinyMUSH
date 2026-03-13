@@ -7,9 +7,11 @@ const (
 	MailIsRead  = 0x0001
 	MailCleared = 0x0002
 	MailUrgent  = 0x0004
-	MailSafe    = 0x0008
-	MailForward = 0x0010
-	MailReply   = 0x0020
+	MailMass    = 0x0008
+	MailSafe    = 0x0010
+	MailTag     = 0x0040
+	MailForward = 0x0080
+	MailReply   = 0x4000
 )
 
 // MailMessage represents a single mail message in a player's mailbox.
@@ -19,6 +21,7 @@ type MailMessage struct {
 	From    DBRef     // Sender
 	To      []DBRef   // Original recipient list
 	CC      []DBRef   // Carbon copy list
+	BCC     []DBRef   // Blind carbon copy list (not shown to recipients)
 	Subject string
 	Body    string
 	Time    time.Time

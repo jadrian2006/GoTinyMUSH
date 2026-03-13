@@ -330,6 +330,7 @@ func InitCommands() map[string]*Command {
 	// Mail system (no guest)
 	registerNG("@mail", cmdMail)
 	registerNG("-", cmdMailDash)
+	registerNG("~", cmdMailTilde)
 
 	return cmds
 }
