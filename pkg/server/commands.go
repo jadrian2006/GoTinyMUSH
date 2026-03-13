@@ -198,6 +198,8 @@ func InitCommands() map[string]*Command {
 	registerNG("@hook", cmdHook)
 	registerNG("@instance", cmdInstance)
 	register("@list", cmdList)
+	registerNG("@dbck", cmdDbck)
+	register("@sweep", cmdSweep)
 
 	// Attribute-setting @commands (all no guest)
 	// Success/Failure messages
@@ -574,6 +576,12 @@ func cmdSay(g *Game, d *Descriptor, args string, switches []string) {
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
 
+	// C TinyMUSH: check SpeechLock on the room
+	if !CouldDoIt(g, d.Player, loc, aLSpeech) {
+		g.Notify(d.Player, "You may not speak in this room.")
+		return
+	}
+
 	// Emit structured event to self
 	g.EmitEvent(d.Player, "SAY", events.Event{
 		Type:   events.EvSay,
@@ -602,6 +610,12 @@ func cmdPose(g *Game, d *Descriptor, args string, switches []string) {
 	}
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
+
+	// C TinyMUSH: check SpeechLock on the room
+	if !CouldDoIt(g, d.Player, loc, aLSpeech) {
+		g.Notify(d.Player, "You may not speak in this room.")
+		return
+	}
 	sep := " "
 	if HasSwitch(switches, "nospace") {
 		sep = ""
@@ -622,6 +636,12 @@ func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
 	args = evalExpr(g, d.Player, args)
 	playerName := g.PlayerName(d.Player)
 	loc := g.PlayerLocation(d.Player)
+
+	// C TinyMUSH: check SpeechLock on the room
+	if !CouldDoIt(g, d.Player, loc, aLSpeech) {
+		g.Notify(d.Player, "You may not speak in this room.")
+		return
+	}
 	msg := fmt.Sprintf("%s%s", playerName, args)
 	g.EmitEventToRoom(loc, "POSE", events.Event{
 		Type:   events.EvPose,
@@ -662,6 +682,12 @@ func cmdPage(g *Game, d *Descriptor, args string, switches []string) {
 	if !g.Conns.IsConnected(target) {
 		targetObj := g.DB.Objects[target]
 		g.Notify(d.Player, fmt.Sprintf("%s is not connected.", DisplayName(targetObj.Name)))
+		return
+	}
+
+	// C TinyMUSH: check PageLock on target — blocks pages to that player
+	if !CouldDoIt(g, d.Player, target, aLPage) {
+		g.Notify(d.Player, "That player is not accepting pages.")
 		return
 	}
 
@@ -815,6 +841,12 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 		args = evalExpr(g, d.Player, args)
 	}
 	loc := g.PlayerLocation(d.Player)
+
+	// C TinyMUSH: check SpeechLock on the room
+	if !CouldDoIt(g, d.Player, loc, aLSpeech) {
+		g.Notify(d.Player, "You may not speak in this room.")
+		return
+	}
 	g.EmitEventToRoom(loc, "EMIT", events.Event{
 		Type:   events.EvEmit,
 		Source: d.Player,

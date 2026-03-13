@@ -43,6 +43,12 @@ const (
 	aORFail  = 133 // A_ORFAIL
 	aARFail  = 134 // A_ARFAIL
 	aLDrop   = 86  // A_LDROP — drop lock
+	aLTport  = 85  // A_LTPORT — teleport lock (on victim)
+	aLTelout = 94  // A_LTELOUT — teleport-out lock (on source room)
+	aLLink   = 93  // A_LLINK — link lock (on destination)
+	aLParent = 98  // A_LPARENT — parent lock
+	aLPage   = 61  // A_LPAGE — page lock (on target)
+	aLSpeech = 209 // A_LSPEECH — speech lock (on room)
 	aDFail   = 135 // A_DFAIL — drop fail message
 	aODFail  = 136 // A_ODFAIL — others drop fail message
 	aADFail  = 137 // A_ADFAIL — drop fail action

@@ -418,6 +418,11 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 						g.Notify(d.Player, "Permission denied.")
 						return
 					}
+					// C TinyMUSH: check LinkLock on destination
+					if !CouldDoIt(g, d.Player, dest, aLLink) {
+						g.Notify(d.Player, "Permission denied.")
+						return
+					}
 				}
 			}
 			obj.Location = dest
@@ -434,6 +439,11 @@ func cmdLink(g *Game, d *Descriptor, args string, _ []string) {
 			if !Controls(g, d.Player, dest) && !CanLinkHome(g, d.Player) {
 				destObj, dok := g.DB.Objects[dest]
 				if !dok || !destObj.HasFlag(gamedb.FlagLinkOK) {
+					g.Notify(d.Player, "Permission denied.")
+					return
+				}
+				// C TinyMUSH: check LinkLock on destination
+				if !CouldDoIt(g, d.Player, dest, aLLink) {
 					g.Notify(d.Player, "Permission denied.")
 					return
 				}
@@ -498,6 +508,13 @@ func cmdParent(g *Game, d *Descriptor, args string, _ []string) {
 	if !Controls(g, d.Player, target) {
 		g.Notify(d.Player, "Permission denied.")
 		return
+	}
+	// C TinyMUSH: check ParentLock on the parent object
+	if parent != gamedb.Nothing && !Controls(g, d.Player, parent) {
+		if !CouldDoIt(g, d.Player, parent, aLParent) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
 	}
 	// C TinyMUSH: Verify no circular parent reference
 	if parent != gamedb.Nothing {
@@ -1110,6 +1127,20 @@ func cmdLock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLRecv // A_LRECEIVE = 87
 	} else if HasSwitch(switches, "drop") || HasSwitch(switches, "droplock") {
 		lockAttrNum = aLDrop // A_LDROP = 86
+	} else if HasSwitch(switches, "page") || HasSwitch(switches, "pagelock") {
+		lockAttrNum = aLPage // A_LPAGE = 61
+	} else if HasSwitch(switches, "speech") || HasSwitch(switches, "speechlock") {
+		lockAttrNum = aLSpeech // A_LSPEECH = 209
+	} else if HasSwitch(switches, "tport") || HasSwitch(switches, "teleport") || HasSwitch(switches, "tportlock") {
+		lockAttrNum = aLTport // A_LTPORT = 85
+	} else if HasSwitch(switches, "telout") || HasSwitch(switches, "teloutlock") {
+		lockAttrNum = aLTelout // A_LTELOUT = 94
+	} else if HasSwitch(switches, "link") || HasSwitch(switches, "linklock") {
+		lockAttrNum = aLLink // A_LLINK = 93
+	} else if HasSwitch(switches, "parent") || HasSwitch(switches, "parentlock") {
+		lockAttrNum = aLParent // A_LPARENT = 98
+	} else if HasSwitch(switches, "chown") || HasSwitch(switches, "chownlock") {
+		lockAttrNum = 217 // A_LCHOWN
 	}
 	// Parse lock expression at set time to resolve names (me, here, etc.) to dbrefs.
 	// This matches C TinyMUSH behavior where lock keys are stored as parsed boolexps.
@@ -1150,6 +1181,20 @@ func cmdUnlock(g *Game, d *Descriptor, args string, switches []string) {
 		lockAttrNum = aLRecv // A_LRECEIVE = 87
 	} else if HasSwitch(switches, "drop") || HasSwitch(switches, "droplock") {
 		lockAttrNum = aLDrop // A_LDROP = 86
+	} else if HasSwitch(switches, "page") || HasSwitch(switches, "pagelock") {
+		lockAttrNum = aLPage // A_LPAGE = 61
+	} else if HasSwitch(switches, "speech") || HasSwitch(switches, "speechlock") {
+		lockAttrNum = aLSpeech // A_LSPEECH = 209
+	} else if HasSwitch(switches, "tport") || HasSwitch(switches, "teleport") || HasSwitch(switches, "tportlock") {
+		lockAttrNum = aLTport // A_LTPORT = 85
+	} else if HasSwitch(switches, "telout") || HasSwitch(switches, "teloutlock") {
+		lockAttrNum = aLTelout // A_LTELOUT = 94
+	} else if HasSwitch(switches, "link") || HasSwitch(switches, "linklock") {
+		lockAttrNum = aLLink // A_LLINK = 93
+	} else if HasSwitch(switches, "parent") || HasSwitch(switches, "parentlock") {
+		lockAttrNum = aLParent // A_LPARENT = 98
+	} else if HasSwitch(switches, "chown") || HasSwitch(switches, "chownlock") {
+		lockAttrNum = 217 // A_LCHOWN
 	}
 	g.SetAttr(target, lockAttrNum, "")
 	g.Notify(d.Player, "Unlocked.")
@@ -1445,6 +1490,24 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 	if !Controls(g, d.Player, victim) && !Wizard(g, d.Player) && !hasTelAnything {
 		g.Notify(d.Player, "Permission denied.")
 		return
+	}
+
+	// C TinyMUSH: check TportLock on the victim (can this object be teleported?)
+	if !Wizard(g, d.Player) && !hasTelAnything {
+		if !CouldDoIt(g, d.Player, victim, aLTport) {
+			g.Notify(d.Player, "You can't teleport that!")
+			return
+		}
+	}
+
+	// C TinyMUSH: check TeloutLock on victim's current location (can things leave?)
+	if !Wizard(g, d.Player) && !hasTelAnything {
+		if vObj, ok := g.DB.Objects[victim]; ok && vObj.Location != gamedb.Nothing {
+			if !CouldDoIt(g, d.Player, vObj.Location, aLTelout) {
+				g.Notify(d.Player, "You can't teleport out of there!")
+				return
+			}
+		}
 	}
 
 	// 2. Destination must be JUMP_OK or player must control dest or be wizard/TEL_ANYWHERE
@@ -3266,9 +3329,16 @@ func cmdChzone(g *Game, d *Descriptor, args string, switches []string) {
 }
 
 func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
-	// @search [type=TYPE] [name=PATTERN]
+	// @search [filter]=value ... — C TinyMUSH compatible search
+	// Filters: type=, name=, flags=, owner=, zone=, parent=
+	// Shortcuts: rooms=, exits=, objects=, things=, players= (type+name)
 	var typeFilter gamedb.ObjectType = -1
 	var namePattern string
+	var ownerFilter gamedb.DBRef = gamedb.Nothing
+	var zoneFilter gamedb.DBRef = gamedb.Nothing
+	var parentFilter gamedb.DBRef = gamedb.Nothing
+	var requiredFlags, excludeFlags [3]int
+	isWiz := Wizard(g, d.Player) || CanSearch(g, d.Player)
 
 	for _, part := range strings.Fields(args) {
 		if eqIdx := strings.IndexByte(part, '='); eqIdx >= 0 {
@@ -3279,7 +3349,7 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 				switch strings.ToLower(val) {
 				case "room", "rooms":
 					typeFilter = gamedb.TypeRoom
-				case "thing", "things":
+				case "thing", "things", "object", "objects":
 					typeFilter = gamedb.TypeThing
 				case "exit", "exits":
 					typeFilter = gamedb.TypeExit
@@ -3287,8 +3357,64 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 					typeFilter = gamedb.TypePlayer
 				case "garbage":
 					typeFilter = gamedb.TypeGarbage
+				default:
+					g.Notify(d.Player, fmt.Sprintf("%s: unknown type", val))
+					return
 				}
 			case "name":
+				namePattern = strings.ToLower(val)
+			case "flags":
+				negate := false
+				for _, ch := range val {
+					if ch == '!' {
+						negate = true
+						continue
+					}
+					for _, fl := range flagLetters {
+						if fl.Letter == byte(ch) {
+							if negate {
+								excludeFlags[fl.Word] |= fl.Bit
+							} else {
+								requiredFlags[fl.Word] |= fl.Bit
+							}
+							break
+						}
+					}
+					negate = false
+				}
+			case "owner":
+				if strings.EqualFold(val, "me") {
+					ownerFilter = d.Player
+				} else {
+					ownerFilter = LookupPlayer(g.DB, val)
+					if ownerFilter == gamedb.Nothing {
+						g.Notify(d.Player, fmt.Sprintf("%s: No such player", val))
+						return
+					}
+				}
+			case "zone":
+				zoneFilter = g.ResolveRef(d.Player, val)
+				if zoneFilter == gamedb.Nothing {
+					g.Notify(d.Player, fmt.Sprintf("%s: No match.", val))
+					return
+				}
+			case "parent":
+				parentFilter = g.ResolveRef(d.Player, val)
+				if parentFilter == gamedb.Nothing {
+					g.Notify(d.Player, fmt.Sprintf("%s: No match.", val))
+					return
+				}
+			case "rooms":
+				typeFilter = gamedb.TypeRoom
+				namePattern = strings.ToLower(val)
+			case "exits":
+				typeFilter = gamedb.TypeExit
+				namePattern = strings.ToLower(val)
+			case "objects", "things":
+				typeFilter = gamedb.TypeThing
+				namePattern = strings.ToLower(val)
+			case "players":
+				typeFilter = gamedb.TypePlayer
 				namePattern = strings.ToLower(val)
 			}
 		} else if namePattern == "" {
@@ -3299,13 +3425,39 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 	// Collect matching objects sorted by dbref
 	var matches []gamedb.DBRef
 	for ref, obj := range g.DB.Objects {
+		if obj.IsGoing() {
+			continue
+		}
 		if typeFilter >= 0 && obj.ObjType() != typeFilter {
 			continue
 		}
 		if namePattern != "" && !wildMatchSimple(namePattern, strings.ToLower(obj.Name)) {
 			continue
 		}
-		if !g.Controls(d.Player, ref) && !CanSearch(g, d.Player) {
+		if ownerFilter != gamedb.Nothing && obj.Owner != ownerFilter {
+			continue
+		}
+		if zoneFilter != gamedb.Nothing && obj.Zone != zoneFilter {
+			continue
+		}
+		if parentFilter != gamedb.Nothing && obj.Parent != parentFilter {
+			continue
+		}
+		if requiredFlags[0] != 0 || requiredFlags[1] != 0 || requiredFlags[2] != 0 {
+			if obj.Flags[0]&requiredFlags[0] != requiredFlags[0] ||
+				obj.Flags[1]&requiredFlags[1] != requiredFlags[1] ||
+				obj.Flags[2]&requiredFlags[2] != requiredFlags[2] {
+				continue
+			}
+		}
+		if excludeFlags[0] != 0 || excludeFlags[1] != 0 || excludeFlags[2] != 0 {
+			if obj.Flags[0]&excludeFlags[0] != 0 ||
+				obj.Flags[1]&excludeFlags[1] != 0 ||
+				obj.Flags[2]&excludeFlags[2] != 0 {
+				continue
+			}
+		}
+		if !isWiz && !g.Controls(d.Player, ref) {
 			continue
 		}
 		matches = append(matches, ref)
@@ -6031,4 +6183,134 @@ func cmdListGlobals(g *Game, d *Descriptor) {
 	}
 	g.Notify(d.Player, fmt.Sprintf("Global parameters: logins...%s; dequeueing...%s; idlechecking...%s",
 		yn(true), yn(true), yn(g.Conf.IdleTimeout > 0)))
+}
+
+// cmdDbck implements @dbck — manual database consistency check.
+// C TinyMUSH: purges GOING objects, verifies chains, checks dead refs.
+func cmdDbck(g *Game, d *Descriptor, _ string, _ []string) {
+	if !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	g.PurgeGoing()
+	containers, objects := g.RepairAllChains()
+	g.Notify(d.Player, fmt.Sprintf("Done. (%d containers, %d objects checked)", containers, objects))
+}
+
+// cmdSweep implements @sweep — scan for listeners/commands in current location.
+// C TinyMUSH: checks for $commands, @listen, connected/hidden players, PUPPET.
+func cmdSweep(g *Game, d *Descriptor, _ string, switches []string) {
+	loc := g.PlayerLocation(d.Player)
+	if loc == gamedb.Nothing {
+		g.Notify(d.Player, "You have no location!")
+		return
+	}
+
+	checkCommands := HasSwitch(switches, "commands") || len(switches) == 0
+	checkListeners := HasSwitch(switches, "listen") || len(switches) == 0
+	checkPlayers := HasSwitch(switches, "players") || HasSwitch(switches, "connected") || len(switches) == 0
+	checkHere := HasSwitch(switches, "here") || len(switches) == 0
+	checkExits := HasSwitch(switches, "exits") || len(switches) == 0
+	checkInventory := HasSwitch(switches, "inventory") || HasSwitch(switches, "me") || len(switches) == 0
+
+	found := 0
+
+	// Helper to sweep a single object
+	sweep := func(ref gamedb.DBRef, context string) {
+		obj, ok := g.DB.Objects[ref]
+		if !ok || ref == d.Player {
+			return
+		}
+		reasons := []string{}
+
+		// Check for $commands
+		if checkCommands && obj.HasFlag2(gamedb.Flag2HasCommands) {
+			reasons = append(reasons, "commands")
+		}
+
+		// Check for @listen
+		if checkListeners {
+			listenText := g.GetAttrText(ref, 46) // A_LISTEN = 46
+			if listenText != "" {
+				reasons = append(reasons, "listener")
+			}
+		}
+
+		// Check for connected players
+		if checkPlayers && obj.ObjType() == gamedb.TypePlayer {
+			if g.Conns.IsConnected(ref) {
+				if obj.HasFlag(gamedb.FlagDark) {
+					reasons = append(reasons, "connected (DARK)")
+				}
+			}
+		}
+
+		// Check for PUPPET flag (relays to owner)
+		if obj.HasFlag(gamedb.FlagPuppet) {
+			reasons = append(reasons, "puppet")
+		}
+
+		// Check AUDIBLE flag
+		if obj.HasFlag(gamedb.FlagHearThru) {
+			reasons = append(reasons, "audible")
+		}
+
+		if len(reasons) > 0 {
+			g.Notify(d.Player, fmt.Sprintf("  %s(#%d) is %s [%s]",
+				obj.Name, ref, context, strings.Join(reasons, ", ")))
+			found++
+		}
+	}
+
+	g.Notify(d.Player, fmt.Sprintf("Sweeping %s...", g.ObjName(loc)))
+
+	// Sweep room itself
+	if checkHere {
+		sweep(loc, "here")
+	}
+
+	// Sweep contents of room
+	if checkHere {
+		current := g.DB.Objects[loc].Contents
+		for current != gamedb.Nothing {
+			obj, ok := g.DB.Objects[current]
+			if !ok {
+				break
+			}
+			sweep(current, "in this room")
+			current = obj.Next
+		}
+	}
+
+	// Sweep exits
+	if checkExits {
+		current := g.DB.Objects[loc].Exits
+		for current != gamedb.Nothing {
+			obj, ok := g.DB.Objects[current]
+			if !ok {
+				break
+			}
+			sweep(current, "an exit")
+			current = obj.Next
+		}
+	}
+
+	// Sweep player's inventory
+	if checkInventory {
+		current := g.DB.Objects[d.Player].Contents
+		for current != gamedb.Nothing {
+			obj, ok := g.DB.Objects[current]
+			if !ok {
+				break
+			}
+			sweep(current, "in your inventory")
+			current = obj.Next
+		}
+	}
+
+	if found == 0 {
+		g.Notify(d.Player, "No listeners or commands found.")
+	} else {
+		g.Notify(d.Player, fmt.Sprintf("%d object(s) found.", found))
+	}
 }
