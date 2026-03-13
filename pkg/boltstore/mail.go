@@ -121,3 +121,45 @@ func (s *Store) ImportMail(all map[gamedb.DBRef]map[int]*gamedb.MailMessage) err
 	log.Printf("boltstore: imported %d mail messages", total)
 	return nil
 }
+
+// --- Mail Alias Persistence ---
+
+// maliasKey returns "ownerRef:lowerName" key for mail alias storage.
+func maliasKey(owner gamedb.DBRef, name string) []byte {
+	return []byte(fmt.Sprintf("%d:%s", owner, strings.ToLower(name)))
+}
+
+// PutMailAlias persists a mail alias to bbolt.
+func (s *Store) PutMailAlias(a *gamedb.MailAlias) error {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(a); err != nil {
+		return fmt.Errorf("boltstore: encode mail alias: %w", err)
+	}
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketMailAlias).Put(maliasKey(a.Owner, a.Name), buf.Bytes())
+	})
+}
+
+// DeleteMailAlias removes a mail alias from bbolt.
+func (s *Store) DeleteMailAlias(owner gamedb.DBRef, name string) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketMailAlias).Delete(maliasKey(owner, name))
+	})
+}
+
+// LoadMailAliases reads all mail aliases from bbolt.
+func (s *Store) LoadMailAliases() ([]*gamedb.MailAlias, error) {
+	var aliases []*gamedb.MailAlias
+	err := s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketMailAlias)
+		return b.ForEach(func(k, v []byte) error {
+			var a gamedb.MailAlias
+			if err := gob.NewDecoder(bytes.NewReader(v)).Decode(&a); err != nil {
+				return fmt.Errorf("decode mail alias %q: %w", string(k), err)
+			}
+			aliases = append(aliases, &a)
+			return nil
+		})
+	})
+	return aliases, err
+}

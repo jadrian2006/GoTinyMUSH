@@ -25,6 +25,7 @@ type Mail struct {
 	Messages map[gamedb.DBRef]map[int]*gamedb.MailMessage // recipient -> msgID -> message
 	NextID   map[gamedb.DBRef]int                         // next ID per player
 	Drafts   map[gamedb.DBRef]*MailDraft                  // in-memory only
+	Aliases  map[string]*gamedb.MailAlias                  // "ownerRef:lowerName" -> alias
 	Expire   int                                          // days before auto-expire, 0 = never
 }
 
@@ -34,6 +35,7 @@ func NewMail(expireDays int) *Mail {
 		Messages: make(map[gamedb.DBRef]map[int]*gamedb.MailMessage),
 		NextID:   make(map[gamedb.DBRef]int),
 		Drafts:   make(map[gamedb.DBRef]*MailDraft),
+		Aliases:  make(map[string]*gamedb.MailAlias),
 		Expire:   expireDays,
 	}
 }
@@ -513,4 +515,200 @@ func FormatRecipients(db *gamedb.Database, refs []gamedb.DBRef) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+// --- Mail Alias Methods ---
+
+// aliasKey returns the composite key for an alias: "ownerRef:lowerName".
+func aliasKey(owner gamedb.DBRef, name string) string {
+	return fmt.Sprintf("%d:%s", owner, strings.ToLower(name))
+}
+
+// LoadAliases populates the alias store from persisted data.
+func (m *Mail) LoadAliases(aliases []*gamedb.MailAlias) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range aliases {
+		m.Aliases[aliasKey(a.Owner, a.Name)] = a
+	}
+}
+
+// GetAlias returns an alias visible to player: own alias first, then God-owned.
+// name should NOT include the * prefix.
+func (m *Mail) GetAlias(player gamedb.DBRef, name string) *gamedb.MailAlias {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	lower := strings.ToLower(name)
+	// Check player-owned first
+	if a, ok := m.Aliases[aliasKey(player, lower)]; ok {
+		return a
+	}
+	// Check God-owned (dbref 1)
+	if a, ok := m.Aliases[aliasKey(1, lower)]; ok {
+		return a
+	}
+	return nil
+}
+
+// GetAliasExact returns an alias by exact owner, for admin operations.
+func (m *Mail) GetAliasExact(owner gamedb.DBRef, name string) *gamedb.MailAlias {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.Aliases[aliasKey(owner, name)]
+}
+
+// CreateAlias creates a new mail alias. Returns nil if it already exists.
+func (m *Mail) CreateAlias(owner gamedb.DBRef, name string, members []gamedb.DBRef) *gamedb.MailAlias {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := aliasKey(owner, name)
+	if _, exists := m.Aliases[key]; exists {
+		return nil
+	}
+	a := &gamedb.MailAlias{
+		Owner:   owner,
+		Name:    name,
+		Members: members,
+	}
+	m.Aliases[key] = a
+	return a
+}
+
+// DeleteAlias removes an alias. Returns true if found.
+func (m *Mail) DeleteAlias(owner gamedb.DBRef, name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := aliasKey(owner, name)
+	if _, ok := m.Aliases[key]; !ok {
+		return false
+	}
+	delete(m.Aliases, key)
+	return true
+}
+
+// RenameAlias changes an alias name. Returns false if old doesn't exist or new already exists.
+func (m *Mail) RenameAlias(owner gamedb.DBRef, oldName, newName string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	oldKey := aliasKey(owner, oldName)
+	newKey := aliasKey(owner, newName)
+	a, ok := m.Aliases[oldKey]
+	if !ok {
+		return false
+	}
+	if _, exists := m.Aliases[newKey]; exists {
+		return false
+	}
+	delete(m.Aliases, oldKey)
+	a.Name = newName
+	m.Aliases[newKey] = a
+	return true
+}
+
+// ChownAlias changes the owner of an alias. Returns false on conflict.
+func (m *Mail) ChownAlias(oldOwner gamedb.DBRef, name string, newOwner gamedb.DBRef) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	oldKey := aliasKey(oldOwner, name)
+	newKey := aliasKey(newOwner, name)
+	a, ok := m.Aliases[oldKey]
+	if !ok {
+		return false
+	}
+	if _, exists := m.Aliases[newKey]; exists {
+		return false
+	}
+	delete(m.Aliases, oldKey)
+	a.Owner = newOwner
+	m.Aliases[newKey] = a
+	return true
+}
+
+// SetAliasDesc sets the description of an alias.
+func (m *Mail) SetAliasDesc(owner gamedb.DBRef, name, desc string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.Aliases[aliasKey(owner, name)]
+	if !ok {
+		return false
+	}
+	a.Desc = desc
+	return true
+}
+
+// AddAliasMember adds a player to an alias. Returns false if full or duplicate.
+func (m *Mail) AddAliasMember(owner gamedb.DBRef, name string, player gamedb.DBRef) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.Aliases[aliasKey(owner, name)]
+	if !ok {
+		return false
+	}
+	if len(a.Members) >= gamedb.MaxAliasMembers {
+		return false
+	}
+	for _, p := range a.Members {
+		if p == player {
+			return false
+		}
+	}
+	a.Members = append(a.Members, player)
+	return true
+}
+
+// RemoveAliasMember removes a player from an alias. Returns false if not found.
+func (m *Mail) RemoveAliasMember(owner gamedb.DBRef, name string, player gamedb.DBRef) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.Aliases[aliasKey(owner, name)]
+	if !ok {
+		return false
+	}
+	for i, p := range a.Members {
+		if p == player {
+			a.Members = append(a.Members[:i], a.Members[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// ListAliases returns all aliases visible to a player (own + God-owned).
+func (m *Mail) ListAliases(player gamedb.DBRef) []*gamedb.MailAlias {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*gamedb.MailAlias
+	for _, a := range m.Aliases {
+		if a.Owner == player || a.Owner == 1 {
+			result = append(result, a)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+	return result
+}
+
+// AllAliases returns every alias in the system (admin use).
+func (m *Mail) AllAliases() []*gamedb.MailAlias {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]*gamedb.MailAlias, 0, len(m.Aliases))
+	for _, a := range m.Aliases {
+		result = append(result, a)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Owner != result[j].Owner {
+			return result[i].Owner < result[j].Owner
+		}
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+	return result
+}
+
+// CountAliases returns the total number of aliases.
+func (m *Mail) CountAliases() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.Aliases)
 }

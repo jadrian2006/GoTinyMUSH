@@ -953,9 +953,390 @@ func mailDebug(g *Game, d *Descriptor, args string) {
 	}
 }
 
+// --- @malias Command ---
+
+// cmdMalias handles the @malias command with switch routing.
+func cmdMalias(g *Game, d *Descriptor, args string, switches []string) {
+	if g.Mail == nil {
+		g.Notify(d.Player, "Mail system is not enabled.")
+		return
+	}
+
+	if len(switches) > 0 {
+		sw := strings.ToLower(switches[0])
+		switch sw {
+		case "desc":
+			maliasDesc(g, d, args)
+		case "chown":
+			maliasChown(g, d, args)
+		case "add":
+			maliasAdd(g, d, args)
+		case "remove":
+			maliasRemove(g, d, args)
+		case "delete":
+			maliasDelete(g, d, args)
+		case "rename":
+			maliasRename(g, d, args)
+		case "list":
+			maliasList(g, d, args)
+		case "status":
+			maliasStatus(g, d)
+		default:
+			g.Notify(d.Player, fmt.Sprintf("Unknown @malias switch: /%s", sw))
+		}
+		return
+	}
+
+	// Bare @malias: create or list
+	if args == "" {
+		// List own aliases
+		maliasList(g, d, "")
+		return
+	}
+
+	// @malias *name=player list  → create
+	// @malias *name              → show alias details
+	if idx := strings.Index(args, "="); idx >= 0 {
+		name := strings.TrimSpace(args[:idx])
+		members := strings.TrimSpace(args[idx+1:])
+		maliasCreate(g, d, name, members)
+	} else {
+		maliasShow(g, d, strings.TrimSpace(args))
+	}
+}
+
+// maliasCreate creates a new mail alias: @malias *name=player list
+func maliasCreate(g *Game, d *Descriptor, name, memberStr string) {
+	if !strings.HasPrefix(name, "*") {
+		g.Notify(d.Player, "MAIL: Alias name must start with *.")
+		return
+	}
+	name = name[1:]
+	if len(name) == 0 || len(name) > 31 {
+		g.Notify(d.Player, "MAIL: Alias name must be 1-31 characters.")
+		return
+	}
+
+	// Check if alias already exists for this player
+	if g.Mail.GetAliasExact(d.Player, name) != nil {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: Alias *%s already exists.", name))
+		return
+	}
+
+	// Parse member list
+	recipients := parseMailRecipients(g, d, memberStr)
+	if recipients == nil {
+		return
+	}
+	if len(recipients) > gamedb.MaxAliasMembers {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: Alias cannot have more than %d members.", gamedb.MaxAliasMembers))
+		return
+	}
+
+	a := g.Mail.CreateAlias(d.Player, name, recipients)
+	if a == nil {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: Failed to create alias *%s.", name))
+		return
+	}
+
+	// Persist
+	if g.Store != nil {
+		g.Store.PutMailAlias(a)
+	}
+
+	g.Notify(d.Player, fmt.Sprintf("MAIL: Alias *%s created with %d member(s).", name, len(recipients)))
+}
+
+// maliasShow displays details of a specific alias.
+func maliasShow(g *Game, d *Descriptor, name string) {
+	if strings.HasPrefix(name, "*") {
+		name = name[1:]
+	}
+	a := g.Mail.GetAlias(d.Player, name)
+	if a == nil {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: No such alias *%s.", name))
+		return
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: Alias *%s (owner: %s)", a.Name, playerName(g.DB, a.Owner)))
+	if a.Desc != "" {
+		g.Notify(d.Player, fmt.Sprintf("  Description: %s", a.Desc))
+	}
+	g.Notify(d.Player, fmt.Sprintf("  Members (%d): %s", len(a.Members), FormatRecipients(g.DB, a.Members)))
+}
+
+// maliasDesc sets the description of an alias: @malias/desc *name=text
+func maliasDesc(g *Game, d *Descriptor, args string) {
+	idx := strings.Index(args, "=")
+	if idx < 0 {
+		g.Notify(d.Player, "Usage: @malias/desc *name=description")
+		return
+	}
+	name := strings.TrimSpace(args[:idx])
+	desc := strings.TrimSpace(args[idx+1:])
+	if strings.HasPrefix(name, "*") {
+		name = name[1:]
+	}
+
+	a := maliasRequireOwner(g, d, name)
+	if a == nil {
+		return
+	}
+
+	g.Mail.SetAliasDesc(a.Owner, a.Name, desc)
+	if g.Store != nil {
+		g.Store.PutMailAlias(a)
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: Description set for *%s.", a.Name))
+}
+
+// maliasChown changes alias owner: @malias/chown *name=player (wizard only)
+func maliasChown(g *Game, d *Descriptor, args string) {
+	if !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	idx := strings.Index(args, "=")
+	if idx < 0 {
+		g.Notify(d.Player, "Usage: @malias/chown *name=player")
+		return
+	}
+	name := strings.TrimSpace(args[:idx])
+	targetStr := strings.TrimSpace(args[idx+1:])
+	if strings.HasPrefix(name, "*") {
+		name = name[1:]
+	}
+
+	// Find the alias — wizard can access any alias, search all owners
+	a := maliasWizardLookup(g, d, name)
+	if a == nil {
+		return
+	}
+
+	newOwner := LookupPlayer(g.DB, targetStr)
+	if newOwner == gamedb.Nothing {
+		g.Notify(d.Player, fmt.Sprintf("No such player: %s", targetStr))
+		return
+	}
+
+	oldOwner := a.Owner
+	if g.Store != nil {
+		g.Store.DeleteMailAlias(oldOwner, a.Name)
+	}
+	if !g.Mail.ChownAlias(oldOwner, a.Name, newOwner) {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: Failed to chown *%s (name conflict?).", name))
+		return
+	}
+	if g.Store != nil {
+		g.Store.PutMailAlias(a)
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: *%s chowned to %s.", name, playerName(g.DB, newOwner)))
+}
+
+// maliasAdd adds a player to an alias: @malias/add *name=player
+func maliasAdd(g *Game, d *Descriptor, args string) {
+	idx := strings.Index(args, "=")
+	if idx < 0 {
+		g.Notify(d.Player, "Usage: @malias/add *name=player")
+		return
+	}
+	name := strings.TrimSpace(args[:idx])
+	playerStr := strings.TrimSpace(args[idx+1:])
+	if strings.HasPrefix(name, "*") {
+		name = name[1:]
+	}
+
+	a := maliasRequireOwner(g, d, name)
+	if a == nil {
+		return
+	}
+
+	target := LookupPlayer(g.DB, playerStr)
+	if target == gamedb.Nothing {
+		g.Notify(d.Player, fmt.Sprintf("No such player: %s", playerStr))
+		return
+	}
+
+	if !g.Mail.AddAliasMember(a.Owner, a.Name, target) {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: Cannot add %s to *%s (full or already a member).", playerStr, a.Name))
+		return
+	}
+	if g.Store != nil {
+		g.Store.PutMailAlias(a)
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: %s added to *%s.", playerName(g.DB, target), a.Name))
+}
+
+// maliasRemove removes a player from an alias: @malias/remove *name=player
+func maliasRemove(g *Game, d *Descriptor, args string) {
+	idx := strings.Index(args, "=")
+	if idx < 0 {
+		g.Notify(d.Player, "Usage: @malias/remove *name=player")
+		return
+	}
+	name := strings.TrimSpace(args[:idx])
+	playerStr := strings.TrimSpace(args[idx+1:])
+	if strings.HasPrefix(name, "*") {
+		name = name[1:]
+	}
+
+	a := maliasRequireOwner(g, d, name)
+	if a == nil {
+		return
+	}
+
+	target := LookupPlayer(g.DB, playerStr)
+	if target == gamedb.Nothing {
+		g.Notify(d.Player, fmt.Sprintf("No such player: %s", playerStr))
+		return
+	}
+
+	if !g.Mail.RemoveAliasMember(a.Owner, a.Name, target) {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: %s is not a member of *%s.", playerStr, a.Name))
+		return
+	}
+	if g.Store != nil {
+		g.Store.PutMailAlias(a)
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: %s removed from *%s.", playerName(g.DB, target), a.Name))
+}
+
+// maliasDelete deletes an alias: @malias/delete *name
+func maliasDelete(g *Game, d *Descriptor, args string) {
+	name := strings.TrimSpace(args)
+	if strings.HasPrefix(name, "*") {
+		name = name[1:]
+	}
+	if name == "" {
+		g.Notify(d.Player, "Usage: @malias/delete *name")
+		return
+	}
+
+	a := maliasRequireOwner(g, d, name)
+	if a == nil {
+		return
+	}
+
+	owner := a.Owner
+	if !g.Mail.DeleteAlias(owner, a.Name) {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: Failed to delete *%s.", name))
+		return
+	}
+	if g.Store != nil {
+		g.Store.DeleteMailAlias(owner, name)
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: Alias *%s deleted.", name))
+}
+
+// maliasRename renames an alias: @malias/rename *old=*new
+func maliasRename(g *Game, d *Descriptor, args string) {
+	idx := strings.Index(args, "=")
+	if idx < 0 {
+		g.Notify(d.Player, "Usage: @malias/rename *oldname=*newname")
+		return
+	}
+	oldName := strings.TrimSpace(args[:idx])
+	newName := strings.TrimSpace(args[idx+1:])
+	if strings.HasPrefix(oldName, "*") {
+		oldName = oldName[1:]
+	}
+	if strings.HasPrefix(newName, "*") {
+		newName = newName[1:]
+	}
+	if newName == "" || len(newName) > 31 {
+		g.Notify(d.Player, "MAIL: New alias name must be 1-31 characters.")
+		return
+	}
+
+	a := maliasRequireOwner(g, d, oldName)
+	if a == nil {
+		return
+	}
+
+	owner := a.Owner
+	if g.Store != nil {
+		g.Store.DeleteMailAlias(owner, oldName)
+	}
+	if !g.Mail.RenameAlias(owner, oldName, newName) {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: Cannot rename *%s to *%s (name conflict?).", oldName, newName))
+		return
+	}
+	if g.Store != nil {
+		g.Store.PutMailAlias(a)
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: *%s renamed to *%s.", oldName, newName))
+}
+
+// maliasList lists aliases: bare = own + God-owned, wizard sees all
+func maliasList(g *Game, d *Descriptor, args string) {
+	if Wizard(g, d.Player) && (args == "" || strings.EqualFold(args, "all")) {
+		// Wizard: show all aliases
+		all := g.Mail.AllAliases()
+		if len(all) == 0 {
+			g.Notify(d.Player, "MAIL: No mail aliases defined.")
+			return
+		}
+		g.Notify(d.Player, fmt.Sprintf("MAIL: %d alias(es) defined:", len(all)))
+		for i, a := range all {
+			g.Notify(d.Player, fmt.Sprintf("  %d) *%s (owner: %s, %d members)", i, a.Name, playerName(g.DB, a.Owner), len(a.Members)))
+		}
+	} else {
+		// Player: show own + God-owned
+		aliases := g.Mail.ListAliases(d.Player)
+		if len(aliases) == 0 {
+			g.Notify(d.Player, "MAIL: You have no mail aliases.")
+			return
+		}
+		g.Notify(d.Player, fmt.Sprintf("MAIL: %d alias(es):", len(aliases)))
+		for _, a := range aliases {
+			owner := ""
+			if a.Owner != d.Player {
+				owner = fmt.Sprintf(" (owner: %s)", playerName(g.DB, a.Owner))
+			}
+			g.Notify(d.Player, fmt.Sprintf("  *%s%s — %d member(s)", a.Name, owner, len(a.Members)))
+		}
+	}
+}
+
+// maliasStatus shows alias system stats (wizard only).
+func maliasStatus(g *Game, d *Descriptor) {
+	if !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	count := g.Mail.CountAliases()
+	g.Notify(d.Player, fmt.Sprintf("MAIL: %d mail alias(es) defined.", count))
+}
+
+// maliasRequireOwner looks up an alias and checks ownership.
+// Wizards can access any alias. Returns nil and notifies on failure.
+func maliasRequireOwner(g *Game, d *Descriptor, name string) *gamedb.MailAlias {
+	if Wizard(g, d.Player) {
+		return maliasWizardLookup(g, d, name)
+	}
+	a := g.Mail.GetAliasExact(d.Player, name)
+	if a == nil {
+		g.Notify(d.Player, fmt.Sprintf("MAIL: No such alias *%s, or you don't own it.", name))
+		return nil
+	}
+	return a
+}
+
+// maliasWizardLookup searches all aliases for one with the given name (wizard use).
+func maliasWizardLookup(g *Game, d *Descriptor, name string) *gamedb.MailAlias {
+	lower := strings.ToLower(name)
+	all := g.Mail.AllAliases()
+	for _, a := range all {
+		if strings.ToLower(a.Name) == lower {
+			return a
+		}
+	}
+	g.Notify(d.Player, fmt.Sprintf("MAIL: No such alias *%s.", name))
+	return nil
+}
+
 // --- Helpers ---
 
-// parseMailRecipients parses a comma/space separated list of player names.
+// parseMailRecipients parses a comma/space separated list of player names or *aliases.
 func parseMailRecipients(g *Game, d *Descriptor, input string) []gamedb.DBRef {
 	input = strings.ReplaceAll(input, ",", " ")
 	parts := strings.Fields(input)
@@ -963,6 +1344,21 @@ func parseMailRecipients(g *Game, d *Descriptor, input string) []gamedb.DBRef {
 	for _, name := range parts {
 		name = strings.TrimSpace(name)
 		if name == "" {
+			continue
+		}
+		// Mail alias expansion: *aliasname
+		if strings.HasPrefix(name, "*") {
+			aliasName := name[1:]
+			alias := g.Mail.GetAlias(d.Player, aliasName)
+			if alias == nil {
+				g.Notify(d.Player, fmt.Sprintf("MAIL: No such mail alias *%s.", aliasName))
+				return nil
+			}
+			for _, member := range alias.Members {
+				if obj, ok := g.DB.Objects[member]; ok && obj.ObjType() == gamedb.TypePlayer && !obj.IsGoing() {
+					result = append(result, member)
+				}
+			}
 			continue
 		}
 		ref := LookupPlayer(g.DB, name)

@@ -550,6 +550,17 @@ func loadMail(game *server.Game, store *boltstore.Store, expireDays int) {
 		}
 	}
 
+	// Load mail aliases
+	if store != nil {
+		aliases, err := store.LoadMailAliases()
+		if err != nil {
+			log.Printf("WARNING: failed to load mail aliases from bolt: %v", err)
+		} else if len(aliases) > 0 {
+			m.LoadAliases(aliases)
+			log.Printf("Loaded %d mail aliases from bolt", len(aliases))
+		}
+	}
+
 	game.Mail = m
 	log.Printf("Mail system enabled (expiration: %d days)", expireDays)
 }

@@ -17,6 +17,7 @@ var (
 	bucketStructDefs  = []byte("structdefs")
 	bucketStructInsts = []byte("structinsts")
 	bucketMail        = []byte("mail")
+	bucketMailAlias   = []byte("malias")
 	bucketArrays      = []byte("arrays")
 	bucketAPIKeys     = []byte("apikeys")
 	bucketConnLog     = []byte("connlog")
