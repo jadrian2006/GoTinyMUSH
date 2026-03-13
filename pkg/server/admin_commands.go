@@ -1150,13 +1150,8 @@ func (g *Game) lockAttrInstance(d *Descriptor, args string, lock bool) {
 	attrNum := -1
 	if def, ok := g.DB.AttrByName[attrName]; ok {
 		attrNum = def.Number
-	} else {
-		for num, name := range gamedb.WellKnownAttrs {
-			if strings.EqualFold(name, attrName) {
-				attrNum = num
-				break
-			}
-		}
+	} else if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+		attrNum = num
 	}
 	if attrNum < 0 {
 		g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
@@ -2428,13 +2423,8 @@ func (g *Game) setAttrFlag(d *Descriptor, target gamedb.DBRef, attrName string, 
 	attrNum := -1
 	if def, ok := g.DB.AttrByName[attrName]; ok {
 		attrNum = def.Number
-	} else {
-		for num, name := range gamedb.WellKnownAttrs {
-			if strings.EqualFold(name, attrName) {
-				attrNum = num
-				break
-			}
-		}
+	} else if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+		attrNum = num
 	}
 	if attrNum < 0 {
 		g.Notify(d.Player, fmt.Sprintf("No such attribute: %s", attrName))
@@ -2507,11 +2497,8 @@ func (g *Game) setAttrFlag(d *Descriptor, target gamedb.DBRef, attrName string, 
 func (g *Game) SetAttrByNameChecked(player, obj gamedb.DBRef, attrName string, value string) (bool, string) {
 	// Look up attr number
 	attrNum := -1
-	for num, name := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(name, attrName) {
-			attrNum = num
-			break
-		}
+	if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+		attrNum = num
 	}
 	if attrNum < 0 {
 		if def, ok := g.DB.AttrByName[attrName]; ok {
@@ -4586,11 +4573,9 @@ func cmdAttribute(g *Game, d *Descriptor, args string, switches []string) {
 		def, ok := g.DB.AttrByName[attrName]
 		if !ok {
 			// Also check well-known attrs (can't modify their flags)
-			for _, wkName := range gamedb.WellKnownAttrs {
-				if strings.EqualFold(wkName, attrName) {
-					g.Notify(d.Player, "Cannot modify access on built-in attributes.")
-					return
-				}
+			if _, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+				g.Notify(d.Player, "Cannot modify access on built-in attributes.")
+				return
 			}
 			g.Notify(d.Player, "No such user-named attribute.")
 			return
@@ -5119,7 +5104,7 @@ func cmdList(g *Game, d *Descriptor, args string, _ []string) {
 
 func cmdListFunctions(g *Game, d *Descriptor) {
 	// Build a temp eval context to get the full function table
-	ctx := MakeEvalContextWithGame(g, d.Player, nil)
+	ctx := MakeEvalContextWithGame(g, d.Player, functions.RegisterAll)
 	names := make([]string, 0, len(ctx.Functions))
 	for name := range ctx.Functions {
 		names = append(names, name)
@@ -5196,23 +5181,67 @@ func cmdListCommands(g *Game, d *Descriptor) {
 }
 
 func cmdListFlags(g *Game, d *Descriptor) {
-	names := make([]string, 0, len(FlagTable))
-	for name := range FlagTable {
-		names = append(names, name)
+	type flagEntry struct {
+		name   string
+		letter string
+		word   int
+		bit    int
+		perm   int
 	}
-	sort.Strings(names)
 
-	g.Notify(d.Player, fmt.Sprintf("Flags (%d):", len(names)))
-	for _, name := range names {
-		fd := FlagTable[name]
-		perm := ""
-		switch fd.Perm {
-		case FlagPermGod:
-			perm = " (god)"
-		case FlagPermWiz:
-			perm = " (wizard)"
+	// Collect single-letter aliases
+	letterMap := make(map[string]string) // "word:bit" -> letter
+	for name, fd := range FlagTable {
+		if len(name) == 1 {
+			key := fmt.Sprintf("%d:%d", fd.Word, fd.Bit)
+			letterMap[key] = name
 		}
-		g.Notify(d.Player, fmt.Sprintf("  %-20s word=%d bit=0x%08x%s", name, fd.Word, fd.Bit, perm))
+	}
+
+	// For each unique bit, pick the entry whose fd.Name matches the map key
+	// (i.e. the canonical C-compatible name). If no exact match, pick longest.
+	best := make(map[string]*flagEntry) // "word:bit" -> best entry
+	for name, fd := range FlagTable {
+		if len(name) <= 1 {
+			continue
+		}
+		key := fmt.Sprintf("%d:%d", fd.Word, fd.Bit)
+		isCanonical := (name == fd.Name) // map key matches display name = canonical
+		existing, exists := best[key]
+		if !exists {
+			best[key] = &flagEntry{
+				name:   fd.Name,
+				letter: letterMap[key],
+				word:   fd.Word,
+				bit:    fd.Bit,
+				perm:   fd.Perm,
+			}
+		} else if isCanonical && existing.name != name {
+			// Prefer the entry where map key == fd.Name (canonical)
+			best[key].name = fd.Name
+		}
+	}
+
+	entries := make([]flagEntry, 0, len(best))
+	for _, e := range best {
+		entries = append(entries, *e)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+
+	g.Notify(d.Player, fmt.Sprintf("Flags (%d):", len(entries)))
+	for _, e := range entries {
+		letter := ""
+		if e.letter != "" {
+			letter = fmt.Sprintf("(%s)", e.letter)
+		}
+		perm := ""
+		switch e.perm {
+		case FlagPermGod:
+			perm = " god"
+		case FlagPermWiz:
+			perm = " wizard"
+		}
+		g.Notify(d.Player, fmt.Sprintf("  %-20s %-4s word=%d bit=0x%08x%s", e.name, letter, e.word, e.bit, perm))
 	}
 }
 
@@ -5235,6 +5264,12 @@ func cmdListPowers(g *Game, d *Descriptor) {
 }
 
 func cmdListAttributes(g *Game, d *Descriptor) {
+	// Build alias lookup: num -> []alias names
+	aliasesByNum := make(map[int][]string)
+	for alias, num := range gamedb.WellKnownAttrAliases {
+		aliasesByNum[num] = append(aliasesByNum[num], alias)
+	}
+
 	// Well-known attributes
 	nums := make([]int, 0, len(gamedb.WellKnownAttrs))
 	for num := range gamedb.WellKnownAttrs {
@@ -5242,9 +5277,21 @@ func cmdListAttributes(g *Game, d *Descriptor) {
 	}
 	sort.Ints(nums)
 
-	g.Notify(d.Player, fmt.Sprintf("Well-known attributes (%d):", len(nums)))
+	total := len(nums)
+	for _, aliases := range aliasesByNum {
+		total += len(aliases)
+	}
+
+	g.Notify(d.Player, fmt.Sprintf("Well-known attributes (%d):", total))
 	for _, num := range nums {
 		g.Notify(d.Player, fmt.Sprintf("  %-25s #%d", gamedb.WellKnownAttrs[num], num))
+		// Show aliases for this attr
+		if aliases, ok := aliasesByNum[num]; ok {
+			sort.Strings(aliases)
+			for _, alias := range aliases {
+				g.Notify(d.Player, fmt.Sprintf("  %-25s #%d (alias)", alias, num))
+			}
+		}
 	}
 }
 

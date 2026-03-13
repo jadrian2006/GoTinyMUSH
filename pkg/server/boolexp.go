@@ -242,10 +242,8 @@ func (p *boolParser) resolveAttrNum(name string) int {
 		return n
 	}
 	upper := strings.ToUpper(name)
-	for num, n := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(n, upper) {
-			return num
-		}
+	if num, _, ok := gamedb.ResolveWellKnownAttr(upper); ok {
+		return num
 	}
 	if def, ok := p.g.DB.AttrByName[upper]; ok {
 		return def.Number

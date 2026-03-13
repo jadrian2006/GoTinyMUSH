@@ -30,7 +30,7 @@ var FlagTable = map[string]*FlagDef{
 	"WIZARD":       {Name: "WIZARD", Word: 0, Bit: gamedb.FlagWizard, Perm: FlagPermGod},
 	"DARK":         {Name: "DARK", Word: 0, Bit: gamedb.FlagDark},           // fh_dark_bit: non-wiz can only set on exits
 	"HAVEN":        {Name: "HAVEN", Word: 0, Bit: gamedb.FlagHaven},
-	"HALT":         {Name: "HALT", Word: 0, Bit: gamedb.FlagHalt},
+	"HALT":         {Name: "HALTED", Word: 0, Bit: gamedb.FlagHalt},
 	"SAFE":         {Name: "SAFE", Word: 0, Bit: gamedb.FlagSafe},
 	"INHERIT":      {Name: "INHERIT", Word: 0, Bit: gamedb.FlagInherit},     // fh_inherit: setter must Inherits()
 	"NOSPOOF":      {Name: "NOSPOOF", Word: 0, Bit: gamedb.FlagNoSpoof},
@@ -52,15 +52,15 @@ var FlagTable = map[string]*FlagDef{
 	"MYOPIC":       {Name: "MYOPIC", Word: 0, Bit: gamedb.FlagMyopic},
 	"CHOWN_OK":     {Name: "CHOWN_OK", Word: 0, Bit: gamedb.FlagChownOK},
 	"DESTROY_OK":   {Name: "DESTROY_OK", Word: 0, Bit: gamedb.FlagDestroyOK},
-	"SEE_THROUGH":  {Name: "SEE_THROUGH", Word: 0, Bit: gamedb.FlagSeeThru},
-	"HEAR_THROUGH": {Name: "HEAR_THROUGH", Word: 0, Bit: gamedb.FlagHearThru},
-	"AUDIBLE":      {Name: "HEAR_THROUGH", Word: 0, Bit: gamedb.FlagHearThru}, // alias
+	"SEE_THROUGH":  {Name: "TRANSPARENT", Word: 0, Bit: gamedb.FlagSeeThru},  // Go alias
+	"HEAR_THROUGH": {Name: "AUDIBLE", Word: 0, Bit: gamedb.FlagHearThru},     // Go alias
+	"AUDIBLE":      {Name: "AUDIBLE", Word: 0, Bit: gamedb.FlagHearThru},
 	"IMMORTAL":     {Name: "IMMORTAL", Word: 0, Bit: gamedb.FlagImmortal, Perm: FlagPermWiz},
 	"HAS_STARTUP":  {Name: "HAS_STARTUP", Word: 0, Bit: gamedb.FlagHasStartup},
 
 	// Flag word 1
 	"ABODE":        {Name: "ABODE", Word: 1, Bit: gamedb.Flag2Abode},
-	"FLOATING":     {Name: "FLOATING", Word: 1, Bit: gamedb.Flag2Floating},
+	"FLOATING":     {Name: "FREE", Word: 1, Bit: gamedb.Flag2Floating},       // Go alias
 	"UNFINDABLE":   {Name: "UNFINDABLE", Word: 1, Bit: gamedb.Flag2Unfindable},
 	"PARENT_OK":    {Name: "PARENT_OK", Word: 1, Bit: gamedb.Flag2ParentOK},
 	"LIGHT":        {Name: "LIGHT", Word: 1, Bit: gamedb.Flag2Light},
@@ -71,13 +71,13 @@ var FlagTable = map[string]*FlagDef{
 	"HEAD":         {Name: "HEAD", Word: 1, Bit: gamedb.Flag2HeadFlag},
 	"FIXED":        {Name: "FIXED", Word: 1, Bit: gamedb.Flag2Fixed},
 	"UNINSPECTED":  {Name: "UNINSPECTED", Word: 1, Bit: gamedb.Flag2Uninspected, Perm: FlagPermWizRoy},
-	"ZONE_PARENT":  {Name: "ZONE_PARENT", Word: 1, Bit: gamedb.Flag2ZoneParent},
+	"ZONE_PARENT":  {Name: "ZONE", Word: 1, Bit: gamedb.Flag2ZoneParent},      // Go alias
 	"NOBLEED":      {Name: "NOBLEED", Word: 1, Bit: gamedb.Flag2NoBLeed},
 	"NO_BLEED":     {Name: "NOBLEED", Word: 1, Bit: gamedb.Flag2NoBLeed},
 	"STAFF":        {Name: "STAFF", Word: 1, Bit: gamedb.Flag2Staff, Perm: FlagPermWiz},
 	"HAS_DAILY":    {Name: "HAS_DAILY", Word: 1, Bit: gamedb.Flag2HasDaily},
 	"GAGGED":       {Name: "GAGGED", Word: 1, Bit: gamedb.Flag2Gagged, Perm: FlagPermWiz},
-	"HAS_COMMANDS": {Name: "HAS_COMMANDS", Word: 1, Bit: gamedb.Flag2HasCommands},
+	"HAS_COMMANDS": {Name: "COMMANDS", Word: 1, Bit: gamedb.Flag2HasCommands}, // Go alias
 	"STOP":         {Name: "STOP", Word: 1, Bit: gamedb.Flag2StopMatch},
 	"BOUNCE":       {Name: "BOUNCE", Word: 1, Bit: gamedb.Flag2Bounce},
 	"CONTROL_OK":   {Name: "CONTROL_OK", Word: 1, Bit: gamedb.Flag2ControlOK},
@@ -89,8 +89,29 @@ var FlagTable = map[string]*FlagDef{
 	"CONNECTED":    {Name: "CONNECTED", Word: 1, Bit: gamedb.Flag2Connected, Perm: FlagPermGod},
 	"SLAVE":        {Name: "SLAVE", Word: 1, Bit: gamedb.Flag2Slave, Perm: FlagPermWiz},
 
+	// C-compatible canonical entries (word 0)
+	"HALTED":       {Name: "HALTED", Word: 0, Bit: gamedb.FlagHalt},
+	"TRANSPARENT":  {Name: "TRANSPARENT", Word: 0, Bit: gamedb.FlagSeeThru},
+
+	// C-compatible canonical entries (word 1)
+	"KEY":          {Name: "KEY", Word: 1, Bit: gamedb.Flag2Key},
+	"FREE":         {Name: "FREE", Word: 1, Bit: gamedb.Flag2Floating},
+	"ZONE":         {Name: "ZONE", Word: 1, Bit: gamedb.Flag2ZoneParent},
+	"COMMANDS":     {Name: "COMMANDS", Word: 1, Bit: gamedb.Flag2HasCommands},
+	"CONSTANT":     {Name: "CONSTANT", Word: 1, Bit: gamedb.Flag2ConstAttrs, Perm: FlagPermGod}, // internal
+	"HAS_FORWARDLIST": {Name: "HAS_FORWARDLIST", Word: 1, Bit: gamedb.Flag2HasFwd, Perm: FlagPermGod}, // internal
+	"PLAYER_MAILS": {Name: "PLAYER_MAILS", Word: 1, Bit: gamedb.Flag2PlayerMails, Perm: FlagPermGod}, // internal
+
 	// Flag word 2
 	"INSTANCE":     {Name: "INSTANCE", Word: 2, Bit: gamedb.Flag3Instance},
+	"REDIR_OK":     {Name: "REDIR_OK", Word: 2, Bit: gamedb.Flag3RedirOK},
+	"HAS_REDIRECT": {Name: "HAS_REDIRECT", Word: 2, Bit: gamedb.Flag3HasRedirect, Perm: FlagPermGod}, // internal
+	"ORPHAN":       {Name: "ORPHAN", Word: 2, Bit: gamedb.Flag3Orphan},
+	"HAS_DARKLOCK": {Name: "HAS_DARKLOCK", Word: 2, Bit: gamedb.Flag3HasDarkLock, Perm: FlagPermGod}, // internal
+	"PRESENCE":     {Name: "PRESENCE", Word: 2, Bit: gamedb.Flag3Presence},
+	"SPEECHMOD":    {Name: "SPEECHMOD", Word: 2, Bit: gamedb.Flag3HasSpeechMod, Perm: FlagPermGod}, // internal
+	"HAS_SPEECHMOD": {Name: "SPEECHMOD", Word: 2, Bit: gamedb.Flag3HasSpeechMod, Perm: FlagPermGod}, // alias
+	"NODEFAULT":     {Name: "NODEFAULT", Word: 2, Bit: gamedb.Flag3NoDefault},
 
 	// Single-letter aliases (matching C TinyMUSH flag letters)
 	"W": {Name: "WIZARD", Word: 0, Bit: gamedb.FlagWizard, Perm: FlagPermGod},
@@ -106,6 +127,87 @@ var FlagTable = map[string]*FlagDef{
 	"S": {Name: "STICKY", Word: 0, Bit: gamedb.FlagSticky},
 	"T": {Name: "TRACE", Word: 0, Bit: gamedb.FlagTrace},
 	"Z": {Name: "ROYALTY", Word: 0, Bit: gamedb.FlagRoyalty, Perm: FlagPermWiz},
+	// C single-letter aliases (word 0)
+	"A": {Name: "ABODE", Word: 1, Bit: gamedb.Flag2Abode},
+	"B": {Name: "BLIND", Word: 1, Bit: gamedb.Flag2Blind, Perm: FlagPermWiz},
+	"C": {Name: "CHOWN_OK", Word: 0, Bit: gamedb.FlagChownOK},
+	"E": {Name: "ENTER_OK", Word: 0, Bit: gamedb.FlagEnterOK},
+	"F": {Name: "FREE", Word: 1, Bit: gamedb.Flag2Floating},
+	"G": {Name: "GOING", Word: 0, Bit: gamedb.FlagGoing},
+	"H": {Name: "HAVEN", Word: 0, Bit: gamedb.FlagHaven},
+	"K": {Name: "KEY", Word: 1, Bit: gamedb.Flag2Key},
+	"U": {Name: "UNFINDABLE", Word: 1, Bit: gamedb.Flag2Unfindable},
+	"X": {Name: "ANSI", Word: 1, Bit: gamedb.Flag2Ansi},
+	"Y": {Name: "PARENT_OK", Word: 1, Bit: gamedb.Flag2ParentOK},
+	// C single-letter aliases (word 1)
+	"a": {Name: "AUDIBLE", Word: 0, Bit: gamedb.FlagHearThru},
+	"b": {Name: "BOUNCE", Word: 1, Bit: gamedb.Flag2Bounce},
+	"c": {Name: "CONNECTED", Word: 1, Bit: gamedb.Flag2Connected, Perm: FlagPermGod},
+	"d": {Name: "DESTROY_OK", Word: 0, Bit: gamedb.FlagDestroyOK},
+	"e": {Name: "ENTER_OK", Word: 0, Bit: gamedb.FlagEnterOK},
+	"f": {Name: "FIXED", Word: 1, Bit: gamedb.Flag2Fixed},
+	"g": {Name: "UNINSPECTED", Word: 1, Bit: gamedb.Flag2Uninspected, Perm: FlagPermWizRoy},
+	"h": {Name: "HALTED", Word: 0, Bit: gamedb.FlagHalt},
+	"i": {Name: "IMMORTAL", Word: 0, Bit: gamedb.FlagImmortal, Perm: FlagPermWiz},
+	"j": {Name: "GAGGED", Word: 1, Bit: gamedb.Flag2Gagged, Perm: FlagPermWiz},
+	"k": {Name: "CONSTANT", Word: 1, Bit: gamedb.Flag2ConstAttrs, Perm: FlagPermGod},
+	"l": {Name: "LIGHT", Word: 1, Bit: gamedb.Flag2Light},
+	"m": {Name: "MYOPIC", Word: 0, Bit: gamedb.FlagMyopic},
+	"n": {Name: "AUDITORIUM", Word: 1, Bit: gamedb.Flag2Auditorium},
+	"o": {Name: "ZONE", Word: 1, Bit: gamedb.Flag2ZoneParent},
+	"p": {Name: "PUPPET", Word: 0, Bit: gamedb.FlagPuppet},
+	"q": {Name: "TERSE", Word: 0, Bit: gamedb.FlagTerse},
+	"r": {Name: "ROBOT", Word: 0, Bit: gamedb.FlagRobot},
+	"s": {Name: "SAFE", Word: 0, Bit: gamedb.FlagSafe},
+	"t": {Name: "TRANSPARENT", Word: 0, Bit: gamedb.FlagSeeThru},
+	"u": {Name: "SUSPECT", Word: 1, Bit: gamedb.Flag2Suspect, Perm: FlagPermWiz},
+	"v": {Name: "VERBOSE", Word: 0, Bit: gamedb.FlagVerbose},
+	"w": {Name: "STAFF", Word: 1, Bit: gamedb.Flag2Staff, Perm: FlagPermWiz},
+	"x": {Name: "SLAVE", Word: 1, Bit: gamedb.Flag2Slave, Perm: FlagPermWiz},
+	"y": {Name: "ORPHAN", Word: 2, Bit: gamedb.Flag3Orphan},
+	"z": {Name: "CONTROL_OK", Word: 1, Bit: gamedb.Flag2ControlOK},
+	"!": {Name: "STOP", Word: 1, Bit: gamedb.Flag2StopMatch},
+	"?": {Name: "HEAD", Word: 1, Bit: gamedb.Flag2HeadFlag},
+	"+": {Name: "WATCHER", Word: 1, Bit: gamedb.Flag2Watcher},
+	"|": {Name: "VACATION", Word: 1, Bit: gamedb.Flag2Vacation},
+	"-": {Name: "NOBLEED", Word: 1, Bit: gamedb.Flag2NoBLeed},
+	"*": {Name: "HAS_DAILY", Word: 1, Bit: gamedb.Flag2HasDaily},
+	"=": {Name: "HAS_STARTUP", Word: 0, Bit: gamedb.FlagHasStartup},
+	"$": {Name: "COMMANDS", Word: 1, Bit: gamedb.Flag2HasCommands},
+	"&": {Name: "HAS_FORWARDLIST", Word: 1, Bit: gamedb.Flag2HasFwd, Perm: FlagPermGod},
+	"@": {Name: "HAS_LISTEN", Word: 1, Bit: gamedb.Flag2HasListen, Perm: FlagPermGod},
+	"`": {Name: "PLAYER_MAILS", Word: 1, Bit: gamedb.Flag2PlayerMails, Perm: FlagPermGod},
+	"~": {Name: "HTML", Word: 1, Bit: gamedb.Flag2HTML},
+	"^": {Name: "PRESENCE", Word: 2, Bit: gamedb.Flag3Presence},
+	">": {Name: "REDIR_OK", Word: 2, Bit: gamedb.Flag3RedirOK},
+	"<": {Name: "HAS_REDIRECT", Word: 2, Bit: gamedb.Flag3HasRedirect, Perm: FlagPermGod},
+	".": {Name: "HAS_DARKLOCK", Word: 2, Bit: gamedb.Flag3HasDarkLock, Perm: FlagPermGod},
+	",": {Name: "HAS_PROPDIR", Word: 2, Bit: gamedb.Flag3HasPropdir, Perm: FlagPermGod},
+
+	// Marker flags (word 2, user-defined)
+	"MARKER0": {Name: "MARKER0", Word: 2, Bit: gamedb.Flag3Mark0},
+	"MARKER1": {Name: "MARKER1", Word: 2, Bit: gamedb.Flag3Mark1},
+	"MARKER2": {Name: "MARKER2", Word: 2, Bit: gamedb.Flag3Mark2},
+	"MARKER3": {Name: "MARKER3", Word: 2, Bit: gamedb.Flag3Mark3},
+	"MARKER4": {Name: "MARKER4", Word: 2, Bit: gamedb.Flag3Mark4},
+	"MARKER5": {Name: "MARKER5", Word: 2, Bit: gamedb.Flag3Mark5},
+	"MARKER6": {Name: "MARKER6", Word: 2, Bit: gamedb.Flag3Mark6},
+	"MARKER7": {Name: "MARKER7", Word: 2, Bit: gamedb.Flag3Mark7},
+	"MARKER8": {Name: "MARKER8", Word: 2, Bit: gamedb.Flag3Mark8},
+	"MARKER9": {Name: "MARKER9", Word: 2, Bit: gamedb.Flag3Mark9},
+	"0": {Name: "MARKER0", Word: 2, Bit: gamedb.Flag3Mark0},
+	"1": {Name: "MARKER1", Word: 2, Bit: gamedb.Flag3Mark1},
+	"2": {Name: "MARKER2", Word: 2, Bit: gamedb.Flag3Mark2},
+	"3": {Name: "MARKER3", Word: 2, Bit: gamedb.Flag3Mark3},
+	"4": {Name: "MARKER4", Word: 2, Bit: gamedb.Flag3Mark4},
+	"5": {Name: "MARKER5", Word: 2, Bit: gamedb.Flag3Mark5},
+	"6": {Name: "MARKER6", Word: 2, Bit: gamedb.Flag3Mark6},
+	"7": {Name: "MARKER7", Word: 2, Bit: gamedb.Flag3Mark7},
+	"8": {Name: "MARKER8", Word: 2, Bit: gamedb.Flag3Mark8},
+	"9": {Name: "MARKER9", Word: 2, Bit: gamedb.Flag3Mark9},
+
+	// HAS_PROPDIR (C internal)
+	"HAS_PROPDIR": {Name: "HAS_PROPDIR", Word: 2, Bit: gamedb.Flag3HasPropdir, Perm: FlagPermGod},
 }
 
 // SetFlag result codes
@@ -241,15 +343,12 @@ func (g *Game) GetAttrTextByName(obj gamedb.DBRef, attrName string) string {
 		}
 	}
 
-	// Try well-known
-	for num, name := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(name, attrName) {
-			for _, attr := range o.Attrs {
-				if attr.Number == num {
-					return eval.StripAttrPrefix(attr.Value)
-				}
+	// Try well-known (including aliases)
+	if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+		for _, attr := range o.Attrs {
+			if attr.Number == num {
+				return eval.StripAttrPrefix(attr.Value)
 			}
-			break
 		}
 	}
 	return ""
@@ -261,10 +360,8 @@ func (g *Game) ResolveAttrNum(name string) int {
 	if def, ok := g.DB.AttrByName[name]; ok {
 		return def.Number
 	}
-	for num, n := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(n, name) {
-			return num
-		}
+	if num, _, ok := gamedb.ResolveWellKnownAttr(name); ok {
+		return num
 	}
 	return -1
 }

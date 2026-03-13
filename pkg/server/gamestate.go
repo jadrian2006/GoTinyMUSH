@@ -769,11 +769,9 @@ func (g *Game) HasAttrDef(attrName string) string {
 	if _, ok := g.DB.AttrByName[name]; ok {
 		return "1"
 	}
-	// Also check well-known attrs
-	for _, wkName := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(wkName, name) {
-			return "1"
-		}
+	// Also check well-known attrs (including aliases)
+	if _, _, ok := gamedb.ResolveWellKnownAttr(name); ok {
+		return "1"
 	}
 	return "0"
 }

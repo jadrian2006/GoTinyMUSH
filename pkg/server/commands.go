@@ -2898,11 +2898,9 @@ func (g *Game) LookupAttrNum(name string) int {
 	if def, ok := g.DB.AttrByName[name]; ok {
 		return def.Number
 	}
-	// Check well-known attrs
-	for num, n := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(n, name) {
-			return num
-		}
+	// Check well-known attrs (including aliases)
+	if num, _, ok := gamedb.ResolveWellKnownAttr(name); ok {
+		return num
 	}
 	return -1
 }
@@ -3527,12 +3525,10 @@ func (g *Game) SetAttrChecked(player, obj gamedb.DBRef, attrNum int, value strin
 // Optional executor parameter is passed through to SetAttr to set the attr owner
 // to the executor's resolved player-owner (matching C TinyMUSH's atr_add behavior).
 func (g *Game) SetAttrByName(obj gamedb.DBRef, attrName string, value string, executor ...gamedb.DBRef) {
-	// Look up in well-known first
-	for num, name := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(name, attrName) {
-			g.SetAttr(obj, num, value, executor...)
-			return
-		}
+	// Look up in well-known first (including aliases)
+	if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+		g.SetAttr(obj, num, value, executor...)
+		return
 	}
 	// Look up in user-defined
 	if def, ok := g.DB.AttrByName[attrName]; ok {

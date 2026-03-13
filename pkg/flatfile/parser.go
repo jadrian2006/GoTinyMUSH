@@ -736,10 +736,8 @@ func (p *Parser) readBoolExp1() (*gamedb.BoolExp, error) {
 // Checks well-known attrs first, then user-defined attrs from the database.
 func (p *Parser) resolveAttrName(name string) int {
 	upper := strings.ToUpper(name)
-	for num, n := range gamedb.WellKnownAttrs {
-		if n == upper {
-			return num
-		}
+	if num, _, ok := gamedb.ResolveWellKnownAttr(upper); ok {
+		return num
 	}
 	if p.db != nil {
 		if def, ok := p.db.AttrByName[upper]; ok {
@@ -876,14 +874,8 @@ func parseBoolExpText(text string) *gamedb.BoolExp {
 		attrNum := -1
 		if n, err := strconv.Atoi(name); err == nil && n >= 0 {
 			attrNum = n
-		} else {
-			upper := strings.ToUpper(name)
-			for num, n := range gamedb.WellKnownAttrs {
-				if n == upper {
-					attrNum = num
-					break
-				}
-			}
+		} else if num, _, ok := gamedb.ResolveWellKnownAttr(name); ok {
+			attrNum = num
 		}
 		if attrNum >= 0 {
 			return &gamedb.BoolExp{Type: gamedb.BoolAttr, Thing: attrNum, StrVal: pattern}

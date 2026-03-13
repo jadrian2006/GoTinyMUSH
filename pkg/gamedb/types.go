@@ -130,7 +130,18 @@ const (
 	Flag3NoDefault     = 0x00000020 // NODEFAULT
 	Flag3Presence      = 0x00000040 // PRESENCE
 	Flag3HasSpeechMod  = 0x00000080 // HAS_SPEECHMOD
+	Flag3HasPropdir    = 0x00000100 // HAS_PROPDIR (internal: has Propdir attr)
 	Flag3Instance      = 0x00000200 // INSTANCE (Go extension, above C word 3 range)
+	Flag3Mark0         = 0x00400000 // MARKER0 (user-defined)
+	Flag3Mark1         = 0x00800000 // MARKER1
+	Flag3Mark2         = 0x01000000 // MARKER2
+	Flag3Mark3         = 0x02000000 // MARKER3
+	Flag3Mark4         = 0x04000000 // MARKER4
+	Flag3Mark5         = 0x08000000 // MARKER5
+	Flag3Mark6         = 0x10000000 // MARKER6
+	Flag3Mark7         = 0x20000000 // MARKER7
+	Flag3Mark8         = 0x40000000 // MARKER8
+	Flag3Mark9         = 0x80000000 // MARKER9
 )
 
 // Power constants - first word (Powers[0])

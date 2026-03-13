@@ -666,15 +666,13 @@ func fnHasattr(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 			}
 		}
 	}
-	// Also check well-known
-	for num, name := range gamedb.WellKnownAttrs {
-		if strings.EqualFold(name, attrName) {
-			for _, attr := range obj.Attrs {
-				if attr.Number == num {
-					text := eval.StripAttrPrefix(attr.Value)
-					buf.WriteString(boolToStr(text != ""))
-					return
-				}
+	// Also check well-known (including aliases)
+	if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+		for _, attr := range obj.Attrs {
+			if attr.Number == num {
+				text := eval.StripAttrPrefix(attr.Value)
+				buf.WriteString(boolToStr(text != ""))
+				return
 			}
 		}
 	}

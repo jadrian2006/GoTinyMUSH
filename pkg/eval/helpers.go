@@ -243,13 +243,8 @@ func (ctx *EvalContext) getAttrByNameInternal(ref gamedb.DBRef, attrName string,
 	attrNum := -1
 	if def, ok := ctx.DB.AttrByName[attrName]; ok {
 		attrNum = def.Number
-	} else {
-		for num, name := range gamedb.WellKnownAttrs {
-			if strings.EqualFold(name, attrName) {
-				attrNum = num
-				break
-			}
-		}
+	} else if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+		attrNum = num
 	}
 	if attrNum < 0 {
 		return ""

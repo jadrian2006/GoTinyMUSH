@@ -1,5 +1,7 @@
 package gamedb
 
+import "strings"
+
 // Well-known (built-in) attribute numbers from constants.h
 // These are system-defined and always present.
 // Numbers MUST match the C TinyMUSH source exactly since the flatfile uses these numbers.
@@ -149,14 +151,20 @@ var WellKnownAttrs = map[int]string{
 	144: "OpenLock",
 	// High-number system attrs
 	202: "Amail",
-	204: "DAILYATTRIB",
+	203: "Signature",
+	204: "Daily",
+	208: "Mailcurf",
 	209: "SpeechLock",
 	214: "Conformat",   // A_LCON_FMT
 	215: "Exitformat",  // A_LEXITS_FMT
 	216: "ExitVarDest", // A_EXITVARDEST — variable exit destination expression
 	217: "ChownLock",
+	211: "Mailflags",
+	212: "Destroyer",
+	213: "Newobjs",
 	218: "Lastip",
 	219: "DarkLock",
+	220: "Vrml_url",
 	221: "Htdesc",
 	222: "Nameformat",  // A_NAME_FMT
 	223: "KnownLock",
@@ -165,6 +173,7 @@ var WellKnownAttrs = map[int]string{
 	226: "KnowsLock",
 	227: "HearsLock",
 	228: "MovesLock",
+	229: "Speechformat",
 	231: "Propdir",
 	232: "ROOMFORMAT",
 	233: "SMELL",
@@ -185,6 +194,30 @@ var WellKnownAttrs = map[int]string{
 const A_SEMAPHORE = 47
 const A_PROGCMD = 210
 const A_EXITVARDEST = 216
+
+// WellKnownAttrAliases maps C-compatible alternate names to canonical attr numbers.
+// These are alternate names for attributes already in WellKnownAttrs.
+var WellKnownAttrAliases = map[string]int{
+	"EXITTO":   216, // C name for ExitVarDest (A_EXITVARDEST)
+	"MAILSUCC": 202, // C name for Amail (A_AMAIL)
+}
+
+// ResolveWellKnownAttr looks up a well-known attribute by name (case-insensitive).
+// Returns (number, canonicalName, true) if found, or (0, "", false) if not.
+func ResolveWellKnownAttr(name string) (int, string, bool) {
+	upper := strings.ToUpper(name)
+	for num, n := range WellKnownAttrs {
+		if strings.EqualFold(n, upper) {
+			return num, n, true
+		}
+	}
+	if num, ok := WellKnownAttrAliases[upper]; ok {
+		if canonical, ok2 := WellKnownAttrs[num]; ok2 {
+			return num, canonical, true
+		}
+	}
+	return 0, "", false
+}
 
 // A_USER_START is the first attribute number available for user-defined attrs.
 const A_USER_START = 256
