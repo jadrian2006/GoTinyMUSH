@@ -1708,8 +1708,8 @@ func TestLambdaSortby(t *testing.T) {
 
 func TestLambdaForeach(t *testing.T) {
 	e := newEvalTestEnv(t)
-	// foreach(abc, #lambda/[ucstr(%0)]) should uppercase each character
-	got := e.eval("[foreach(abc,#lambda/[ucstr(%0)])]")
+	// foreach(fn, string) — C arg order: function first, string second
+	got := e.eval("[foreach(#lambda/[ucstr(%0)],abc)]")
 	if got != "ABC" {
 		t.Errorf("foreach(#lambda) = %q, want 'ABC'", got)
 	}

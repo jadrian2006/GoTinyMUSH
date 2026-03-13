@@ -119,15 +119,58 @@ func fnLastmod(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	buf.WriteString(strconv.FormatInt(obj.LastMod.Unix(), 10))
 }
 
-// fnLastcreate — returns CREATED_TIME attr (attr 203) as secs since epoch.
+// fnLastcreate — lastcreate(obj[,type])
+// Returns the dbref of the last object of the given type created by obj.
+// Type: R(oom), E(xit), T(hing), P(layer).  Without type, returns last thing created.
+// Stored in NEWOBJS attr as space-separated: room exit thing player (matching C order).
 func fnLastcreate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 1 { buf.WriteString("-1"); return }
+	if len(args) < 1 {
+		buf.WriteString("#-1")
+		return
+	}
 	ref := resolveDBRef(ctx, args[0])
-	if ref == gamedb.Nothing { buf.WriteString("-1"); return }
-	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("-1"); return }
-	text := getAttrByName(ctx, ref, "CREATED_TIME")
-	if text == "" { buf.WriteString("-1"); return }
-	buf.WriteString(text)
+	if ref == gamedb.Nothing {
+		buf.WriteString("#-1")
+		return
+	}
+	if !gsExaminable(ctx, ctx.Player, ref) {
+		buf.WriteString("#-1")
+		return
+	}
+
+	// Determine type index — C order: 0=room, 1=exit, 2=thing, 3=player
+	typeIdx := 2 // default: thing
+	if len(args) >= 2 {
+		t := strings.TrimSpace(args[1])
+		if len(t) > 0 {
+			switch strings.ToUpper(t[:1]) {
+			case "R":
+				typeIdx = 0
+			case "E":
+				typeIdx = 1
+			case "T":
+				typeIdx = 2
+			case "P":
+				typeIdx = 3
+			default:
+				buf.WriteString("#-1")
+				return
+			}
+		}
+	}
+
+	text := getAttrByName(ctx, ref, "NEWOBJS")
+	if text == "" {
+		buf.WriteString("#-1")
+		return
+	}
+	parts := strings.Fields(text)
+	if typeIdx >= len(parts) {
+		buf.WriteString("#-1")
+		return
+	}
+	buf.WriteString("#")
+	buf.WriteString(parts[typeIdx])
 }
 
 // fnObjmem — returns rough memory size of an object.

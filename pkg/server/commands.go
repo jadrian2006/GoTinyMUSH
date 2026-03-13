@@ -196,6 +196,7 @@ func InitCommands() map[string]*Command {
 	registerNG("@apikey", cmdApikey)
 	registerNG("@hook", cmdHook)
 	registerNG("@instance", cmdInstance)
+	register("@list", cmdList)
 
 	// Attribute-setting @commands (all no guest)
 	// Success/Failure messages
@@ -3571,6 +3572,37 @@ func (g *Game) CreateObject(name string, objType gamedb.ObjectType, owner gamedb
 	}
 	g.DB.Objects[ref] = obj
 	g.PersistObject(obj)
+
+	// Record last-created dbref in NEWOBJS on the owner (C compat: lastcreate()).
+	// Format: space-separated "room exit thing player" dbrefs.
+	if owner != gamedb.Nothing {
+		// Map Go ObjectType to C storage order: 0=room, 1=exit, 2=thing, 3=player
+		var idx int
+		switch objType {
+		case gamedb.TypeRoom:
+			idx = 0
+		case gamedb.TypeExit:
+			idx = 1
+		case gamedb.TypeThing:
+			idx = 2
+		case gamedb.TypePlayer:
+			idx = 3
+		default:
+			return ref
+		}
+		// Read existing NEWOBJS or init to "-1 -1 -1 -1"
+		existing := g.GetAttrTextByName(owner, "NEWOBJS")
+		parts := []string{"-1", "-1", "-1", "-1"}
+		if existing != "" {
+			fields := strings.Fields(existing)
+			for i := 0; i < len(fields) && i < 4; i++ {
+				parts[i] = fields[i]
+			}
+		}
+		parts[idx] = fmt.Sprintf("%d", ref)
+		g.SetAttrByName(owner, "NEWOBJS", strings.Join(parts, " "))
+	}
+
 	return ref
 }
 

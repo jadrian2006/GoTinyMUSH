@@ -5059,3 +5059,303 @@ func cmdAttributePropagate(g *Game, d *Descriptor, args string) {
 	g.Notify(d.Player, fmt.Sprintf("Propagated %s to %d object(s) (%d already had it, %d total checked).",
 		attrName, set, skipped, len(targets)))
 }
+
+// --- @list command ---
+// C compat: @list <option> — lists various internal tables.
+// Options: functions, commands, flags, powers, attributes, switches, costs,
+//          user_attributes, options, default_flags, permissions, func_permissions
+func cmdList(g *Game, d *Descriptor, args string, _ []string) {
+	option := strings.ToLower(strings.TrimSpace(args))
+	if option == "" {
+		g.Notify(d.Player, "Options: functions, commands, flags, powers, attributes, switches, user_attributes, options, default_flags, permissions, func_permissions")
+		return
+	}
+
+	switch option {
+	case "functions":
+		cmdListFunctions(g, d)
+	case "commands":
+		cmdListCommands(g, d)
+	case "flags":
+		cmdListFlags(g, d)
+	case "powers":
+		if !Wizard(g, d.Player) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		cmdListPowers(g, d)
+	case "attributes":
+		cmdListAttributes(g, d)
+	case "user_attributes":
+		if !Wizard(g, d.Player) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		cmdListUserAttrs(g, d)
+	case "switches":
+		cmdListSwitches(g, d)
+	case "permissions":
+		if !Wizard(g, d.Player) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		cmdListPermissions(g, d)
+	case "func_permissions":
+		if !Wizard(g, d.Player) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		cmdListFuncPermissions(g, d)
+	case "options":
+		cmdListOptions(g, d)
+	case "default_flags":
+		cmdListDefaultFlags(g, d)
+	case "costs":
+		cmdListCosts(g, d)
+	default:
+		g.Notify(d.Player, fmt.Sprintf("Unknown option '%s'. Options: functions, commands, flags, powers, attributes, switches, user_attributes, options, default_flags, permissions, func_permissions, costs", option))
+	}
+}
+
+func cmdListFunctions(g *Game, d *Descriptor) {
+	// Build a temp eval context to get the full function table
+	ctx := MakeEvalContextWithGame(g, d.Player, nil)
+	names := make([]string, 0, len(ctx.Functions))
+	for name := range ctx.Functions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	// Also include user-defined functions
+	unames := make([]string, 0, len(ctx.UFunctions))
+	for name := range ctx.UFunctions {
+		unames = append(unames, name)
+	}
+	sort.Strings(unames)
+
+	g.Notify(d.Player, fmt.Sprintf("Built-in functions (%d):", len(names)))
+	// Print in columns of ~4 per line
+	line := "  "
+	col := 0
+	for _, name := range names {
+		line += fmt.Sprintf("%-25s", strings.ToLower(name))
+		col++
+		if col >= 3 {
+			g.Notify(d.Player, line)
+			line = "  "
+			col = 0
+		}
+	}
+	if col > 0 {
+		g.Notify(d.Player, line)
+	}
+
+	if len(unames) > 0 {
+		g.Notify(d.Player, fmt.Sprintf("User-defined functions (%d):", len(unames)))
+		line = "  "
+		col = 0
+		for _, name := range unames {
+			line += fmt.Sprintf("%-25s", strings.ToLower(name))
+			col++
+			if col >= 3 {
+				g.Notify(d.Player, line)
+				line = "  "
+				col = 0
+			}
+		}
+		if col > 0 {
+			g.Notify(d.Player, line)
+		}
+	}
+
+	g.Notify(d.Player, fmt.Sprintf("Total: %d built-in, %d user-defined.", len(names), len(unames)))
+}
+
+func cmdListCommands(g *Game, d *Descriptor) {
+	names := make([]string, 0, len(g.Commands))
+	for name := range g.Commands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	g.Notify(d.Player, fmt.Sprintf("Commands (%d):", len(names)))
+	line := "  "
+	col := 0
+	for _, name := range names {
+		line += fmt.Sprintf("%-20s", name)
+		col++
+		if col >= 4 {
+			g.Notify(d.Player, line)
+			line = "  "
+			col = 0
+		}
+	}
+	if col > 0 {
+		g.Notify(d.Player, line)
+	}
+}
+
+func cmdListFlags(g *Game, d *Descriptor) {
+	names := make([]string, 0, len(FlagTable))
+	for name := range FlagTable {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	g.Notify(d.Player, fmt.Sprintf("Flags (%d):", len(names)))
+	for _, name := range names {
+		fd := FlagTable[name]
+		perm := ""
+		switch fd.Perm {
+		case FlagPermGod:
+			perm = " (god)"
+		case FlagPermWiz:
+			perm = " (wizard)"
+		}
+		g.Notify(d.Player, fmt.Sprintf("  %-20s word=%d bit=0x%08x%s", name, fd.Word, fd.Bit, perm))
+	}
+}
+
+func cmdListPowers(g *Game, d *Descriptor) {
+	names := make([]string, 0, len(powerTable))
+	for name := range powerTable {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	g.Notify(d.Player, fmt.Sprintf("Powers (%d):", len(names)))
+	for _, name := range names {
+		pe := powerTable[name]
+		god := ""
+		if pe.GodOnly {
+			god = " (god-only)"
+		}
+		g.Notify(d.Player, fmt.Sprintf("  %-25s word=%d bit=0x%08x%s", name, pe.Word, pe.Bit, god))
+	}
+}
+
+func cmdListAttributes(g *Game, d *Descriptor) {
+	// Well-known attributes
+	nums := make([]int, 0, len(gamedb.WellKnownAttrs))
+	for num := range gamedb.WellKnownAttrs {
+		nums = append(nums, num)
+	}
+	sort.Ints(nums)
+
+	g.Notify(d.Player, fmt.Sprintf("Well-known attributes (%d):", len(nums)))
+	for _, num := range nums {
+		g.Notify(d.Player, fmt.Sprintf("  %-25s #%d", gamedb.WellKnownAttrs[num], num))
+	}
+}
+
+func cmdListUserAttrs(g *Game, d *Descriptor) {
+	if g.DB.AttrNames == nil || len(g.DB.AttrNames) == 0 {
+		g.Notify(d.Player, "No user-defined attributes.")
+		return
+	}
+	nums := make([]int, 0, len(g.DB.AttrNames))
+	for num := range g.DB.AttrNames {
+		nums = append(nums, num)
+	}
+	sort.Ints(nums)
+
+	g.Notify(d.Player, fmt.Sprintf("User-defined attributes (%d):", len(nums)))
+	for _, num := range nums {
+		def := g.DB.AttrNames[num]
+		g.Notify(d.Player, fmt.Sprintf("  %-30s #%d flags=0x%x", def.Name, def.Number, def.Flags))
+	}
+}
+
+func cmdListSwitches(g *Game, d *Descriptor) {
+	g.Notify(d.Player, "Command switches are not tracked in a separate table.")
+	g.Notify(d.Player, "Use 'help <command>' for switch information.")
+}
+
+func cmdListPermissions(g *Game, d *Descriptor) {
+	names := make([]string, 0, len(g.Commands))
+	for name := range g.Commands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	g.Notify(d.Player, fmt.Sprintf("Command permissions (%d):", len(names)))
+	for _, name := range names {
+		cmd := g.Commands[name]
+		perm := "public"
+		if cmd.NoGuest {
+			perm = "no_guest"
+		}
+		g.Notify(d.Player, fmt.Sprintf("  %-20s %s", name, perm))
+	}
+}
+
+func cmdListFuncPermissions(g *Game, d *Descriptor) {
+	ctx := MakeEvalContextWithGame(g, d.Player, nil)
+	names := make([]string, 0, len(ctx.Functions))
+	for name := range ctx.Functions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	// Only show non-public functions
+	g.Notify(d.Player, "Non-public function permissions:")
+	count := 0
+	for _, name := range names {
+		fn := ctx.Functions[name]
+		if fn.Perms == 0 {
+			continue
+		}
+		perm := "public"
+		switch fn.Perms {
+		case 1:
+			perm = "wizard"
+		case 2:
+			perm = "god"
+		case 3:
+			perm = "disabled"
+		}
+		g.Notify(d.Player, fmt.Sprintf("  %-25s %s", strings.ToLower(name), perm))
+		count++
+	}
+	if count == 0 {
+		g.Notify(d.Player, "  (all functions are public)")
+	}
+}
+
+func cmdListOptions(g *Game, d *Descriptor) {
+	if g.Conf == nil {
+		g.Notify(d.Player, "No configuration loaded.")
+		return
+	}
+	g.Notify(d.Player, "Server options:")
+	g.Notify(d.Player, fmt.Sprintf("  mud_name:            %s", g.Conf.MudName))
+	g.Notify(d.Player, fmt.Sprintf("  port:                %d", g.Conf.Port))
+	g.Notify(d.Player, fmt.Sprintf("  player_starting_room: #%d", g.Conf.PlayerStartingRoom))
+	g.Notify(d.Player, fmt.Sprintf("  player_starting_home: #%d", g.Conf.PlayerStartingHome))
+	g.Notify(d.Player, fmt.Sprintf("  iter_limit:          %d", g.Conf.IterLimit))
+	g.Notify(d.Player, fmt.Sprintf("  func_invk_limit:     %d", g.Conf.FunctionInvocationLimit))
+	g.Notify(d.Player, fmt.Sprintf("  eval_output_limit:   %d", g.Conf.EvalOutputLimit))
+	g.Notify(d.Player, fmt.Sprintf("  cmd_invk_limit:      %d", g.Conf.CommandInvocationLimit))
+	if g.Conf.MasterRoom >= 0 {
+		g.Notify(d.Player, fmt.Sprintf("  master_room:         #%d", g.Conf.MasterRoom))
+	}
+}
+
+func cmdListDefaultFlags(g *Game, d *Descriptor) {
+	g.Notify(d.Player, "Default object flags:")
+	g.Notify(d.Player, "  Rooms:   (none)")
+	g.Notify(d.Player, "  Things:  (none)")
+	g.Notify(d.Player, "  Exits:   (none)")
+	g.Notify(d.Player, "  Players: (none)")
+}
+
+func cmdListCosts(g *Game, d *Descriptor) {
+	g.Notify(d.Player, "Command costs:")
+	g.Notify(d.Player, "  @create:  10")
+	g.Notify(d.Player, "  @dig:     10")
+	g.Notify(d.Player, "  @open:    1")
+	g.Notify(d.Player, "  @clone:   10")
+	g.Notify(d.Player, "  kill:     10")
+	g.Notify(d.Player, "  give:     1+")
+	g.Notify(d.Player, "  page:     0")
+}

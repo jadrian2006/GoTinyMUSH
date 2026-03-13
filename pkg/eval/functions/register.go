@@ -378,7 +378,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	// Timestamp functions
 	ctx.RegisterFunction("LASTACCESS", fnLastaccess, 1, 0)
 	ctx.RegisterFunction("LASTMOD", fnLastmod, 1, 0)
-	ctx.RegisterFunction("LASTCREATE", fnLastcreate, 1, 0)
+	ctx.RegisterFunctionV("LASTCREATE", fnLastcreate, 1, 2, 0)
 	ctx.RegisterFunction("OBJMEM", fnObjmem, 1, 0)
 
 	// Formatting functions
