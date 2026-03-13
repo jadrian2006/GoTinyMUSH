@@ -45,9 +45,10 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 		cost = g.Conf.CreateMaxCost
 	}
 
-	// Check if player can afford it
+	// Check if player can afford it (C: wizards have free building)
 	playerObj := g.DB.Objects[d.Player]
-	if playerObj.Pennies < cost {
+	isWiz := g.IsWizard(d.Player)
+	if !isWiz && playerObj.Pennies < cost {
 		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
 		return
 	}
@@ -59,8 +60,10 @@ func cmdCreate(g *Game, d *Descriptor, args string, _ []string) {
 
 	ref := g.CreateObject(name, gamedb.TypeThing, d.Player)
 	obj := g.DB.Objects[ref]
-	// Charge the player (money + quota)
-	playerObj.Pennies -= cost
+	// Charge the player (money + quota) — wizards are free
+	if !isWiz {
+		playerObj.Pennies -= cost
+	}
 	g.PayQuota(d.Player, g.Conf.ThingQuota, gamedb.TypeThing)
 	// Set object value (endowment)
 	obj.Pennies = g.Conf.ObjectEndowment(cost)
@@ -844,10 +847,26 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "You have exceeded your quota.")
 		return
 	}
+
+	// C TinyMUSH: clone costs createmin credits (wizards are free)
+	cloneCost := g.Conf.CreateMinCost
+	playerObj := g.DB.Objects[d.Player]
+	isWiz := g.IsWizard(d.Player)
+	if !isWiz && playerObj.Pennies < cloneCost {
+		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
+		return
+	}
+
 	g.PayQuota(d.Player, quotaCostForType(g, cloneType), cloneType)
 
 	ref := g.CreateObject(newName, srcObj.ObjType(), d.Player)
 	newObj := g.DB.Objects[ref]
+
+	// Deduct clone cost and set endowment on clone — wizards are free
+	if !isWiz {
+		playerObj.Pennies -= cloneCost
+	}
+	newObj.Pennies = g.Conf.ObjectEndowment(cloneCost)
 
 	// /parent switch: set parent to the original instead of copying its parent
 	if HasSwitch(switches, "parent") {
@@ -876,7 +895,6 @@ func cmdClone(g *Game, d *Descriptor, args string, switches []string) {
 	}
 
 	// /location: place clone in the same location as the source, not player's inventory
-	playerObj := g.DB.Objects[d.Player]
 	if HasSwitch(switches, "location") {
 		newObj.Location = srcObj.Location
 		g.AddToContents(srcObj.Location, ref)
@@ -2312,7 +2330,7 @@ var attrFlagNames = map[string]int{
 	"DARK":       gamedb.AFDark,
 	"MDARK":      gamedb.AFMDark,
 	"VISUAL":     gamedb.AFVisual,
-	"NO_COMMAND": gamedb.AFNoCMD,
+	"NO_COMMAND": gamedb.AFNoProg, // no_command suppresses $-cmd matching (AF_NOPROG), not @command creation (AF_NOCMD)
 	"NO_CLONE":   gamedb.AFNoClone,
 	"PRIVATE":    gamedb.AFPrivate,
 	"REGEXP":     gamedb.AFRegexp,

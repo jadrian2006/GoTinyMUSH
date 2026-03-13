@@ -89,6 +89,8 @@ type GameState interface {
 	IsConnected(player gamedb.DBRef) bool
 	// LookupPlayer finds a player by name (partial match).
 	LookupPlayer(name string) gamedb.DBRef
+	// LookupPlayerExact finds a player by exact name/alias only (no prefix).
+	LookupPlayerExact(name string) gamedb.DBRef
 	// CreateObject creates a new object, returns its dbref.
 	CreateObject(name string, objType gamedb.ObjectType, owner gamedb.DBRef) gamedb.DBRef
 	// Controls returns true if player controls target.

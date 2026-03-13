@@ -1390,10 +1390,11 @@ func cmdDig(g *Game, d *Descriptor, args string, switches []string) {
 	parts := strings.SplitN(args, "=", 2)
 	roomName := strings.TrimSpace(parts[0])
 
-	// Charge dig cost
+	// Charge dig cost (C: wizards have free building)
 	cost := g.Conf.DigCost
 	playerObj := g.DB.Objects[d.Player]
-	if playerObj.Pennies < cost {
+	isWiz := g.IsWizard(d.Player)
+	if !isWiz && playerObj.Pennies < cost {
 		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
 		return
 	}
@@ -1402,7 +1403,9 @@ func cmdDig(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "You have exceeded your quota.")
 		return
 	}
-	playerObj.Pennies -= cost
+	if !isWiz {
+		playerObj.Pennies -= cost
+	}
 	g.PayQuota(d.Player, g.Conf.RoomQuota, gamedb.TypeRoom)
 	g.PersistObject(playerObj)
 
@@ -1447,10 +1450,11 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 	parts := strings.SplitN(args, "=", 2)
 	exitName := strings.TrimSpace(parts[0])
 
-	// Charge open cost
+	// Charge open cost (C: wizards have free building)
 	cost := g.Conf.OpenCost
 	playerObj := g.DB.Objects[d.Player]
-	if playerObj.Pennies < cost {
+	isWiz := g.IsWizard(d.Player)
+	if !isWiz && playerObj.Pennies < cost {
 		g.Notify(d.Player, fmt.Sprintf("Sorry, you don't have enough %s.", g.MoneyName(2)))
 		return
 	}
@@ -1459,7 +1463,9 @@ func cmdOpen(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "You have exceeded your quota.")
 		return
 	}
-	playerObj.Pennies -= cost
+	if !isWiz {
+		playerObj.Pennies -= cost
+	}
 	g.PayQuota(d.Player, g.Conf.ExitQuota, gamedb.TypeExit)
 	g.PersistObject(playerObj)
 
@@ -4452,13 +4458,15 @@ func cmdKill(g *Game, d *Descriptor, args string, _ []string) {
 		cost = g.Conf.KillMax
 	}
 
-	// Charge the killer
+	// Charge the killer (C: wizards have free kills)
 	playerObj := g.DB.Objects[d.Player]
-	if playerObj.Pennies < cost {
+	if !g.IsWizard(d.Player) && playerObj.Pennies < cost {
 		g.Notify(d.Player, fmt.Sprintf("You don't have enough %s.", g.MoneyName(2)))
 		return
 	}
-	playerObj.Pennies -= cost
+	if !g.IsWizard(d.Player) {
+		playerObj.Pennies -= cost
+	}
 	g.PersistObject(playerObj)
 
 	// Probability check: random(killGuarantee) < cost

@@ -274,6 +274,43 @@ func (g *Game) Teleport(victim, dest gamedb.DBRef) {
 }
 
 // LookupPlayer finds a player by name (exact and partial match).
+// LookupPlayerExact finds a player by exact name or alias match only (no prefix).
+// Used by pmatch() which requires exact matches per C TinyMUSH behavior.
+func (g *Game) LookupPlayerExact(name string) gamedb.DBRef {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return gamedb.Nothing
+	}
+	if name[0] == '*' {
+		name = name[1:]
+	}
+	for _, obj := range g.DB.Objects {
+		if obj.ObjType() == gamedb.TypePlayer && !obj.IsGoing() && strings.EqualFold(obj.Name, name) {
+			return obj.DBRef
+		}
+	}
+	// Check aliases
+	for _, obj := range g.DB.Objects {
+		if obj.ObjType() != gamedb.TypePlayer || obj.IsGoing() {
+			continue
+		}
+		for _, attr := range obj.Attrs {
+			if attr.Number == 58 { // A_ALIAS
+				aliasStr := eval.StripAttrPrefix(attr.Value)
+				if aliasStr != "" {
+					for _, a := range strings.Split(aliasStr, ";") {
+						if strings.EqualFold(strings.TrimSpace(a), name) {
+							return obj.DBRef
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+	return gamedb.Nothing
+}
+
 func (g *Game) LookupPlayer(name string) gamedb.DBRef {
 	name = strings.TrimSpace(name)
 	if name == "" {

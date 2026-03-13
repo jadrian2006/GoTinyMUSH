@@ -510,11 +510,11 @@ func TestFnLparent(t *testing.T) {
 func TestFnLocate(t *testing.T) {
 	e := newEvalTestEnv(t)
 	tests := map[string]string{
-		"[locate(#1,me)]":         "#1",
-		"[locate(#1,here)]":       "#0",
+		"[locate(#1,me)]":         "#-1", // C compat: locate() doesn't expand me/here keywords
+		"[locate(#1,here)]":       "#-1",
 		"[locate(#1,#2)]":         "#2",
 		"[locate(#1,TestObject)]": "#2",
-		"[locate(#1,nosuch)]":     "#-1 NOT FOUND",
+		"[locate(#1,nosuch)]":     "#-1",
 	}
 	for expr, want := range tests {
 		got := e.eval(expr)
@@ -1015,7 +1015,7 @@ func TestFnConnectionNoGameState(t *testing.T) {
 func TestFnPmatch(t *testing.T) {
 	e := newEvalTestEnv(t)
 	tests := map[string]string{
-		"[pmatch(me)]":     "#1",
+		"[pmatch(me)]":     "#-1", // C compat: pmatch does NOT expand "me" keyword
 		"[pmatch(Wizard)]": "#1",
 		"[pmatch(Bob)]":    "#3",
 	}

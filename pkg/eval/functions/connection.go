@@ -88,17 +88,11 @@ func fnPmatch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		}
 		return
 	}
-	// Handle "me"
-	if strings.EqualFold(name, "me") {
-		buf.WriteString(fmt.Sprintf("#%d", ctx.Player))
-		return
-	}
-	// Use GameState if available, otherwise fall back to DB scan
+	// C TinyMUSH: pmatch() does NOT expand "me" keyword — it's a pure player name lookup.
+	// C's pmatch() uses exact name match only (no prefix matching).
 	if ctx.GameState != nil {
-		ref := ctx.GameState.LookupPlayer(name)
-		if ref == gamedb.Ambiguous {
-			buf.WriteString("#-2")
-		} else if ref == gamedb.Nothing {
+		ref := ctx.GameState.LookupPlayerExact(name)
+		if ref == gamedb.Nothing {
 			buf.WriteString("#-1")
 		} else {
 			buf.WriteString(fmt.Sprintf("#%d", ref))
@@ -233,6 +227,31 @@ func fnEntrances(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, 
 	buf.WriteString(strings.Join(entrances, " "))
 }
 
+// matchTypeByChars checks if an object matches the given type filter characters (R, E, P, T).
+func matchTypeByChars(obj *gamedb.Object, typeChars string) bool {
+	for _, ch := range typeChars {
+		switch ch {
+		case 'R':
+			if obj.ObjType() == gamedb.TypeRoom {
+				return true
+			}
+		case 'E':
+			if obj.ObjType() == gamedb.TypeExit {
+				return true
+			}
+		case 'P':
+			if obj.ObjType() == gamedb.TypePlayer {
+				return true
+			}
+		case 'T':
+			if obj.ObjType() == gamedb.TypeThing {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // fnLocate does advanced object matching: locate(looker, name, type)
 func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 {
@@ -257,42 +276,6 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 
 	// Handle empty name
 	if name == "" {
-		buf.WriteString("#-1")
-		return
-	}
-
-	// Handle special tokens
-	if strings.EqualFold(name, "me") {
-		buf.WriteString(fmt.Sprintf("#%d", looker))
-		return
-	}
-	if strings.EqualFold(name, "here") {
-		if obj, ok := ctx.DB.Objects[looker]; ok {
-			buf.WriteString(fmt.Sprintf("#%d", obj.Location))
-		} else {
-			buf.WriteString("#-1")
-		}
-		return
-	}
-	if name[0] == '#' {
-		ref := resolveDBRef(ctx, name)
-		if _, ok := ctx.DB.Objects[ref]; ok {
-			buf.WriteString(fmt.Sprintf("#%d", ref))
-		} else {
-			buf.WriteString("#-1")
-		}
-		return
-	}
-	if name[0] == '*' {
-		// Player match
-		ref := resolveDBRef(ctx, name)
-		buf.WriteString(fmt.Sprintf("#%d", ref))
-		return
-	}
-
-	// Search: inventory, location contents, location exits
-	lookerObj, ok := ctx.DB.Objects[looker]
-	if !ok {
 		buf.WriteString("#-1")
 		return
 	}
@@ -342,6 +325,50 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		scopeInv = true
 		scopeNeigh = true
 		scopeExits = true
+	}
+
+	// C TinyMUSH: locate() does NOT expand "me" or "here" keywords.
+	// Those are only expanded by the command-level MatchObject().
+	// locate() is a pure name/dbref search.
+
+	// Handle #dbref absolute reference
+	if name[0] == '#' {
+		ref := resolveDBRef(ctx, name)
+		if obj, ok := ctx.DB.Objects[ref]; ok {
+			if hasTypeFilter && !allTypes && !matchTypeByChars(obj, typeChars) {
+				buf.WriteString("#-1")
+			} else {
+				buf.WriteString(fmt.Sprintf("#%d", ref))
+			}
+		} else {
+			buf.WriteString("#-1")
+		}
+		return
+	}
+	// Handle *player notation
+	if name[0] == '*' {
+		ref := resolveDBRef(ctx, name)
+		if ref != gamedb.Nothing {
+			if obj, ok := ctx.DB.Objects[ref]; ok {
+				if hasTypeFilter && !allTypes && !matchTypeByChars(obj, typeChars) {
+					buf.WriteString("#-1")
+				} else {
+					buf.WriteString(fmt.Sprintf("#%d", ref))
+				}
+			} else {
+				buf.WriteString("#-1")
+			}
+		} else {
+			buf.WriteString("#-1")
+		}
+		return
+	}
+
+	// Search: inventory, location contents, location exits
+	lookerObj, ok := ctx.DB.Objects[looker]
+	if !ok {
+		buf.WriteString("#-1")
+		return
 	}
 
 	matchType := func(obj *gamedb.Object) bool {
