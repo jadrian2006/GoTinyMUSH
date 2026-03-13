@@ -608,8 +608,8 @@ func fnMunge(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if len(args) > 4 && args[4] != "" { odelim = args[4] }
 	list1 := splitList(args[1], delim)
 	list2 := splitList(args[2], delim)
-	// Call ufun with list1
-	reordered := ctx.CallIterFun(args[0], []string{strings.Join(list1, delim)})
+	// C passes %0=entire list1, %1=delimiter string to the user function
+	reordered := ctx.CallIterFun(args[0], []string{strings.Join(list1, delim), delim})
 	reorderedWords := splitList(reordered, delim)
 	// Map from list1 position to list2
 	indexMap := make(map[string]string)
