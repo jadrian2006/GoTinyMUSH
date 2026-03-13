@@ -162,11 +162,12 @@ func fnFold(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	buf.WriteString(acc)
 }
 
-// fnForeach implements foreach(string, obj/attr)
+// fnForeach implements foreach(obj/attr, string[, start_token[, end_token]])
+// C arg order: function first, string second.
 func fnForeach(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { return }
-	str := evalArg(ctx, args[0])
-	objAttr := evalFunRef(ctx, args[1])
+	objAttr := evalFunRef(ctx, args[0])
+	str := evalArg(ctx, args[1])
 	count := 0
 	for _, ch := range str {
 		if ctx.TimedOut { break }
@@ -177,26 +178,45 @@ func fnForeach(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	}
 }
 
-// fnWhile implements while(obj/attr1, obj/attr2, initial[, delim])
+// fnWhile implements while(eval_fn, cond_fn, list, stop_value[, isep[, osep]])
+// C semantics: iterates through list elements, applies eval_fn to each (output),
+// applies cond_fn to each, stops when cond result equals stop_value (exact match).
 func fnWhile(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 3 { return }
-	condFn := evalFunRef(ctx, args[0])
-	bodyFn := evalFunRef(ctx, args[1])
-	current := evalArg(ctx, args[2])
-	delim := " "
-	if len(args) > 3 { d := evalArg(ctx, args[3]); if d != "" { delim = d } }
+	if len(args) < 4 { return }
+	evalFn := evalFunRef(ctx, args[0])
+	condFn := evalFunRef(ctx, args[1])
+	listStr := evalArg(ctx, args[2])
+	stopVal := evalArg(ctx, args[3])
+	isep := " "
+	osep := " "
+	if len(args) > 4 { s := evalArg(ctx, args[4]); if s != "" { isep = s } }
+	if len(args) > 5 { s := evalArg(ctx, args[5]); if s != "" { osep = s } } else { osep = isep }
 
-	var results []string
-	limit := ctx.IterLim
-	if limit <= 0 { limit = 10000 }
-	for i := 0; i < limit; i++ {
+	if listStr == "" { return }
+	words := splitList(listStr, isep)
+
+	first := true
+	for i, word := range words {
 		if ctx.TimedOut { break }
-		cond := ctx.CallIterFun(condFn, []string{current})
-		if !isTrue(cond) { break }
-		current = ctx.CallIterFun(bodyFn, []string{current})
-		results = append(results, current)
+		if ctx.IterLim > 0 && i >= ctx.IterLim { ctx.IterLimited = true; break }
+		// Evaluate eval_fn with %0=word, %1=position (1-based)
+		posStr := strconv.Itoa(i + 1)
+		result := ctx.CallIterFun(evalFn, []string{word, posStr})
+		if !first { buf.WriteString(osep) }
+		first = false
+		buf.WriteString(result)
+		// Check condition — if cond_fn and eval_fn are the same attr,
+		// condition result = eval result; otherwise evaluate separately
+		var condResult string
+		if condFn == evalFn {
+			condResult = result
+		} else {
+			condResult = ctx.CallIterFun(condFn, []string{word, posStr})
+		}
+		if condResult == stopVal {
+			break
+		}
 	}
-	buf.WriteString(strings.Join(results, delim))
 }
 
 // Loop state query functions
