@@ -38,8 +38,9 @@ func stripEqSep(s string) string {
 type Command struct {
 	Name    string
 	Handler CommandHandler
-	NoGuest bool // if true, guests cannot use this command
-	IsAlias bool // true for abbreviation aliases loaded from goTinyAlias.conf
+	NoGuest bool   // if true, guests cannot use this command
+	IsAlias bool   // true for abbreviation aliases loaded from goTinyAlias.conf
+	Perms   string // C-compatible permission string for @list permissions (e.g. "wizard", "no_slave no_guest")
 }
 
 // InitCommands registers all available game commands.
