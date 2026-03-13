@@ -1248,11 +1248,17 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	}
 
 	// Non-wizard can only search own objects.
-	// Wizard with no explicit player specification defaults to own objects.
-	// Wizard must explicitly say "all" to search all objects (C compat).
+	// Wizard with no args defaults to own objects (C compat).
+	// Wizard with a class but no explicit player defaults to all objects.
 	if !isWiz {
 		ownerRef = ctx.Player
 		searchAll = false
+	} else if raw == "" {
+		// search() with no args — wizard searches own objects only
+		searchAll = false
+	} else if eqIdx >= 0 && len(strings.Fields(leftSide)) == 1 {
+		// search(type=thing) — class specified, no player — wizard searches all
+		searchAll = true
 	}
 
 	// Determine type filter from class
