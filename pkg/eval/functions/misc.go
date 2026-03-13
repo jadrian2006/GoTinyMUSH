@@ -1177,7 +1177,13 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	searchClass := ""
 	restriction := ""
 	lowBound := gamedb.DBRef(0)
-	highBound := gamedb.DBRef(len(ctx.DB.Objects) - 1)
+	// Find the actual maximum dbref in the DB (map keys aren't contiguous)
+	highBound := gamedb.DBRef(0)
+	for ref := range ctx.DB.Objects {
+		if ref > highBound {
+			highBound = ref
+		}
+	}
 	filterType := gamedb.ObjectType(-1) // -1 means no type filter
 
 	// Split on first '=' to get left side and right side
