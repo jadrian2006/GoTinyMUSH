@@ -603,8 +603,8 @@ func fnMunge(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	// munge(obj/attr, list1, list2[, delim[, odelim]])
 	if len(args) < 3 { return }
 	delim := " "
-	odelim := " "
 	if len(args) > 3 && args[3] != "" { delim = args[3] }
+	odelim := delim
 	if len(args) > 4 && args[4] != "" { odelim = args[4] }
 	list1 := splitList(args[1], delim)
 	list2 := splitList(args[2], delim)
