@@ -409,10 +409,13 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		}
 	}
 	// Default: if no scope flags specified, search everything
+	// C TinyMUSH match_everything includes absolute dbrefs and *player
 	if !hasScope {
 		scopeInv = true
 		scopeNeigh = true
 		scopeExits = true
+		scopeAbsDbref = true
+		scopePlayer = true
 	}
 
 	// C TinyMUSH match_everything: match_me, match_here, match_absolute,
