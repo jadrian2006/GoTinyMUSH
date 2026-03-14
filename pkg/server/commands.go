@@ -1331,8 +1331,8 @@ func cmdExamine(g *Game, d *Descriptor, args string, switches []string) {
 			}
 
 			if pairsMode {
-				// ex/pairs: clean name:value pairs, no header/flags/owner
-				g.Notify(d.Player, fmt.Sprintf("%s: %s", name, text))
+				// ex/pairs: depth-colored delimiters matching C TinyMUSH
+				g.Notify(d.Player, PairsFormatAttr(name, text))
 				found = true
 				continue
 			}

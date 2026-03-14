@@ -437,3 +437,46 @@ func PrettyExamineAttr(attrName, value string) ([]string, []string) {
 	errors := ValidateBraces(value)
 	return lines, errors
 }
+
+// depthColors cycles through colors for nested delimiters, matching C TinyMUSH ex/pairs.
+var depthColors = []string{
+	"\033[32m", // green  — depth 0
+	"\033[33m", // yellow — depth 1
+	"\033[36m", // cyan   — depth 2
+	"\033[34m", // blue   — depth 3
+	"\033[35m", // magenta — depth 4
+}
+
+// PairsFormatAttr formats a single attribute for ex/pairs display.
+// Colorizes delimiters (parens, brackets, braces) by nesting depth,
+// matching C TinyMUSH behavior. Single line, no indentation.
+func PairsFormatAttr(attrName, value string) string {
+	var out strings.Builder
+	out.WriteString("\033[1m") // bold attr name
+	out.WriteString(attrName)
+	out.WriteString(":\033[0m ")
+
+	depth := 0
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		switch ch {
+		case '(', '[', '{':
+			color := depthColors[depth%len(depthColors)]
+			out.WriteString(color)
+			out.WriteByte(ch)
+			out.WriteString(ansiReset)
+			depth++
+		case ')', ']', '}':
+			if depth > 0 {
+				depth--
+			}
+			color := depthColors[depth%len(depthColors)]
+			out.WriteString(color)
+			out.WriteByte(ch)
+			out.WriteString(ansiReset)
+		default:
+			out.WriteByte(ch)
+		}
+	}
+	return out.String()
+}
