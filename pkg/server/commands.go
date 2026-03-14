@@ -1330,7 +1330,14 @@ func cmdExamine(g *Game, d *Descriptor, args string, switches []string) {
 				}
 			}
 
-			if prettyMode || pairsMode {
+			if pairsMode {
+				// ex/pairs: clean name:value pairs, no header/flags/owner
+				g.Notify(d.Player, fmt.Sprintf("%s: %s", name, text))
+				found = true
+				continue
+			}
+
+			if prettyMode {
 				// Pretty-print with syntax highlighting and indentation
 				prettyLines, braceErrors := PrettyExamineAttr(name, text)
 				for _, line := range prettyLines {
