@@ -17213,3 +17213,1777 @@ TRUNC_LENGTH - Per-player examine output truncation
     {"publish_count":42,"deliver_count":42,...}
 
   See also: publish(), subscribe(), EVENT BUS FUNCTIONS.
+
+& FLOATING POINT MATH
+& FADD()
+  Function: fadd(<number1>[, <number2>, ...])
+
+  Returns the sum of all arguments as a floating-point number. This is
+  identical to add() in GoTinyMUSH (both return float results with
+  trailing zero stripping), but exists for compatibility with MUSHes
+  that distinguish integer and float arithmetic.
+
+  Example:
+    > say [fadd(1.5, 2.3, 0.2)]
+    You say, "4"
+
+  See also: add(), fsub(), fmul(), fdiv().
+
+& FSUB()
+  Function: fsub(<number1>, <number2>)
+
+  Returns the floating-point difference of <number1> minus <number2>.
+
+  Example:
+    > say [fsub(5.7, 2.3)]
+    You say, "3.4"
+
+  See also: sub(), fadd(), fmul(), fdiv().
+
+& FMUL()
+  Function: fmul(<number1>[, <number2>, ...])
+
+  Returns the floating-point product of all arguments.
+
+  Example:
+    > say [fmul(2.5, 3.0)]
+    You say, "7.5"
+
+  See also: mul(), fadd(), fsub(), fdiv().
+
+& ATAN2()
+  Function: atan2(<y>, <x>)
+
+  Returns the two-argument arctangent of <y> and <x> in radians. This
+  computes the angle from the positive X-axis to the point (x, y),
+  returning a value in the range (-pi, pi]. Unlike atan(), atan2()
+  correctly handles all four quadrants.
+
+  Example:
+    > say [atan2(1, 1)]
+    You say, "0.785398"
+    > say [atan2(0, -1)]
+    You say, "3.141593"
+
+  See also: atan(), sin(), cos(), tan().
+
+& BOUND()
+  Function: bound(<value>, <min>, <max>)
+
+  Clamps <value> to be within the range [<min>, <max>]. If <value> is
+  less than <min>, returns <min>. If greater than <max>, returns <max>.
+  Otherwise returns <value> unchanged.
+
+  Example:
+    > say [bound(15, 0, 10)]
+    You say, "10"
+    > say [bound(-5, 0, 100)]
+    You say, "0"
+    > say [bound(5, 0, 10)]
+    You say, "5"
+
+  See also: min(), max(), between().
+
+& AVG()
+  Function: avg(<number1>, <number2>[, ...])
+
+  Returns the arithmetic mean (average) of all arguments.
+
+  Example:
+    > say [avg(10, 20, 30)]
+    You say, "20"
+    > say [avg(1, 2)]
+    You say, "1.5"
+
+  See also: median(), lavg(), min(), max().
+
+& MEDIAN()
+  Function: median(<number1>, <number2>[, ...])
+
+  Returns the median value of all arguments. If an even number of
+  arguments is given, returns the average of the two middle values.
+
+  Example:
+    > say [median(1, 5, 3)]
+    You say, "3"
+    > say [median(1, 2, 3, 4)]
+    You say, "2.5"
+
+  See also: avg(), min(), max().
+
+& BETWEEN()
+  Function: between(<lower>, <upper>, <value>)
+
+  Returns 1 if <value> is between <lower> and <upper> (inclusive),
+  0 otherwise.
+
+  Example:
+    > say [between(1, 10, 5)]
+    You say, "1"
+    > say [between(1, 10, 15)]
+    You say, "0"
+    > say [between(1, 10, 1)]
+    You say, "1"
+
+  See also: bound(), gt(), lt(), gte(), lte().
+
+& HYPERBOLIC FUNCTIONS
+& COSH()
+  Function: cosh(<number>)
+
+  Returns the hyperbolic cosine of <number> (in radians).
+
+  Example:
+    > say [cosh(0)]
+    You say, "1"
+    > say [cosh(1)]
+    You say, "1.543081"
+
+  See also: sinh(), tanh(), cos().
+
+& SINH()
+  Function: sinh(<number>)
+
+  Returns the hyperbolic sine of <number> (in radians).
+
+  Example:
+    > say [sinh(0)]
+    You say, "0"
+    > say [sinh(1)]
+    You say, "1.175201"
+
+  See also: cosh(), tanh(), sin().
+
+& TANH()
+  Function: tanh(<number>)
+
+  Returns the hyperbolic tangent of <number> (in radians).
+
+  Example:
+    > say [tanh(0)]
+    You say, "0"
+    > say [tanh(1)]
+    You say, "0.761594"
+
+  See also: cosh(), sinh(), tan().
+
+& FMOD()
+  Function: fmod(<x>, <y>)
+
+  Returns the floating-point remainder of <x> divided by <y>. This is
+  the floating-point equivalent of mod(). Returns #-1 DIVIDE BY ZERO
+  if <y> is zero.
+
+  Example:
+    > say [fmod(5.5, 2.0)]
+    You say, "1.5"
+    > say [fmod(10.3, 3.1)]
+    You say, "1"
+
+  See also: mod(), remainder(), fdiv().
+
+& LOGIC GATES
+& NAND()
+  Function: nand(<value1>, <value2>[, ...])
+
+  NAND logic gate. Returns 1 if any argument is zero (false), 0 if all
+  arguments are non-zero (true). Requires at least 2 arguments.
+
+  Example:
+    > say [nand(1, 1)]
+    You say, "0"
+    > say [nand(1, 0)]
+    You say, "1"
+    > say [nand(0, 0)]
+    You say, "1"
+
+  See also: and(), nor(), xnor(), or().
+
+& NOR()
+  Function: nor(<value1>, <value2>[, ...])
+
+  NOR logic gate. Returns 1 if all arguments are zero (false), 0 if
+  any argument is non-zero (true). Requires at least 2 arguments.
+
+  Example:
+    > say [nor(0, 0)]
+    You say, "1"
+    > say [nor(1, 0)]
+    You say, "0"
+    > say [nor(1, 1)]
+    You say, "0"
+
+  See also: or(), nand(), xnor(), and().
+
+& XNOR()
+  Function: xnor(<value1>, <value2>[, ...])
+
+  XNOR logic gate (boolean equality). Returns 1 if an even number of
+  arguments are true (non-zero), 0 if an odd number are true.
+
+  Example:
+    > say [xnor(1, 1)]
+    You say, "1"
+    > say [xnor(1, 0)]
+    You say, "0"
+    > say [xnor(0, 0)]
+    You say, "1"
+
+  See also: xor(), nand(), nor(), and(), or().
+
+& BASE CONVERSION
+& TOBIN()
+  Function: tobin(<number>)
+
+  Converts an integer to its binary (base-2) string representation.
+  Negative numbers use 32-bit two's complement.
+
+  Example:
+    > say [tobin(42)]
+    You say, "101010"
+    > say [tobin(255)]
+    You say, "11111111"
+
+  See also: todec(), tohex(), tooct().
+
+& TODEC()
+  Function: todec(<number>)
+
+  Converts a number from any standard prefix format to decimal. Accepts
+  0x (hex), 0o (octal), and 0b (binary) prefixes. Without a prefix,
+  parses as base-10.
+
+  Example:
+    > say [todec(0xFF)]
+    You say, "255"
+    > say [todec(0b101010)]
+    You say, "42"
+    > say [todec(0o77)]
+    You say, "63"
+
+  See also: tobin(), tohex(), tooct().
+
+& TOHEX()
+  Function: tohex(<number>)
+
+  Converts an integer to its hexadecimal (base-16) string representation
+  in uppercase, without the 0x prefix. Negative numbers use 32-bit
+  two's complement.
+
+  Example:
+    > say [tohex(255)]
+    You say, "FF"
+    > say [tohex(42)]
+    You say, "2A"
+
+  See also: todec(), tobin(), tooct().
+
+& TOOCT()
+  Function: tooct(<number>)
+
+  Converts an integer to its octal (base-8) string representation.
+  Negative numbers use 32-bit two's complement.
+
+  Example:
+    > say [tooct(255)]
+    You say, "377"
+    > say [tooct(8)]
+    You say, "10"
+
+  See also: todec(), tobin(), tohex().
+
+& PRINTF()
+  Function: printf(<format>, <arg1>[, <arg2>, ...])
+
+  Formatted string output, similar to C's printf. Supports the following
+  format specifiers:
+
+    %s  - Insert argument as a string.
+    %d  - Insert argument as an integer.
+    %f  - Insert argument as a floating-point number.
+    %%  - Insert a literal percent sign.
+
+  Example:
+    > say [printf(Name: %s Age: %d, Bob, 25)]
+    You say, "Name: Bob Age: 25"
+    > say [printf(%s has %d coins, Alice, 100)]
+    You say, "Alice has 100 coins"
+
+  See also: cat(), strcat(), ljust(), rjust().
+
+& TR()
+  Function: tr(<string>, <from>, <to>)
+
+  Transliterates characters in <string>. Each character in <from> is
+  replaced by the corresponding character in <to>, like the Unix tr
+  command.
+
+  Example:
+    > say [tr(Hello World, lo, LO)]
+    You say, "HeLLO WOrLd"
+    > say [tr(abc, abc, xyz)]
+    You say, "xyz"
+
+  See also: edit(), translate().
+
+& STRDISTANCE()
+  Function: strdistance(<string1>, <string2>)
+
+  Returns the Levenshtein edit distance between two strings (case-
+  insensitive). This is the minimum number of single-character edits
+  (insertions, deletions, substitutions) needed to transform one string
+  into the other.
+
+  Example:
+    > say [strdistance(kitten, sitting)]
+    You say, "3"
+    > say [strdistance(hello, hello)]
+    You say, "0"
+
+  See also: comp(), match(), soundlike().
+
+& STRLENVIS()
+  Function: strlenvis(<string>)
+
+  Returns the visible length of <string>, stripping ANSI escape
+  sequences before counting characters. This gives the display width
+  of a string that may contain ANSI color codes.
+
+  Example:
+    > say [strlenvis(Hello)]
+    You say, "5"
+
+  See also: strlen(), stripansi().
+
+& NSECURE()
+  Function: nsecure(<string>)
+
+  Escapes special MUSH characters in <string> to prevent evaluation,
+  similar to secure() but does NOT escape the first character. Special
+  characters escaped: % $ \ [ ] ( ) { } , ;
+
+  Example:
+    > say [nsecure(Hello [World])]
+    You say, "Hello \[World\]"
+
+  See also: secure(), escape().
+
+& HTML_ESCAPE()
+  Function: html_escape(<string>)
+
+  Escapes HTML special characters in <string>. Converts < to &lt;,
+  > to &gt;, & to &amp;, and " to &quot;.
+
+  Example:
+    > say [html_escape(<b>Hello & "World"</b>)]
+    You say, "&lt;b&gt;Hello &amp; &quot;World&quot;&lt;/b&gt;"
+
+  See also: html_unescape(), url_escape().
+
+& HTML_UNESCAPE()
+  Function: html_unescape(<string>)
+
+  Reverses HTML entity escaping. Converts &lt; to <, &gt; to >,
+  &amp; to &, and &quot; to ".
+
+  Example:
+    > say [html_unescape(&lt;b&gt;Hello&lt;/b&gt;)]
+    You say, "<b>Hello</b>"
+
+  See also: html_escape(), url_unescape().
+
+& URL_ESCAPE()
+  Function: url_escape(<string>)
+
+  Percent-encodes a string for use in URLs. Letters, digits, and
+  the characters - _ . ~ are left unchanged; all other characters
+  are encoded as %XX hex values.
+
+  Example:
+    > say [url_escape(hello world!)]
+    You say, "hello%20world%21"
+
+  See also: url_unescape(), html_escape().
+
+& URL_UNESCAPE()
+  Function: url_unescape(<string>)
+
+  Decodes percent-encoded URL strings, converting %XX sequences back
+  to their original characters.
+
+  Example:
+    > say [url_unescape(hello%20world%21)]
+    You say, "hello world!"
+
+  See also: url_escape(), html_unescape().
+
+& ASC()
+  Function: asc(<string>)
+
+  Returns the ASCII code of the first character in <string>. Returns
+  -1 if the string is empty.
+
+  Example:
+    > say [asc(A)]
+    You say, "65"
+    > say [asc(a)]
+    You say, "97"
+
+  See also: chr().
+
+& CHR()
+  Function: chr(<code>)
+
+  Returns the character for the given ASCII code. The code must be in
+  the printable range 32-126. Returns #-1 ARGUMENT OUT OF RANGE for
+  values outside this range.
+
+  Example:
+    > say [chr(65)]
+    You say, "A"
+    > say [chr(32)]
+    You say, " "
+
+  See also: asc().
+
+& STRIP()
+  Function: strip(<string>, <chars>)
+
+  Removes all occurrences of the characters in <chars> from <string>.
+
+  Example:
+    > say [strip(Hello World!, lo)]
+    You say, "He Wrd!"
+    > say [strip(abc123, 123)]
+    You say, "abc"
+
+  See also: tr(), edit(), trim().
+
+& CAPLIST()
+  Function: caplist(<list>[, <delim>])
+
+  Capitalizes the first letter of each word in <list>, lowercasing
+  the rest. Uses <delim> as the list delimiter (default: space).
+
+  Example:
+    > say [caplist(hello world)]
+    You say, "Hello World"
+    > say [caplist(JOHN DOE)]
+    You say, "John Doe"
+
+  See also: capstr(), ucstr(), lcstr().
+
+& SPELLNUM()
+  Function: spellnum(<number>)
+
+  Converts an integer to its English word representation. Supports
+  numbers up to billions and handles negative numbers.
+
+  Example:
+    > say [spellnum(42)]
+    You say, "forty-two"
+    > say [spellnum(1000)]
+    You say, "one thousand"
+    > say [spellnum(-7)]
+    You say, "negative seven"
+
+  See also: roman().
+
+& ROMAN()
+  Function: roman(<number>)
+
+  Converts an integer (1 to 3999999) to Roman numeral notation.
+  Numbers above 3999 use vinculum notation (overlined letters for
+  thousands). Returns #-1 OUT OF RANGE for numbers outside 1-3999999.
+
+  Example:
+    > say [roman(42)]
+    You say, "XLII"
+    > say [roman(2024)]
+    You say, "MMXXIV"
+    > say [roman(9)]
+    You say, "IX"
+
+  See also: spellnum().
+
+& SOUNDEX()
+  Function: soundex(<word>)
+
+  Returns the 4-character Soundex phonetic code for <word>. Soundex
+  codes group words that sound similar, useful for fuzzy name matching.
+
+  Example:
+    > say [soundex(Robert)]
+    You say, "R163"
+    > say [soundex(Rupert)]
+    You say, "R163"
+
+  See also: soundlike(), strdistance().
+
+& SOUNDLIKE()
+  Function: soundlike(<word1>, <word2>)
+
+  Returns 1 if <word1> and <word2> have the same Soundex code (i.e.,
+  they sound similar), 0 otherwise.
+
+  Example:
+    > say [soundlike(Robert, Rupert)]
+    You say, "1"
+    > say [soundlike(Robert, Smith)]
+    You say, "0"
+
+  See also: soundex(), strdistance().
+
+& GARBLE()
+  Function: garble(<text>[, <percent>])
+
+  Randomly corrupts <text> by replacing characters with random printable
+  ASCII characters. <percent> is the chance (0-100) that each character
+  gets replaced; default is 50. Spaces are never garbled.
+
+  Example:
+    > say [garble(Hello World, 30)]
+    You say, "He&lo Wo@ld"
+    > say [garble(secret message)]
+    You say, "s7cr#t m3$s!ge"
+
+  See also: scramble(), encrypt().
+
+& CHARACTER CLASS FUNCTIONS
+& ISALNUM()
+  Function: isalnum(<string>)
+
+  Returns 1 if every character in <string> is alphanumeric (a-z, A-Z,
+  0-9), 0 otherwise. Returns 0 for empty strings.
+
+  Example:
+    > say [isalnum(Hello123)]
+    You say, "1"
+    > say [isalnum(Hello World)]
+    You say, "0"
+
+  See also: isalpha(), isdigit().
+
+& ISALPHA()
+  Function: isalpha(<string>)
+
+  Returns 1 if every character in <string> is alphabetic (a-z, A-Z),
+  0 otherwise. Returns 0 for empty strings.
+
+  Example:
+    > say [isalpha(Hello)]
+    You say, "1"
+    > say [isalpha(Hello1)]
+    You say, "0"
+
+  See also: isalnum(), isupper(), islower().
+
+& ISDIGIT()
+  Function: isdigit(<string>)
+
+  Returns 1 if every character in <string> is a digit (0-9),
+  0 otherwise. Returns 0 for empty strings.
+
+  Example:
+    > say [isdigit(12345)]
+    You say, "1"
+    > say [isdigit(123a)]
+    You say, "0"
+
+  See also: isalnum(), isalpha().
+
+& ISUPPER()
+  Function: isupper(<string>)
+
+  Returns 1 if every character in <string> is an uppercase letter
+  (A-Z), 0 otherwise. Returns 0 for empty strings.
+
+  Example:
+    > say [isupper(HELLO)]
+    You say, "1"
+    > say [isupper(Hello)]
+    You say, "0"
+
+  See also: islower(), isalpha().
+
+& ISLOWER()
+  Function: islower(<string>)
+
+  Returns 1 if every character in <string> is a lowercase letter
+  (a-z), 0 otherwise. Returns 0 for empty strings.
+
+  Example:
+    > say [islower(hello)]
+    You say, "1"
+    > say [islower(Hello)]
+    You say, "0"
+
+  See also: isupper(), isalpha().
+
+& ISSPACE()
+  Function: isspace(<string>)
+
+  Returns 1 if every character in <string> is whitespace (space, tab,
+  newline, carriage return), 0 otherwise. Returns 0 for empty strings.
+
+  Example:
+    > say [isspace(   )]
+    You say, "1"
+    > say [isspace( a )]
+    You say, "0"
+
+  See also: isalpha(), ispunct().
+
+& ISPUNCT()
+  Function: ispunct(<string>)
+
+  Returns 1 if every character in <string> is a punctuation character
+  (not alphanumeric and not a space), 0 otherwise. Returns 0 for
+  empty strings.
+
+  Example:
+    > say [ispunct(!@#)]
+    You say, "1"
+    > say [ispunct(!a#)]
+    You say, "0"
+
+  See also: isalnum(), isspace().
+
+& LIST ARITHMETIC
+& LAVG()
+  Function: lavg(<list>[, <delim>])
+
+  Returns the arithmetic average of all numbers in <list>.
+
+  Example:
+    > say [lavg(10 20 30)]
+    You say, "20"
+    > say [lavg(1|2|3, |)]
+    You say, "2"
+
+  See also: avg(), ladd(), lsub(), lmul(), ldiv().
+
+& LSUB()
+  Function: lsub(<list>[, <delim>])
+
+  Subtracts all elements in <list> from the first element:
+  first - second - third - ...
+
+  Example:
+    > say [lsub(100 20 30)]
+    You say, "50"
+    > say [lsub(10 3 2)]
+    You say, "5"
+
+  See also: sub(), ladd(), lavg(), ldiv().
+
+& LMUL()
+  Function: lmul(<list>[, <delim>])
+
+  Returns the product of all numbers in <list>.
+
+  Example:
+    > say [lmul(2 3 4)]
+    You say, "24"
+    > say [lmul(5|10, |)]
+    You say, "50"
+
+  See also: mul(), ladd(), lsub(), ldiv().
+
+& LDIV()
+  Function: ldiv(<list>[, <delim>])
+
+  Divides the first element by all subsequent elements:
+  first / second / third / ...
+  Division by zero is silently skipped.
+
+  Example:
+    > say [ldiv(100 5 2)]
+    You say, "10"
+    > say [ldiv(1000 10 10)]
+    You say, "10"
+
+  See also: div(), fdiv(), lmul(), lsub().
+
+& LIST MATCHING
+& LISTMATCH()
+  Function: listmatch(<list>, <pattern>[, <delim>])
+
+  Returns all elements in <list> that match the wildcard <pattern>.
+
+  Example:
+    > say [listmatch(apple banana avocado, a*)]
+    You say, "apple avocado"
+    > say [listmatch(cat dog cow, c*)]
+    You say, "cat cow"
+
+  See also: grab(), graball(), nummatch(), match().
+
+& NUMMATCH()
+  Function: nummatch(<list>, <pattern>[, <delim>])
+
+  Returns the count of elements in <list> that match the wildcard
+  <pattern>.
+
+  Example:
+    > say [nummatch(apple banana avocado, a*)]
+    You say, "2"
+    > say [nummatch(cat dog cow, d*)]
+    You say, "1"
+
+  See also: listmatch(), nummember(), words().
+
+& NUMMEMBER()
+  Function: nummember(<list>, <value>[, <delim>])
+
+  Returns the count of exact occurrences of <value> in <list>.
+  Comparison is case-insensitive.
+
+  Example:
+    > say [nummember(a b a c a, a)]
+    You say, "3"
+    > say [nummember(red green blue, red)]
+    You say, "1"
+
+  See also: member(), nummatch(), listmatch().
+
+& VECTOR FUNCTIONS
+& VCROSS()
+  Function: vcross(<vector1>, <vector2>)
+
+  Computes the 3D cross product of two vectors. Both vectors must be
+  exactly 3 dimensions. Returns #-1 VECTORS MUST BE 3D otherwise.
+
+  Example:
+    > say [vcross(1 0 0, 0 1 0)]
+    You say, "0 0 1"
+    > say [vcross(0 1 0, 1 0 0)]
+    You say, "0 0 -1"
+
+  See also: vdot(), vadd(), vsub(), vmul().
+
+& VDIST()
+  Function: vdist(<vector1>, <vector2>)
+
+  Returns the Euclidean distance between two N-dimensional points.
+  Both vectors must have the same number of dimensions.
+
+  Example:
+    > say [vdist(0 0 0, 3 4 0)]
+    You say, "5"
+    > say [vdist(1 1, 4 5)]
+    You say, "5"
+
+  See also: dist2d(), dist3d(), vmag().
+
+& VLERP()
+  Function: vlerp(<vector1>, <vector2>, <t>)
+
+  Linearly interpolates between two vectors. When <t>=0, returns
+  <vector1>; when <t>=1, returns <vector2>. Values of <t> between
+  0 and 1 return proportional blends. Both vectors must have the same
+  number of dimensions.
+
+  Example:
+    > say [vlerp(0 0, 10 10, 0.5)]
+    You say, "5 5"
+    > say [vlerp(0 0 0, 100 200 300, 0.25)]
+    You say, "25 50 75"
+
+  See also: vadd(), vsub(), vmul().
+
+& VNEAR()
+  Function: vnear(<vector1>, <vector2>, <radius>)
+
+  Returns 1 if <vector2> is within <radius> distance of <vector1>,
+  0 otherwise. Both vectors must have the same dimensions.
+
+  Example:
+    > say [vnear(0 0, 3 4, 5)]
+    You say, "1"
+    > say [vnear(0 0, 3 4, 4)]
+    You say, "0"
+
+  See also: vdist(), dist2d(), dist3d().
+
+& VCLAMP()
+  Function: vclamp(<vector>, <min_vector>, <max_vector>)
+
+  Clamps each component of <vector> to the range defined by the
+  corresponding components of <min_vector> and <max_vector>. All
+  three vectors must have the same number of dimensions.
+
+  Example:
+    > say [vclamp(15 -5 50, 0 0 0, 10 10 100)]
+    You say, "10 0 50"
+    > say [vclamp(5 5 5, 0 0 0, 10 10 10)]
+    You say, "5 5 5"
+
+  See also: bound(), vadd(), vsub().
+
+& ENCODING FUNCTIONS
+& ENCODE64()
+  Function: encode64(<string>)
+
+  Encodes <string> using Base64 encoding.
+
+  Example:
+    > say [encode64(Hello World)]
+    You say, "SGVsbG8gV29ybGQ="
+
+  See also: decode64(), digest().
+
+& DECODE64()
+  Function: decode64(<string>)
+
+  Decodes a Base64-encoded <string> back to its original value.
+  Returns #-1 INVALID BASE64 if the input is malformed.
+
+  Example:
+    > say [decode64(SGVsbG8gV29ybGQ=)]
+    You say, "Hello World"
+
+  See also: encode64().
+
+& DIGEST()
+  Function: digest(<algorithm>, <text>)
+
+  Computes a cryptographic hash of <text> using the specified algorithm.
+  Supported algorithms: sha256, sha1, md5, sha512. Returns the hash
+  as a lowercase hexadecimal string.
+
+  Example:
+    > say [digest(sha256, hello)]
+    You say, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    > say [digest(md5, test)]
+    You say, "098f6bcd4621d373cade4e832627b4f6"
+
+  See also: hmac(), crc32(), encode64().
+
+& CRC32()
+  Function: crc32(<string>)
+
+  Computes the CRC32 checksum of <string>, returned as an unsigned
+  integer.
+
+  Example:
+    > say [crc32(Hello)]
+    You say, "4157704578"
+
+  See also: digest(), hmac().
+
+& HMAC()
+  Function: hmac(<algorithm>, <key>, <message>)
+
+  Computes an HMAC (Hash-based Message Authentication Code) of
+  <message> using the specified <algorithm> and <key>. Supported
+  algorithms: sha256, sha1, md5, sha512. Returns the HMAC as a
+  lowercase hexadecimal string.
+
+  Example:
+    > say [hmac(sha256, secret, hello)]
+    You say, "88aab3ede8d3adf94d26ab90d3bafd4a2083070c3bcce9c014ee04a443847c0b"
+
+  See also: digest(), crc32(), encode64().
+
+& OBJECT FUNCTIONS
+& OBJID()
+  Function: objid(<object>)
+
+  Returns the object ID in the format #dbref:timestamp, where timestamp
+  is the object's last modification time (Unix epoch seconds). This
+  format uniquely identifies an object even if dbrefs are recycled.
+
+  Example:
+    > say [objid(me)]
+    You say, "#1234:1710000000"
+
+  See also: num(), createtime().
+
+& CREATETIME()
+  Function: createtime(<object>)
+
+  Returns the creation timestamp of <object> as seconds since the Unix
+  epoch, or -1 if not available.
+
+  Example:
+    > say [createtime(me)]
+    You say, "1710000000"
+
+  See also: objid(), convtime().
+
+& SINGLETIME()
+  Function: singletime(<seconds>)
+
+  Converts a number of seconds into a human-readable duration string.
+  Breaks the value into days, hours, minutes, and seconds as needed.
+
+  Example:
+    > say [singletime(90061)]
+    You say, "1 day 1 hour 1 minute 1 second"
+    > say [singletime(3600)]
+    You say, "1 hour"
+    > say [singletime(45)]
+    You say, "45 seconds"
+
+  See also: convtime(), convsecs().
+
+& LCMDS()
+  Function: lcmds(<object>[, <delim>[, <type>]])
+
+  Lists the $-command or ^-listen patterns defined on <object>. The
+  <type> argument selects the prefix: "$" (default) for $-commands,
+  "^" for ^-listen patterns. Returns command patterns without the
+  leading $ or ^ or the :action part.
+
+  You must be able to examine the object to use this function.
+
+  Example:
+    > say [lcmds(me)]
+    You say, "+who +help inventory"
+
+  See also: lattr(), attrcnt(), examine.
+
+& ATTRCNT()
+  Function: attrcnt(<object>[/<pattern>])
+
+  Returns the number of attributes on <object>. If a wildcard
+  <pattern> is given after a slash, only counts matching attribute
+  names. You must be able to examine the object.
+
+  Example:
+    > say [attrcnt(me)]
+    You say, "15"
+    > say [attrcnt(me/CMD_*)]
+    You say, "3"
+
+  See also: lattr(), lcmds(), hasattr().
+
+& LROOMS()
+  Function: lrooms(<room>[, <depth>])
+
+  Lists room dbrefs reachable from <room> within <depth> exit
+  traversals (default 1, max 20). Uses breadth-first search through
+  exits. You must be able to examine the starting room.
+
+  Example:
+    > say [lrooms(here)]
+    You say, "#200 #201 #205"
+    > say [lrooms(here, 2)]
+    You say, "#200 #201 #205 #210 #211"
+
+  See also: lexits(), lcon(), loc().
+
+& MAILSUBJ()
+  Function: mailsubj(<message_number>)
+
+  Returns the subject line of the specified mail message. Returns
+  #-1 NO SUCH MESSAGE if the message number is invalid.
+
+  Example:
+    > say [mailsubj(1)]
+    You say, "Welcome to the game!"
+
+  See also: mail(), mailfrom().
+
+& ATTRIBUTE DEFINITION FUNCTIONS
+& LATTRDEF()
+  Function: lattrdef([<pattern>[, <type>]])
+
+  Returns a space-separated list of user-defined attribute names.
+  Optionally filters by wildcard <pattern> and/or object <type>
+  (player, thing, room, exit). Non-wizards can only see VISUAL
+  attribute definitions.
+
+  Example:
+    > say [lattrdef()]
+    You say, "MYATTR CUSTOM_FLAG ZONE_ID"
+    > say [lattrdef(MY*)]
+    You say, "MYATTR"
+
+  See also: attrdefflags(), hasattrdef(), setattrdef().
+
+& ATTRDEFFLAGS()
+  Function: attrdefflags(<attrname>)
+
+  Returns the flag string for a user-defined attribute definition.
+  Non-wizards can only query VISUAL attribute definitions.
+
+  Example:
+    > say [attrdefflags(MYATTR)]
+    You say, "IVwp"
+
+  See also: lattrdef(), hasattrdef(), setattrdef().
+
+& HASATTRDEF()
+  Function: hasattrdef(<attrname>)
+
+  Returns 1 if an attribute definition (user-defined or built-in)
+  exists with the given name, 0 otherwise.
+
+  Example:
+    > say [hasattrdef(DESC)]
+    You say, "1"
+    > say [hasattrdef(NONEXISTENT)]
+    You say, "0"
+
+  See also: lattrdef(), attrdefflags(), setattrdef().
+
+& SETATTRDEF()
+  Function: setattrdef(<attrname>, <flags>)
+
+  Modifies flags on a user-defined attribute definition. Wizard-only.
+  Supported flags include WIZARD, VISUAL, NO_INHERIT, HIDDEN, and
+  PROPAGATE. Prefix a flag with ! to clear it.
+
+  Example:
+    > say [setattrdef(MYATTR, VISUAL)]
+    You say, ""
+    > say [setattrdef(MYATTR, !WIZARD VISUAL)]
+    You say, ""
+
+  See also: lattrdef(), attrdefflags(), hasattrdef().
+
+& SIDE-EFFECT FUNCTIONS
+& CLONE()
+  Function: clone(<object>)
+
+  Side-effect function that clones <object> and returns the dbref of
+  the new clone. You must be able to examine the target object.
+
+  Example:
+    > say [clone(#1234)]
+    You say, "#1235"
+
+  See also: @clone, create().
+
+& THINK()
+  Function: think(<message>)
+
+  Side-effect function that sends <message> to the executor as a
+  notification (visible only to you). Useful for debugging output
+  within function expressions.
+
+  Example:
+    > say [think(debug: value is 5)]
+    You say, ""
+
+  (The debug message appears as a separate line to you.)
+
+  See also: pemit(), @pemit.
+
+& CONNECTION FUNCTIONS
+& MWHO()
+  Function: mwho()
+
+  Returns a space-separated list of dbrefs of all connected players
+  visible to you. DARK and UNFINDABLE players are hidden from
+  non-wizards.
+
+  Example:
+    > say [mwho()]
+    You say, "#1 #42 #100"
+
+  See also: lwho(), nwho(), conn(), idle().
+
+& ITERATION FUNCTIONS
+& IBREAK()
+  Function: ibreak([<levels>])
+
+  Breaks out of an iter() or parse() loop. If <levels> is specified,
+  breaks out of that many nesting levels. Default is 1.
+
+  Example:
+    > say [iter(1 2 3 4 5, [if(eq(##,3),ibreak())]##)]
+    You say, "1 2 "
+
+  See also: iter(), parse(), itext().
+
+& RANDEXTRACT()
+  Function: randextract(<list>[, <delim>[, <count>]])
+
+  Extracts <count> random elements from <list> without repetition.
+  Default count is 1. Uses Fisher-Yates partial shuffle for fairness.
+
+  Example:
+    > say [randextract(a b c d e)]
+    You say, "c"
+    > say [randextract(a b c d e, , 3)]
+    You say, "d a e"
+
+  See also: shuffle(), rand(), pickrand().
+
+& ELEMENTPOS()
+  Function: elementpos(<list>, <element>[, <delim>])
+
+  Returns the 1-based position of <element> in <list>, using case-
+  insensitive matching. Returns 0 if not found.
+
+  Example:
+    > say [elementpos(apple banana cherry, banana)]
+    You say, "2"
+    > say [elementpos(red green blue, BLUE)]
+    You say, "3"
+
+  See also: member(), match(), listmatch().
+
+& NAVIGATION FUNCTIONS
+
+  GoTinyMUSH includes a comprehensive 3D navigation system built as
+  softcode functions. It provides:
+
+    - A 4-quadrant grid coordinate system (AA-ZZ letters x 0-999 numbers)
+    - 32-point compass heading system (0=E, counterclockwise)
+    - Navigation projection with drift and climb
+    - Multi-object tactical calculations (bearing, intercept, ETA)
+    - Deterministic terrain topology with features
+    - Dual-medium current system (water/air)
+    - Temperature modeling with thermoclines
+    - Point-of-Interest (POI) management
+    - Multi-map instancing
+
+  See the individual function entries for details.
+
+  See also: HEADING FUNCTIONS, GRID FUNCTIONS, TACTICAL FUNCTIONS,
+  TOPOLOGY FUNCTIONS, POI FUNCTIONS.
+
+& HEADING FUNCTIONS
+& HVEC()
+  Function: hvec(<heading>)
+
+  Converts a heading (0-31) to its unit direction vector "dx dy".
+  Heading 0 is East, increasing counterclockwise. Each step is 11.25
+  degrees.
+
+  Example:
+    > say [hvec(0)]
+    You say, "1 0"
+    > say [hvec(8)]
+    You say, "0 1"
+
+  See also: hdelta(), hname(), h2deg(), vec2h().
+
+& HDELTA()
+  Function: hdelta(<heading1>, <heading2>)
+
+  Returns the shortest turn between two headings. Positive means
+  counterclockwise, negative means clockwise. Range: -16 to +16.
+
+  Example:
+    > say [hdelta(0, 4)]
+    You say, "4"
+    > say [hdelta(0, 28)]
+    You say, "-4"
+
+  See also: hvec(), hname(), bearing().
+
+& HNAME()
+  Function: hname(<heading>[, <exact>])
+
+  Converts a heading (0-31) to a compass direction name. Without
+  <exact> (or 0), returns a 16-point name. With <exact>=1, returns
+  the precise 32-point name (e.g., "EbN" for East by North).
+
+  Example:
+    > say [hname(0)]
+    You say, "E"
+    > say [hname(4)]
+    You say, "NE"
+    > say [hname(1, 1)]
+    You say, "EbN"
+
+  See also: hvec(), hdelta(), h2deg().
+
+& H2DEG()
+  Function: h2deg(<heading>)
+
+  Converts a heading (0-31) to degrees (0-360). Heading 0 = 0 degrees
+  (East), heading 8 = 90 degrees (North).
+
+  Example:
+    > say [h2deg(0)]
+    You say, "0"
+    > say [h2deg(8)]
+    You say, "90"
+    > say [h2deg(16)]
+    You say, "180"
+
+  See also: deg2h(), hvec(), hname().
+
+& DEG2H()
+  Function: deg2h(<degrees>)
+
+  Converts degrees to the nearest heading (0-31). Rounds to the
+  closest step. Negative values wrap correctly.
+
+  Example:
+    > say [deg2h(0)]
+    You say, "0"
+    > say [deg2h(90)]
+    You say, "8"
+    > say [deg2h(45)]
+    You say, "4"
+
+  See also: h2deg(), vec2h(), hvec().
+
+& VEC2H()
+  Function: vec2h(<x>, <y>)
+
+  Converts a direction vector to the nearest heading (0-31).
+
+  Example:
+    > say [vec2h(1, 0)]
+    You say, "0"
+    > say [vec2h(0, 1)]
+    You say, "8"
+    > say [vec2h(1, 1)]
+    You say, "4"
+
+  See also: hvec(), deg2h(), h2deg().
+
+& GRID FUNCTIONS
+& GRIDABS()
+  Function: gridabs(<location>)
+  Function: gridabs(<letters>, <number>, <quadrant>)
+
+  Converts a grid address to absolute X,Y coordinates. Accepts either
+  a single string like "EL-453-NE" or three separate arguments. Grid
+  addresses use the format LL-NNN-QQ where LL is a two-letter code
+  (AA-ZZ), NNN is a number (0-999), and QQ is a quadrant (NE/NW/SE/SW).
+
+  Example:
+    > say [gridabs(AA-0-NE)]
+    You say, "0 0"
+    > say [gridabs(EL-453-NE)]
+    You say, "115 453"
+    > say [gridabs(EL, 453, NE)]
+    You say, "115 453"
+
+  See also: absgrid(), griddist(), gridcourse().
+
+& ABSGRID()
+  Function: absgrid(<x>, <y>)
+
+  Converts absolute X,Y coordinates to a grid address string.
+
+  Example:
+    > say [absgrid(0, 0)]
+    You say, "AA-0-NE"
+    > say [absgrid(115, 453)]
+    You say, "EL-453-NE"
+    > say [absgrid(-676, 0)]
+    You say, "AA-0-NW"
+
+  See also: gridabs(), gridlocfull().
+
+& GRIDDIST()
+  Function: griddist(<location1>, <location2>)
+
+  Returns the 2D Euclidean distance between two grid locations.
+  Altitude is not considered.
+
+  Example:
+    > say [griddist(AA-0-NE, AA-10-NE)]
+    You say, "10"
+    > say [griddist(AA-0-NW, AA-0-NE)]
+    You say, "676"
+
+  See also: griddist3d(), gridcourse(), vdist().
+
+& GRIDCOURSE()
+  Function: gridcourse(<from>, <to>)
+
+  Returns the heading and distance from one grid location to another
+  as "heading distance".
+
+  Example:
+    > say [gridcourse(AA-0-NE, AA-100-NE)]
+    You say, "8 100"
+    > say [gridcourse(AA-0-NE, ZZ-0-NE)]
+    You say, "0 675"
+
+  See also: griddist(), bearing(), gridnav().
+
+& GRIDNAV()
+  Function: gridnav(<position>, <heading>, <speed>[, <climb>[, <drift>]])
+
+  Projects a new 3D position given current position (as "x y z"),
+  heading (0-31), speed, optional climb rate, and optional drift.
+  This is the core function called each tick to move an object.
+
+  Drift applies random perturbation in [-drift, +drift] per axis.
+  Altitude is clamped to -1000 to +1000.
+
+  Example:
+    > say [gridnav(100 200 50, 0, 10)]
+    You say, "110 200 50"
+    > say [gridnav(100 200 50, 8, 10)]
+    You say, "100 210 50"
+    > say [gridnav(100 200 50, 0, 10, 5)]
+    You say, "110 200 55"
+
+  See also: gridcourse(), bearing(), drift().
+
+& GRIDPARSEFULL()
+  Function: gridparsefull(<location>)
+
+  Parses a grid location with optional altitude (LL-NNN-QQ[:ALT])
+  and returns absolute coordinates as "x y z".
+
+  Example:
+    > say [gridparsefull(EL-453-NE:100)]
+    You say, "115 453 100"
+    > say [gridparsefull(AA-0-NE)]
+    You say, "0 0 0"
+
+  See also: gridabs(), gridlocfull(), absgrid().
+
+& GRIDLOCFULL()
+  Function: gridlocfull(<x>, <y>, <z>)
+
+  Converts absolute X, Y, Z coordinates to a full grid location
+  string with altitude in the format "LL-NNN-QQ:ALT".
+
+  Example:
+    > say [gridlocfull(115, 453, 100)]
+    You say, "EL-453-NE:100"
+
+  See also: absgrid(), gridparsefull().
+
+& GRIDDIST3D()
+  Function: griddist3d(<location1>, <location2>)
+
+  Returns the 3D Euclidean distance between two grid locations
+  including altitude. Locations use the format LL-NNN-QQ:ALT.
+
+  Example:
+    > say [griddist3d(AA-0-NE:0, AA-0-NE:100)]
+    You say, "100"
+    > say [griddist3d(AA-0-NE:0, AA-10-NE:10)]
+    You say, "14.142136"
+
+  See also: griddist(), vdist(), dist3d().
+
+& GPS()
+  Function: gps(<position>[, <heading>])
+
+  Returns a full GPS string for a position vector ("x y z"). Includes
+  grid address, altitude, and optionally compass heading.
+
+  Example:
+    > say [gps(115 453 100)]
+    You say, "EL-453-NE ALT:100"
+    > say [gps(115 453 100, 4)]
+    You say, "EL-453-NE ALT:100 HDG:NE"
+
+  See also: absgrid(), gridlocfull(), hname().
+
+& TACTICAL FUNCTIONS
+& BEARING()
+  Function: bearing(<position1>, <position2>)
+
+  Returns the heading (0-31) from position1 to position2. This is a
+  2D calculation (ignores Z component). Positions are space-delimited
+  vectors ("x y" or "x y z").
+
+  Example:
+    > say [bearing(100 200, 300 400)]
+    You say, "4"
+    > say [bearing(100 200, 100 400)]
+    You say, "8"
+
+  See also: pitch(), closing(), gridcourse(), hname().
+
+& PITCH()
+  Function: pitch(<position1>, <position2>)
+
+  Returns the vertical angle in degrees from position1 to position2.
+  Positive means the target is above, negative means below. Range:
+  -90 to +90. Both positions must be 3D vectors ("x y z").
+
+  Example:
+    > say [pitch(100 200 50, 100 200 80)]
+    You say, "90"
+    > say [pitch(100 200 50, 200 200 100)]
+    You say, "26.565051"
+
+  See also: bearing(), closing(), atan2().
+
+& CLOSING()
+  Function: closing(<pos1>, <hdg1>, <spd1>, <pos2>, <hdg2>, <spd2>)
+
+  Calculates the closing rate between two moving objects in distance
+  units per tick. Positive means getting closer, negative means
+  separating. Positions are "x y" vectors, headings are 0-31.
+
+  Example:
+    > say [closing(0 0, 0, 10, 100 0, 16, 10)]
+    You say, "20"
+    > say [closing(0 0, 0, 10, 100 0, 0, 10)]
+    You say, "-10"
+
+  See also: bearing(), relvel(), eta(), intercept().
+
+& RELVEL()
+  Function: relvel(<heading1>, <speed1>, <heading2>, <speed2>)
+
+  Returns the relative velocity vector of object 2 as seen from
+  object 1. Result is "dx dy" per tick.
+
+  Example:
+    > say [relvel(0, 10, 16, 10)]
+    You say, "-20 0"
+    > say [relvel(0, 10, 0, 10)]
+    You say, "0 0"
+
+  See also: closing(), bearing(), hvec().
+
+& ETA()
+  Function: eta(<position>, <heading>, <speed>, <target>)
+
+  Estimates the number of ticks to reach <target> from <position>
+  at the given heading and speed, assuming the target is stationary.
+  Returns -1 if moving away or perpendicular to the target.
+
+  Example:
+    > say [eta(0 0, 0, 10, 100 0)]
+    You say, "10"
+    > say [eta(0 0, 0, 10, 0 100)]
+    You say, "-1"
+
+  See also: intercept(), closing(), bearing(), griddist().
+
+& INTERCEPT()
+  Function: intercept(<pos1>, <speed1>, <pos2>, <heading2>, <speed2>)
+
+  Calculates the optimal heading (0-31) for object 1 to intercept a
+  moving object 2. Uses binary search to solve the pursuit geometry.
+  Returns -1 if no intercept is possible (target too fast or moving
+  away).
+
+  Example:
+    > say [intercept(0 0, 15, 100 0, 8, 10)]
+    You say, "6"
+    > say [intercept(0 0, 10, 100 0, 0, 10)]
+    You say, "0"
+
+  See also: eta(), closing(), bearing(), gridnav().
+
+& ALTCLAMP()
+  Function: altclamp(<z>)
+
+  Clamps an altitude value to the valid range (-1000 to 1000).
+
+  Example:
+    > say [altclamp(1500)]
+    You say, "1000"
+    > say [altclamp(-2000)]
+    You say, "-1000"
+    > say [altclamp(500)]
+    You say, "500"
+
+  See also: bound(), gridnav().
+
+& DRIFT()
+  Function: drift(<position>, <max_drift>)
+
+  Applies random drift to a position vector. <max_drift> can be a
+  single number (uniform per axis) or a vector (per-component max).
+  Returns the new drifted position.
+
+  Example:
+    > say [drift(100 200 50, 3)]
+    You say, "101.7 198.4 51.2"
+    > say [drift(100 200 50, 5 5 1)]
+    You say, "103.2 197.8 50.4"
+
+  See also: vrand(), vrandc(), gridnav().
+
+& VRAND()
+  Function: vrand(<max_magnitude>[, <dimensions>])
+
+  Generates a random direction vector with magnitude between 0 and
+  <max_magnitude>. Direction is uniformly random on the unit sphere.
+  Default dimensions is 3.
+
+  Example:
+    > say [vrand(5)]
+    You say, "-2.31 1.74 3.12"
+    > say [vrand(5, 2)]
+    You say, "3.21 -1.45"
+
+  See also: vrandc(), drift(), rand().
+
+& VRANDC()
+  Function: vrandc(<max_per_component>)
+
+  Generates a per-component random vector where each axis is
+  independently randomized in [-max, +max]. The argument is a vector
+  specifying the maximum for each component.
+
+  Example:
+    > say [vrandc(5 5 1)]
+    You say, "2.3 -4.1 0.7"
+    > say [vrandc(10 10 0)]
+    You say, "-3.4 7.2 0"
+
+  See also: vrand(), drift().
+
+& TOPOLOGY FUNCTIONS
+& TOPOLOGY()
+  Function: topology(<zone_dbref>, <x>, <y>)
+
+  Returns the terrain elevation at position (x, y) within the given
+  zone. Positive values indicate land above sea level, negative values
+  indicate water depth below sea level, zero is the shoreline.
+
+  The zone object defines terrain via attributes:
+    TOPO_SEED       - integer seed (makes each zone unique)
+    TOPO_BASE       - baseline elevation (e.g., -20 for ocean)
+    TOPO_GRADIENT   - "axis rate" (e.g., "x -0.15")
+    TOPO_NOISE_AMP  - noise amplitude (roughness, default 2.0)
+    TOPO_NOISE_FREQ - noise frequency (feature size, default 0.05)
+    TOPO_FEATURES   - count of terrain features
+    TOPO_F_1..N     - feature definitions
+
+  Feature types: seamount, island, basin, trench, ridge, shelf.
+
+  Results are deterministic: same inputs always return the same output.
+
+  Example:
+    > say [topology(#100, 50, 50)]
+    You say, "-18.4"
+
+  See also: depth(), islandchk(), topomap(), topoflush().
+
+& TOPOFLUSH()
+  Function: topoflush(<zone_dbref>)
+
+  Clears the cached topology data for a zone. Call this after modifying
+  any TOPO_* attributes on the zone object so that subsequent calls to
+  topology(), depth(), etc. use the updated values. Returns 1.
+
+  Example:
+    > say [topoflush(#100)]
+    You say, "1"
+
+  See also: topology(), depth(), islandchk().
+
+& DEPTH()
+  Function: depth(<zone_dbref>, <x>, <y>[, <tide_offset>])
+
+  Returns the water depth at position (x, y) as a positive number.
+  Returns 0 if the position is on land (above sea level). The optional
+  <tide_offset> adjusts the effective sea level.
+
+  Example:
+    > say [depth(#100, 50, 50)]
+    You say, "18.4"
+    > say [depth(#100, 50, 50, 5)]
+    You say, "13.4"
+
+  See also: topology(), islandchk(), topomap().
+
+& ISLANDCHK()
+  Function: islandchk(<zone_dbref>, <x>, <y>[, <tide_offset>])
+
+  Returns 1 if position (x, y) is on land (elevation > 0), 0 if it
+  is water. The optional <tide_offset> adjusts the effective sea level.
+
+  Example:
+    > say [islandchk(#100, 50, 50)]
+    You say, "0"
+    > say [islandchk(#100, 200, 200)]
+    You say, "1"
+
+  See also: topology(), depth(), topomap().
+
+& TOPOMAP()
+  Function: topomap(<zone_dbref>, <x1>, <y1>, <x2>, <y2>[, <step>])
+
+  Renders a topology map as ANSI-colored ASCII art. The map covers the
+  rectangle from (x1, y1) to (x2, y2) with one character per <step>
+  grid units (default 1). Output is clamped to 120x60 characters.
+
+  Elevation tiers are color-coded:
+    ^ (bright green)  - high land (>10)
+    . (yellow)        - beach/shore (0-10)
+    ~ (bright cyan)   - shallows (0-5 depth)
+    ~ (cyan)          - moderate depth (5-15)
+    - (bright blue)   - deep water (15-30)
+    - (blue)          - very deep (30-60)
+    = (magenta)       - abyss (60-100)
+    # (bright magenta)- trench (>100)
+
+  Example:
+    > say [topomap(#100, 0, 0, 50, 30, 2)]
+
+  See also: topology(), depth(), islandchk().
+
+& WEATHER FUNCTIONS
+& CURRENT()
+  Function: current(<zone>, <x>, <y>[, <tide>[, <storm>[, <wind_hdg>,
+            <wind_str>[, <medium>]]]])
+
+  Returns the flow vector "dx dy" at position (x, y) in the given zone.
+  Supports both water and air medium.
+
+  Arguments:
+    zone      - Zone dbref with CURRENT_* and TOPO_* attributes
+    x, y      - Position coordinates
+    tide      - Tide phase, -1.0 (ebb) to 1.0 (flood), default 0
+    storm     - Storm multiplier on currents, default 1.0
+    wind_hdg  - Wind compass heading in degrees (0=N, 90=E)
+    wind_str  - Wind speed
+    medium    - "water" (default) or "air"
+
+  Water current combines: base current, Ekman wind-driven current (3%
+  of wind, 45 degrees right), topology deflection, shallow-water
+  friction, and tidal oscillation.
+
+  Air current combines: base wind (AIR_BASE attr), weather wind at
+  full strength, topology deflection, and venturi acceleration over
+  peaks.
+
+  Zone attributes:
+    CURRENT_BASE    - "heading strength" for prevailing current
+    CURRENT_DEFLECT - topology deflection factor (default 1.0)
+    CURRENT_TIDAL   - "heading strength" for tidal component
+    AIR_BASE        - "heading strength" for prevailing wind
+
+  Example:
+    > say [current(#100, 50, 50)]
+    You say, "0.3 -0.1"
+    > say [current(#100, 50, 50, 0.5, 2.0, 90, 10, air)]
+    You say, "15.2 0.8"
+
+  See also: topology(), temperature(), depth().
+
+& TEMPERATURE()
+  Function: temperature(<zone>, <x>, <y>[, <depth>[, <season_offset>]])
+
+  Returns the temperature at position (x, y) and optional depth below
+  surface. Temperature is computed from:
+    - Base temperature (TEMP_BASE attr, default 20)
+    - Depth cooling (TEMP_DEPTH_RATE per unit, default 0.1)
+    - Position gradient (TEMP_GRADIENT attr)
+    - Feature warming (volcanic features warm nearby water)
+    - Season offset (passed by weather system)
+
+  Zone attributes:
+    TEMP_BASE       - surface temperature (default 20)
+    TEMP_DEPTH_RATE - cooling per unit depth (default 0.1)
+    TEMP_GRADIENT   - "axis rate" (e.g., "y -0.02" = colder north)
+
+  Example:
+    > say [temperature(#100, 50, 50)]
+    You say, "20"
+    > say [temperature(#100, 50, 50, 30)]
+    You say, "17"
+    > say [temperature(#100, 50, 50, 0, -5)]
+    You say, "15"
+
+  See also: current(), topology(), depth().
+
+& MAP INSTANCE FUNCTIONS
+& MAPINSTANCE()
+  Function: mapinstance(<instance_id>, <location>)
+  Function: mapinstance(<instance_id>, <x>, <y>[, <z>])
+
+  Constructs an instanced grid location key by combining an instance
+  ID with a grid location, separated by a pipe. Used for multi-map
+  systems where each planet/zone has its own grid.
+
+  Example:
+    > say [mapinstance(terra, EL-453-NE)]
+    You say, "terra|EL-453-NE"
+    > say [mapinstance(terra, 115, 453)]
+    You say, "terra|EL-453-NE"
+
+  See also: mapparse(), gridabs(), absgrid().
+
+& MAPPARSE()
+  Function: mapparse(<key>, <component>)
+
+  Splits an instanced grid location key and extracts a component.
+  Valid components: instance, loc, x, y, z.
+
+  Example:
+    > say [mapparse(terra|EL-453-NE, instance)]
+    You say, "terra"
+    > say [mapparse(terra|EL-453-NE, loc)]
+    You say, "EL-453-NE"
+    > say [mapparse(terra|EL-453-NE, x)]
+    You say, "115"
+
+  See also: mapinstance(), gridabs().
+
+& POI FUNCTIONS
+& POIFORMAT()
+  Function: poiformat(<x>, <y>, <z>, <height>, <instance>, <name>
+            [, <tags>])
+
+  Formats a Point of Interest attribute value string. POIs are stored
+  as: "x y z height|instance|name|tags"
+
+  Example:
+    > say [poiformat(100, 200, 50, 25, terra, Crystal Tower, landmark quest)]
+    You say, "100 200 50 25|terra|Crystal Tower|landmark quest"
+
+  See also: poiparse(), poiinrange(), poidist(), poibearing().
+
+& POIPARSE()
+  Function: poiparse(<poi_value>, <component>)
+
+  Extracts a component from a POI attribute value string.
+  Valid components: x, y, z, height, instance, name, tags, pos,
+  grid, gps.
+
+  Example:
+    > say [poiparse(100 200 50 25|terra|Crystal Tower|landmark, name)]
+    You say, "Crystal Tower"
+    > say [poiparse(100 200 50 25|terra|Crystal Tower|landmark, pos)]
+    You say, "100 200 50"
+    > say [poiparse(100 200 50 25|terra|Crystal Tower|landmark, grid)]
+    You say, "DW-200-NE"
+
+  See also: poiformat(), poiinrange(), poidist().
+
+& POIINRANGE()
+  Function: poiinrange(<poi_value>, <position>, <radius>)
+
+  Returns 1 if <position> ("x y z" vector) is within <radius> distance
+  of the POI, accounting for the POI's vertical extent (z to z+height).
+  Returns 0 otherwise.
+
+  Example:
+    > say [poiinrange(100 200 50 25|terra|Tower|landmark, 105 205 60, 10)]
+    You say, "1"
+    > say [poiinrange(100 200 50 25|terra|Tower|landmark, 200 200 50, 10)]
+    You say, "0"
+
+  See also: poidist(), poibearing(), poiparse().
+
+& POIDIST()
+  Function: poidist(<poi_value>, <position>)
+
+  Returns the distance from <position> ("x y z" vector) to the nearest
+  point of the POI, accounting for the POI's vertical extent.
+
+  Example:
+    > say [poidist(100 200 50 25|terra|Tower|landmark, 105 205 60)]
+    You say, "7.071068"
+
+  See also: poiinrange(), poibearing(), griddist().
+
+& POIBEARING()
+  Function: poibearing(<poi_value>, <position>)
+
+  Returns the heading (0-31) from <position> ("x y" or "x y z") toward
+  the POI's center position.
+
+  Example:
+    > say [poibearing(100 200 50 25|terra|Tower|landmark, 90 190 50)]
+    You say, "4"
+
+  See also: poidist(), poiinrange(), bearing().

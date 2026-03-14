@@ -193,6 +193,7 @@
   may be set.
 
 & @apply_marked
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @apply_marked <command>
  
   Performs <command> once for each object in the database that has been
@@ -307,6 +308,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   See also: @chown, stripped_flags.
  
 & @cut
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @cut <object/exit>
   Cuts off the object or exit list for the current location at the indicated
   object or exit by setting [next(thing)] to NOTHING.  Objects or exits that
@@ -406,6 +408,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
      rename       - Renames <object> to <value>
 
 & @freelist
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @freelist <dbref>
  
   This command puts a garbage object, specified by <dbref>, at the head
@@ -474,6 +477,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   unused attribute.  This command may normally only be invoked by God.
  
 & @hashresize
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @hashresize
  
   This God-only command dynamically resizes a number of the MUSH's internal
@@ -616,6 +620,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   be run when an object moves, regardless of the reason why it has moved.
  
 & @kick
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @kick <count>
   Immediately executes the first <count> commands from the top of the queue.
   See also: @disable, @enable, @timewarp.
@@ -1057,6 +1062,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   <message> is the specified message to log.
  
 & @logrotate
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @logrotate
  
   This command, which can only be used by God, rotates the log file.
@@ -1067,6 +1073,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   (netmush.log.0, netmush.log.1, etc., incrementing with each @logrotate).
   
 & @mark
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @mark[/<switches>] [<player>] [<class>=<restriction>]
  
   Sets or clears the mark bit for objects that match the search criteria.
@@ -1080,6 +1087,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   See also: @apply_marked, @@mark_all, SEARCH CRITERIA.
 
 & @mark_all
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @mark_all[/<switches>]
  
   Sets or clears the mark bit for objects that match the search criteria.
@@ -1130,6 +1138,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   Sets the wealth of all players to <amount>.
 
 & @purge
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @purge
   Immediately destroys any rooms that are waiting to be destroyed, crediting
   their owners for the cost of creating the room.  The freelist is also 
@@ -1167,6 +1176,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   @readcache.
  
 & @restart
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @restart
   
   This command restarts the game, in a fashion which is largely transparent
@@ -1185,6 +1195,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   old binary, then copy the new one into place.
 
 & @rwho
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @rwho[/<switches>]
   Sets up or breaks the connection to the remote RWHO server over which
   WHO data is transmitted.  Note that changes to many of the RWHO
@@ -1213,6 +1224,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   See also: status_file
 
 & @startslave
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @startslave
  
   Creates an external slave process that does DNS lookups. This only
@@ -1254,6 +1266,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   See also: @sql, @sqldisconnect.
 
 & @sqlconnect
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @sqlconnect
  
   Deprecated alias for @sqlinit. See 'wizhelp @sqlinit'.
@@ -1268,6 +1281,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   See also: @sql, @sqlinit.
  
 & @timewarp
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @timewarp[/<switches>] <secs>
   Subtracts (or adds if negative) <secs> to one or more internal timers,
   depending on the switches specified from the following list:
@@ -1287,6 +1301,7 @@ See also: exit_attr_defaults, player_attr_defaults, room_attr_defaults,
   See also: @list options.
 
 & @timecheck
+  NOTE: This command is not implemented in GoTinyMUSH.
   Command: @timecheck[/<switches>]
  
   If timechecking instrumentation is enabled, statistics are kept, for
@@ -1615,6 +1630,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: forbid_site, permit_site.
 
 & binary_home
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: binary_home <path>.  Default: ./bin
   Specifies the directory in which binary files are stored. You do not
   need to follow this with a trailing slash (/).
@@ -1659,6 +1675,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: cache_width.
 
 & cache_width
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: cache_width <width>.  Default: 20
  
   Specifies the number of buckets in the database cache.  A hashing function
@@ -1680,6 +1697,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: check_interval, @dbck.
 
 & cache_steal_dirty
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: cache_steal_dirty <yes/no>.  Default: No
   Specifies whether or not the cache manager may take a modified attribute
   and write it out when trying to insert a new attribute into the cache.
@@ -2057,6 +2075,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: badsite_file, permit_site, register_site, SITE LISTS.
 
 & fork_dump
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: fork_dump <yes/no>.  Default: No
  
   Indicates whether or not database dumps are to be done by fork()ing off a
@@ -2067,6 +2086,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: fork_vfork.
 
 & fork_vfork
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: fork_vfork <yes/no>.  Default: No
   Indicates whether or not the vfork() system call should be used in place of
   fork() when a database dump is to be performed.  This parameter is only
@@ -2152,9 +2172,11 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   (unless blocked by a recursion limit)
 
 & garbage_chunk
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: garbage_chunk <number>.  Default: 3
 
 & gdbm_database
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: gdbm_database <filename>.  Default: None.
   Specifies the name of the file that stores the text portion of the
   database.  The text strings are stored in a binary format optimized for
@@ -2721,6 +2743,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   typing, for example, an '-' by accident instead of '='.
   
 & paranoid_allocate
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: paranoid_allocate <yes/no>.  Default: No
 
   Controls whether or not the game performs a consistency check on the entire
@@ -3077,6 +3100,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: @quota, exit_quota, player_quota, thing_quota, QUOTAS.
 
 & rwho_data_port
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: rwho_data_port <number>.  Default: 0
   Sets the port number that is used to retrieve RWHO information from the
   remote RWHO server in response to a user entering the RWHO command.
@@ -3087,6 +3111,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: RWHO, rwho_host.
 
 & rwho_dump_interval
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: rwho_dump_interval <secs>.  Default: 241
   Sets the number of seconds between RWHO dumps, during which the MUSH sends
   an 'I am alive' message and a list of all connected users to the remote RWHO
@@ -3094,18 +3119,21 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: mud_name, rwho_host, rwho_info_port, rwho_password, rwho_transmit.
 
 & rwho_host
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: rwho_host <hostname/ip_address>.  Default: 36.21.0.69
   Sets the host name or IP address of the remote RWHO server.
   See also: mud_name, rwho_data_port, rwho_info_port, rwho_password,
             rwho_transmit.
 
 & rwho_info_port
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: rwho_info_port <number>.  Default: 6888
   Sets the port number to be used when sending data to the remote RWHO
   server.
   See also: mud_name, rwho_host, rwho_password, rwho_transmit.
 
 & rwho_password
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: rwho_password <string>.  Default: something wrong.
   Sets the password that is used when sending data to a remote RWHO server.
   You must receive the value for this parameter from the administrator
@@ -3113,6 +3141,7 @@ use_global_aconn	visible_wizards		wizard_obeys_linklock
   See also: mud_name, rwho_host, rwho_info_port, rwho_transmit.
 
 & rwho_transmit
+  NOTE: This configuration parameter is specific to C TinyMUSH and is not used by GoTinyMUSH.
   Config parameter: rwho_transmit <yes/no>.  Default: No
   Indicates whether or not to transmit data to a remote RWHO server.
   See also: @list, mud_name, rwho_host, rwho_info_port, rwho_password.
@@ -4151,4 +4180,177 @@ TLS/SSL - Encrypted connections
     - Crystal: temperature affects resonance stability
 
   See also: topology(), depth(), current().
+
+& @botcreate
+  Command: @botcreate <name>
+
+  Creates a new ROBOT-flagged player object intended for use as a bot.
+  The bot is created with no password and cannot log in interactively.
+  An API key is automatically generated for the bot, which is the sole
+  means of authentication (via the WebSocket API).
+
+  The bot is placed at the creator's current location and its home is
+  set to that location. The name must be at least 2 characters long and
+  must not contain double-quote or semicolon characters.
+
+  This command is wizard-only.
+
+  Example:
+    > @botcreate WeatherBot
+    Player WeatherBot created as #1234.
+    API key generated for WeatherBot(#1234).
+    Key: <64-character hex key>
+    Store this key securely - it will not be shown again.
+
+  See also: @apikey, @pcreate, ROBOT.
+
+& @apikey
+  Command: @apikey generate|revoke <object>
+
+  Manages API keys for players and things. API keys allow objects to
+  authenticate with the server's WebSocket API without a password.
+
+  The following actions are available:
+    generate  - Creates a new 64-character hex API key for the target
+                object. The key is displayed once and stored as a
+                SHA-256 hash. Only players and things may have API keys.
+                A warning is shown if a player lacks the ROBOT flag.
+    revoke    - Removes the API key from the target object, preventing
+                further API authentication.
+
+  Permission: Wizard, or caller with BOT power who owns the target.
+
+  Example:
+    > @apikey generate #1234
+    API key generated for WeatherBot(#1234).
+    Key: a1b2c3d4...
+    Store this key securely - it will not be shown again.
+
+    > @apikey revoke #1234
+    API key revoked for WeatherBot(#1234).
+
+  See also: @botcreate, ROBOT.
+
+& @instance
+  Command: @instance/create <template> [= <name>]
+           @instance/destroy <instance>
+
+  Manages room instances for vehicles and enterable containers. The
+  instance system must be enabled in the server configuration.
+
+  The following switches are available:
+    /create   - Clones a template THING and all its interior rooms
+                (rooms whose location is the template) plus exits
+                between those rooms. The clone receives the INSTANCE
+                flag and ENTER_OK flag. If no name is given, the
+                template's name is used. The new instance is placed
+                at the creator's location.
+    /destroy  - Destroys an instance: ejects all players from interior
+                rooms to the instance's exterior location, then
+                destroys interior exits, rooms, and the instance
+                THING itself.
+
+  Only THINGs may be used as templates. The creator must control the
+  template. This command is wizard-only.
+
+  Example:
+    > @instance/create #5000 = My Rowboat
+    Instance My Rowboat(#5100) created from template #5000.
+
+    > @instance/destroy #5100
+    Instance #5100 destroyed.
+
+  See also: @clone.
+
+& @archive
+  Command: @archive
+           @archive/list
+
+  Creates a compressed archive of the game database. The archive
+  includes a BoltDB snapshot, the SQLite database (if enabled),
+  configuration files, text files, and dictionary files. Archives
+  are stored in the directory specified by the archive_dir configuration
+  parameter (default: backups/).
+
+  The following switches are available:
+    /list     - Lists existing archives in the archive directory.
+
+  If archive_retain is configured, old archives beyond the retention
+  count are automatically pruned after a successful archive. A
+  post-archive hook command can also be configured.
+
+  @dump is an alias for @archive. This command is wizard-only.
+
+  Example:
+    > @archive
+    Creating archive...
+    Archive created: backups/CrystalMUSH-20260314-120000.tar.gz
+
+    > @archive/list
+    Archives in backups/:
+    CrystalMUSH-20260314-120000.tar.gz (15.2 MB)
+
+  See also: @backup.
+
+& @backup
+  Command: @backup [<filename>]
+
+  Creates a hot backup of the BoltDB database. The backup is performed
+  in a background goroutine and does not block the game. If no filename
+  is specified, one is generated automatically using the current date
+  and time (e.g., game-backup-20260314-120000.bolt).
+
+  Requires that the server was started with the -bolt flag. This command
+  is wizard-only.
+
+  Example:
+    > @backup
+    Backing up database to game-backup-20260314-120000.bolt...
+    Backup complete: game-backup-20260314-120000.bolt
+
+    > @backup mybackup.bolt
+    Backing up database to mybackup.bolt...
+    Backup complete: mybackup.bolt
+
+  See also: @archive.
+
+& @fixall
+  Command: @fixall
+
+  Rebuilds all content and exit chains across the entire database. This
+  repairs any inconsistencies in the linked lists that connect objects
+  to their containers. The command reports how many containers and
+  objects were updated.
+
+  This command is God-only (#1).
+
+  Example:
+    > @fixall
+    Database check complete: 42 containers, 128 objects updated.
+
+  See also: @fixdb, @dbck.
+
+& ports()
+  Function: ports()
+
+  Returns a space-separated list of port numbers that the server is
+  currently listening on. This is a stub function in the current
+  implementation and returns an empty string.
+
+  This function is wizard-only.
+
+  See also: lwho(), conn().
+
+& beep()
+  Function: beep()
+
+  Returns a BEL character (ASCII 7 / \a), which causes a beep or
+  visual alert in most terminal clients when included in output.
+
+  This function is wizard-only.
+
+  Example:
+    > @pemit *Bob=[beep()]Warning: server restart in 5 minutes.
+
+  See also: @pemit.
 
