@@ -4029,10 +4029,31 @@ func cmdDecompile(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, openMarker)
 	}
 	for i, line := range lines {
-		if pretty && i > 0 {
-			g.Notify(d.Player, "")
+		if pretty {
+			// Pretty-print each line with syntax highlighting
+			// Lines are in the form "&ATTR obj=value" or "@command obj=value"
+			attrName := ""
+			value := line
+			if eqIdx := strings.Index(line, "="); eqIdx >= 0 {
+				attrName = line[:eqIdx]
+				value = line[eqIdx+1:]
+			}
+			prettyLines, braceErrors := PrettyExamineAttr(attrName, value)
+			for _, pl := range prettyLines {
+				g.Notify(d.Player, pl)
+			}
+			if len(braceErrors) > 0 {
+				g.Notify(d.Player, ansiError+"  Brace/bracket errors:"+ansiReset)
+				for _, e := range braceErrors {
+					g.Notify(d.Player, "    "+ansiError+e+ansiReset)
+				}
+			}
+			if i < len(lines)-1 {
+				g.Notify(d.Player, "")
+			}
+		} else {
+			g.Notify(d.Player, line)
 		}
-		g.Notify(d.Player, line)
 	}
 	if closeMarker != "" {
 		g.Notify(d.Player, closeMarker)

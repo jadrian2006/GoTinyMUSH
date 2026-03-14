@@ -1294,6 +1294,9 @@ func cmdExamine(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
+	prettyMode := HasSwitch(switches, "pretty")
+	pairsMode := HasSwitch(switches, "pairs")
+
 	if attrName != "" {
 		// C TinyMUSH always uses parse_attrib_wild + exam_wildattrs for
 		// obj/attr — both exact names and wildcard patterns go through
@@ -1326,6 +1329,23 @@ func cmdExamine(g *Game, d *Descriptor, args string, switches []string) {
 					text = UnparseBoolExp(g, parsed)
 				}
 			}
+
+			if prettyMode || pairsMode {
+				// Pretty-print with syntax highlighting and indentation
+				prettyLines, braceErrors := PrettyExamineAttr(name, text)
+				for _, line := range prettyLines {
+					g.Notify(d.Player, line)
+				}
+				if len(braceErrors) > 0 {
+					g.Notify(d.Player, ansiError+"Brace/bracket errors:"+ansiReset)
+					for _, e := range braceErrors {
+						g.Notify(d.Player, "  "+ansiError+e+ansiReset)
+					}
+				}
+				found = true
+				continue
+			}
+
 			// C TinyMUSH: only show annotation if player controls object or owns attr
 			showAnnotation := Controls(g, d.Player, target) || info.Owner == d.Player
 			annotation := ""
