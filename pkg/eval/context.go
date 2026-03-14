@@ -583,9 +583,9 @@ func StripAttrPrefix(raw string) string {
 	return raw[1:]
 }
 
-// parseInstanceFlags extracts per-instance attribute flags from the raw
+// ParseInstanceFlags extracts per-instance attribute flags from the raw
 // "\x01owner:flags:text" format. Returns 0 if no prefix is present.
-func parseInstanceFlags(raw string) int {
+func ParseInstanceFlags(raw string) int {
 	if len(raw) == 0 || raw[0] != '\x01' {
 		return 0
 	}

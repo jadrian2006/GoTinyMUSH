@@ -271,7 +271,7 @@ func (ctx *EvalContext) getAttrByNameInternal(ref gamedb.DBRef, attrName string,
 			if attr.Number == attrNum {
 				// At depth > 0 (on a parent), check instance AF_PRIVATE
 				if depth > 0 {
-					instFlags := parseInstanceFlags(attr.Value)
+					instFlags := ParseInstanceFlags(attr.Value)
 					if instFlags&gamedb.AFPrivate != 0 {
 						break // skip this parent's copy, try grandparent
 					}

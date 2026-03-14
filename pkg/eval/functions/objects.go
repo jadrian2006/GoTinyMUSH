@@ -612,7 +612,8 @@ var knownFlags = map[string][2]int{
 	"HAS_COMMANDS": {1, gamedb.Flag2HasCommands}, "COMMANDS": {1, gamedb.Flag2HasCommands},
 	"INSTANCE": {2, gamedb.Flag3Instance},
 	"KEY": {1, gamedb.Flag2Key}, "CONSTANT": {1, gamedb.Flag2ConstAttrs},
-	"FREE": {1, gamedb.Flag2Floating}, "ZONE": {1, gamedb.Flag2ZoneParent},
+	"FREE": {1, gamedb.Flag2Floating}, "FLOATING": {1, gamedb.Flag2Floating},
+	"ZONE": {1, gamedb.Flag2ZoneParent},
 	"ORPHAN": {2, gamedb.Flag3Orphan},
 	"PLAYER": {-1, int(gamedb.TypePlayer)}, "ROOM": {-1, int(gamedb.TypeRoom)},
 	"EXIT": {-1, int(gamedb.TypeExit)}, "THING": {-1, int(gamedb.TypeThing)},
@@ -641,12 +642,75 @@ func objHasFlag(obj *gamedb.Object, flagName string) bool {
 
 func fnHasflag(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
-	ref := resolveDBRef(ctx, args[0])
+	target := strings.TrimSpace(args[0])
+	flagName := strings.ToUpper(strings.TrimSpace(args[1]))
+
+	// Check for obj/ATTR syntax — attribute flag check
+	if slashIdx := strings.IndexByte(target, '/'); slashIdx >= 0 {
+		objPart := target[:slashIdx]
+		attrName := strings.ToUpper(target[slashIdx+1:])
+		ref := resolveDBRef(ctx, objPart)
+		obj, ok := ctx.DB.Objects[ref]
+		if !ok { buf.WriteString("0"); return }
+		if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
+		// Find the attribute on the object
+		attrNum := -1
+		if def, ok := ctx.DB.AttrByName[attrName]; ok {
+			attrNum = def.Number
+		} else if num, _, ok := gamedb.ResolveWellKnownAttr(attrName); ok {
+			attrNum = num
+		}
+		if attrNum < 0 { buf.WriteString("0"); return }
+		// Get combined flags: definition defaults + per-instance
+		for _, attr := range obj.Attrs {
+			if attr.Number == attrNum {
+				flags := 0
+				if def, ok := ctx.DB.AttrByName[attrName]; ok {
+					flags = def.Flags
+				}
+				flags |= eval.ParseInstanceFlags(attr.Value)
+				// Check the attribute flag
+				buf.WriteString(boolToStr(attrHasFlag(flags, flagName)))
+				return
+			}
+		}
+		buf.WriteString("0")
+		return
+	}
+
+	ref := resolveDBRef(ctx, target)
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
 	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
-	flagName := strings.ToUpper(strings.TrimSpace(args[1]))
 	buf.WriteString(boolToStr(objHasFlag(obj, flagName)))
+}
+
+// knownAttrFlags maps attribute flag names to AF_ constants for hasflag(obj/ATTR, flag).
+var knownAttrFlags = map[string]int{
+	"WIZARD":     gamedb.AFWizard,
+	"DARK":       gamedb.AFDark,
+	"MDARK":      gamedb.AFMDark,
+	"VISUAL":     gamedb.AFVisual,
+	"NO_COMMAND": gamedb.AFNoProg,
+	"NO_CLONE":   gamedb.AFNoClone,
+	"PRIVATE":    gamedb.AFPrivate,
+	"NO_INHERIT": gamedb.AFPrivate,
+	"REGEXP":     gamedb.AFRegexp,
+	"CASE":       gamedb.AFCase,
+	"NOPARSE":    gamedb.AFNoParse,
+	"GOD":        gamedb.AFGod,
+	"NOPROG":     gamedb.AFNoProg,
+	"ODARK":      gamedb.AFODark,
+	"HTML":       gamedb.AFHTML,
+	"NOW":        gamedb.AFNow,
+	"LOCKED":     gamedb.AFLock,
+}
+
+// attrHasFlag checks if an attribute flags bitmask has a named flag set.
+func attrHasFlag(flags int, flagName string) bool {
+	bit, ok := knownAttrFlags[flagName]
+	if !ok { return false }
+	return flags&bit != 0
 }
 
 func fnHasattr(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
@@ -1318,8 +1382,8 @@ func fnAndflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if !ok { buf.WriteString("0"); return }
 	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
 	flagStr := args[1]
+	negate := false
 	for _, ch := range flagStr {
-		negate := false
 		if ch == '!' {
 			negate = true
 			continue
@@ -1332,6 +1396,7 @@ func fnAndflags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 		} else {
 			if !has { buf.WriteString("0"); return }
 		}
+		negate = false
 	}
 	buf.WriteString("1")
 }

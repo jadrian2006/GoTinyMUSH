@@ -94,6 +94,12 @@ async function runTests() {
   await sendCmd(goSock, '@desc me=building wizard');
   await sendCmd(cSock, '@sex me=male');
   await sendCmd(cSock, '@desc me=building wizard');
+  // Fix home if pointing to garbage — set to #0
+  const goHomeType = lastLine(await sendCmd(goSock, 'think [type(home(me))]'));
+  if (goHomeType !== 'ROOM') {
+    console.log(`  Go home is ${goHomeType}, fixing to #0...`);
+    await sendCmd(goSock, '@link me=#0');
+  }
   await new Promise(r => setTimeout(r, 300));
 
   // C's Toaster Oven is a chargen room — need to type 'visitor' then 'out' to leave

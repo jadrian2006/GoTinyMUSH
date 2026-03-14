@@ -104,6 +104,7 @@ func InitCommands() map[string]*Command {
 	registerNG("@notify", cmdNotify)
 	registerNG("@halt", cmdHalt)
 	registerNG("@boot", cmdBoot)
+	registerNG("@toad", cmdToad)
 	registerNG("@wall", cmdWall)
 	registerNG("@newpassword", cmdNewPassword)
 	registerNG("@pcreate", cmdPcreate)
@@ -2065,7 +2066,7 @@ func (g *Game) visibleContents(room, looker gamedb.DBRef) []gamedb.DBRef {
 				}
 			}
 		} else if obj.ObjType() == gamedb.TypeThing {
-			if !Darkened(g, looker, next) || SeeAll(g, looker) || Controls(g, looker, next) {
+			if !Darkened(g, looker, next) {
 				visible = true
 			}
 		}
@@ -2239,7 +2240,7 @@ func (g *Game) ShowRoom(d *Descriptor, room gamedb.DBRef) {
 					}
 				}
 			} else if obj.ObjType() == gamedb.TypeThing {
-				if !Darkened(g, d.Player, next) || SeeAll(g, d.Player) || Controls(g, d.Player, next) {
+				if !Darkened(g, d.Player, next) {
 					visible = true
 				}
 			}

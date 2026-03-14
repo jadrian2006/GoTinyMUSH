@@ -469,7 +469,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("BEEP", fnBeep, 0, 0)
 	ctx.Functions["BEEP"].Perms = eval.FnAccessWizard // C default: CA_WIZARD
 	ctx.RegisterFunction("SEARCH", fnSearch, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("LSEARCH", fnSearch, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("LSEARCH", fnSearch, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("STATS", fnStats, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("HASMODULE", fnHasmodule, 1, 0)
 	ctx.RegisterFunction("RESTARTS", fnRestarts, 0, 0)

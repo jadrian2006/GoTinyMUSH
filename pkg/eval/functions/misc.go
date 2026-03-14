@@ -1149,20 +1149,36 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	// search("all type=player,0,100")  — single arg with range
 	// lsearch(all, type, player)       — comma-separated: player, class, restriction
 	// lsearch(all, type, player, 0, 100) — with range
+	//
+	// LSEARCH is registered FnNoEval because EVAL-class restrictions contain
+	// expressions with ## placeholders that must NOT be pre-evaluated.
+	// We manually evaluate args here, skipping the restriction for EVAL classes.
 	var raw string
 	if len(args) == 0 {
 		raw = "" // No args: search own objects (wizard defaults to all)
 	} else if len(args) >= 3 && !strings.Contains(args[0], "=") && !strings.Contains(args[1], "=") {
-		// Comma-separated format: args[0]=player, args[1]=class, args[2]=restriction[, low[, high]]
-		raw = strings.TrimSpace(args[0]) + " " + strings.TrimSpace(args[1]) + "=" + strings.TrimSpace(args[2])
+		// Comma-separated format (lsearch): args[0]=player, args[1]=class, args[2]=restriction
+		// Evaluate args[0] (player) and args[1] (class) — always safe
+		evaledPlayer := ctx.Exec(strings.TrimSpace(args[0]), eval.EvFCheck|eval.EvEval, nil)
+		evaledClass := ctx.Exec(strings.TrimSpace(args[1]), eval.EvFCheck|eval.EvEval, nil)
+		// For EVAL-class restrictions, keep args[2] as literal text (## placeholder)
+		classUpper := strings.ToUpper(strings.TrimSpace(evaledClass))
+		var evaledRestriction string
+		switch classUpper {
+		case "EVAL", "EVALUATE", "EPLAYER", "EROOM", "EOBJECT", "ETHING", "EEXIT":
+			evaledRestriction = strings.TrimSpace(args[2])
+		default:
+			evaledRestriction = ctx.Exec(strings.TrimSpace(args[2]), eval.EvFCheck|eval.EvEval, nil)
+		}
+		raw = evaledPlayer + " " + evaledClass + "=" + evaledRestriction
 		if len(args) >= 4 {
-			raw += "," + strings.TrimSpace(args[3])
+			raw += "," + ctx.Exec(strings.TrimSpace(args[3]), eval.EvFCheck|eval.EvEval, nil)
 		}
 		if len(args) >= 5 {
-			raw += "," + strings.TrimSpace(args[4])
+			raw += "," + ctx.Exec(strings.TrimSpace(args[4]), eval.EvFCheck|eval.EvEval, nil)
 		}
 	} else {
-		// Standard single-arg format, rejoin any extra args as comma-separated range
+		// Standard single-arg format (search) — args already evaluated by dispatcher
 		raw = strings.TrimSpace(args[0])
 		for i := 1; i < len(args); i++ {
 			raw += "," + args[i]
@@ -1202,8 +1218,9 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	}
 
 	// Parse low,high from right side (comma-separated after restriction)
+	// Must be paren-aware: EVAL=strmatch(name(##),pattern) has commas inside parens
 	if rightSide != "" {
-		parts := strings.SplitN(rightSide, ",", 3)
+		parts := splitParenAware(rightSide, ',', 3)
 		restriction = strings.TrimSpace(parts[0])
 		if len(parts) >= 2 {
 			if v, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(parts[1], "#"))); err == nil {
@@ -1415,7 +1432,11 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 			if isEvalClass && restriction != "" {
 				// Replace ## with current dbref
 				expr := strings.ReplaceAll(restriction, "##", fmt.Sprintf("#%d", ref))
+				// Save and reset invocation counter for each eval iteration
+				// to avoid hitting function invocation limit on large DBs
+				savedCtr := ctx.FuncInvkCtr
 				result := ctx.Exec(expr, eval.EvFCheck|eval.EvEval, nil)
+				ctx.FuncInvkCtr = savedCtr
 				result = strings.TrimSpace(result)
 				if result == "" || result == "0" || result == "#-1" {
 					continue
@@ -1435,16 +1456,54 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 
 // fnStats — return database statistics.
 func fnStats(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	rooms, things, exits, players := 0, 0, 0, 0
+	// stats(player) — full stats for owner
+	// stats(player, type) — count of objects of that type owned by player
+	owner := gamedb.Nothing
+	if len(args) >= 1 && strings.TrimSpace(args[0]) != "" {
+		owner = resolveDBRef(ctx, args[0])
+	}
+
+	// Count by type, filtered by owner if specified
+	rooms, things, exits, players, garbage := 0, 0, 0, 0, 0
 	for _, obj := range ctx.DB.Objects {
+		if owner != gamedb.Nothing && obj.Owner != owner {
+			continue
+		}
 		switch obj.ObjType() {
-		case gamedb.TypeRoom: rooms++
-		case gamedb.TypeThing: things++
-		case gamedb.TypeExit: exits++
-		case gamedb.TypePlayer: players++
+		case gamedb.TypeRoom:
+			rooms++
+		case gamedb.TypeThing:
+			things++
+		case gamedb.TypeExit:
+			exits++
+		case gamedb.TypePlayer:
+			players++
+		default:
+			garbage++
 		}
 	}
-	total := len(ctx.DB.Objects)
+	total := rooms + things + exits + players + garbage
+
+	if len(args) >= 2 {
+		// 2-arg form: return count for specific type
+		typeArg := strings.ToUpper(strings.TrimSpace(args[1]))
+		switch typeArg {
+		case "ROOM", "ROOMS", "R":
+			fmt.Fprintf(buf, "%d", rooms)
+		case "EXIT", "EXITS", "E":
+			fmt.Fprintf(buf, "%d", exits)
+		case "THING", "THINGS", "T":
+			fmt.Fprintf(buf, "%d", things)
+		case "PLAYER", "PLAYERS", "P":
+			fmt.Fprintf(buf, "%d", players)
+		case "GARBAGE", "G":
+			fmt.Fprintf(buf, "%d", garbage)
+		default:
+			fmt.Fprintf(buf, "%d", total)
+		}
+		return
+	}
+
 	buf.WriteString(fmt.Sprintf("%d objects = %d rooms, %d exits, %d things, %d players",
 		total, rooms, exits, things, players))
 }
@@ -1652,11 +1711,18 @@ func fnObjid(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1"); return }
-	text := getAttrByName(ctx, ref, "CREATED_TIME")
-	if text == "" {
-		fmt.Fprintf(buf, "#%d", obj.DBRef)
+	// Use LastMod as the generation timestamp (matches C TinyMUSH objid format)
+	ts := obj.LastMod.Unix()
+	if ts <= 0 {
+		// Fallback: check CREATED_TIME attr
+		text := getAttrByName(ctx, ref, "CREATED_TIME")
+		if text != "" {
+			fmt.Fprintf(buf, "#%d:%s", obj.DBRef, text)
+			return
+		}
+		fmt.Fprintf(buf, "#%d:0", obj.DBRef)
 	} else {
-		fmt.Fprintf(buf, "#%d:%s", obj.DBRef, text)
+		fmt.Fprintf(buf, "#%d:%d", obj.DBRef, ts)
 	}
 }
 
@@ -1791,6 +1857,36 @@ func fnWildparse(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, 
 			ctx.RData.XRegs[name] = captures[i]
 		}
 	}
+}
+
+// splitParenAware splits a string on a delimiter, respecting parenthesis nesting.
+// Returns at most maxParts parts (0 = unlimited).
+func splitParenAware(s string, delim byte, maxParts int) []string {
+	var parts []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case delim:
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+				if maxParts > 0 && len(parts) >= maxParts-1 {
+					// Last part gets the rest
+					parts = append(parts, s[start:])
+					return parts
+				}
+			}
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
 }
 
 // wildMatchCapture performs glob-style pattern matching and captures * groups.

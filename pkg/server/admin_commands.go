@@ -2019,8 +2019,13 @@ func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	newPass := strings.TrimSpace(args[eqIdx+1:])
-	// Use MatchObject to handle #dbref, *player, and name syntax
-	target := g.MatchObject(d.Player, targetStr)
+	// Try #dbref first, then global player lookup
+	var target gamedb.DBRef
+	if strings.HasPrefix(targetStr, "#") {
+		target = g.MatchObject(d.Player, targetStr)
+	} else {
+		target = g.LookupPlayer(targetStr)
+	}
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "No such player.")
 		return
@@ -2039,6 +2044,120 @@ func cmdNewPassword(g *Game, d *Descriptor, args string, _ []string) {
 	hash := mushcrypt.Crypt(newPass, "XX")
 	g.SetAttr(target, aPass, hash)
 	g.Notify(d.Player, fmt.Sprintf("Password for %s changed.", g.ObjName(target)))
+}
+
+// cmdToad implements @toad player[=recipient] — converts a player into a thing.
+// Matches C TinyMUSH wiz.c:do_toad.
+func cmdToad(g *Game, d *Descriptor, args string, switches []string) {
+	if !Wizard(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
+	targetStr := args
+	recipientStr := ""
+	if eqIdx := strings.IndexByte(args, '='); eqIdx >= 0 {
+		targetStr = strings.TrimSpace(args[:eqIdx])
+		recipientStr = strings.TrimSpace(args[eqIdx+1:])
+	}
+	if targetStr == "" {
+		g.Notify(d.Player, "Usage: @toad player[=recipient]")
+		return
+	}
+
+	// Look up the victim
+	target := g.LookupPlayer(targetStr)
+	if target == gamedb.Nothing {
+		// Try #dbref
+		target = g.MatchObject(d.Player, targetStr)
+	}
+	if target == gamedb.Nothing {
+		g.Notify(d.Player, "No such player.")
+		return
+	}
+	obj, ok := g.DB.Objects[target]
+	if !ok || obj.ObjType() != gamedb.TypePlayer {
+		g.Notify(d.Player, "No such player.")
+		return
+	}
+
+	// Can't toad God
+	if IsGod(g, target) {
+		g.Notify(d.Player, "You can't toad God!")
+		return
+	}
+	// Can't toad yourself
+	if target == d.Player {
+		g.Notify(d.Player, "You can't toad yourself!")
+		return
+	}
+	// Can't toad wizards unless you're God
+	if Wizard(g, target) && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "You can't toad a Wizard!")
+		return
+	}
+
+	// Determine recipient of possessions (default: the wizard executing)
+	recipient := d.Player
+	if recipientStr != "" {
+		recipient = g.LookupPlayer(recipientStr)
+		if recipient == gamedb.Nothing {
+			recipient = g.MatchObject(d.Player, recipientStr)
+		}
+		if recipient == gamedb.Nothing {
+			g.Notify(d.Player, "No such recipient.")
+			return
+		}
+		rObj, rok := g.DB.Objects[recipient]
+		if !rok || rObj.ObjType() != gamedb.TypePlayer {
+			g.Notify(d.Player, "Recipient must be a player.")
+			return
+		}
+	}
+
+	// Boot any connected sessions
+	for _, dd := range g.Conns.AllDescriptors() {
+		if dd.Player == target && dd.State == ConnConnected {
+			dd.Send("You have been turned into a slimy toad!")
+			g.DisconnectPlayer(dd)
+		}
+	}
+
+	// Transfer ownership of all objects owned by victim
+	chownCount := 0
+	for ref, o := range g.DB.Objects {
+		if o.Owner == target && ref != target {
+			o.Owner = recipient
+			// Set HALT, clear wizard/power flags
+			o.Flags[0] |= gamedb.FlagHalt
+			o.Flags[0] &^= gamedb.FlagWizard
+			chownCount++
+		}
+	}
+
+	// Announce to room
+	loc := obj.Location
+	origName := obj.Name
+	if loc != gamedb.Nothing {
+		g.NotifyRoomExcept(loc, target, d.Player,
+			fmt.Sprintf("%s has been turned into a slimy toad!", origName), 0)
+	}
+
+	// Convert player to thing
+	obj.Flags[0] = (obj.Flags[0] &^ gamedb.TypeMask) | int(gamedb.TypeThing)
+	obj.Flags[0] |= gamedb.FlagHalt
+	obj.Flags[0] &^= gamedb.FlagWizard
+	obj.Flags[1] = 0
+	obj.Flags[2] = 0
+	obj.Owner = recipient
+	obj.Name = fmt.Sprintf("a slimy toad named %s", origName)
+	obj.Pennies = 1
+
+	g.Notify(d.Player, fmt.Sprintf("You toaded %s! (%d objects @chowned to %s)",
+		origName, chownCount, g.ObjName(recipient)))
+	log.Printf("TOAD: %s(#%d) toaded %s(#%d), %d objects to %s(#%d)",
+		g.PlayerName(d.Player), d.Player, origName, target, chownCount,
+		g.PlayerName(recipient), recipient)
 }
 
 // cmdPcreate implements @pcreate name=password — wizard creates a player
@@ -4192,7 +4311,11 @@ func cmdPower(g *Game, d *Descriptor, args string, _ []string) {
 	targetStr := strings.TrimSpace(args[:eqIdx])
 	powStr := strings.TrimSpace(args[eqIdx+1:])
 
+	// Try local match first, then global player lookup for bare names
 	target := g.MatchObject(d.Player, targetStr)
+	if target == gamedb.Nothing {
+		target = g.LookupPlayer(targetStr)
+	}
 	if target == gamedb.Nothing {
 		g.Notify(d.Player, "I don't see that here.")
 		return
