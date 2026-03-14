@@ -9,8 +9,8 @@ const net = require('net');
 const HOST = '192.168.100.12';
 const GO_PORT = 6886;
 const C_PORT = 9886;
-const GO_LOGIN = 'connect Moravel mne8994';
-const C_LOGIN = 'connect Moravel mne8994';
+const GO_LOGIN = process.env.GO_LOGIN || 'connect Moravel mne8994';
+const C_LOGIN = process.env.C_LOGIN || 'connect Moravel mne8994';
 
 // No static setup cmds — we use create() function to capture dbrefs
 

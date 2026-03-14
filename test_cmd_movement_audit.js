@@ -7,6 +7,8 @@ const net = require('net');
 const HOST = process.env.MUSH_HOST || '192.168.100.12';
 const GO_PORT = 6886;
 const C_PORT  = 9886;
+const GO_LOGIN = process.env.GO_LOGIN || 'connect AuditMove auditpass';
+const C_LOGIN  = process.env.C_LOGIN || 'connect AuditMove auditpass';
 
 function connect(port) {
   return new Promise((resolve, reject) => {
@@ -64,8 +66,8 @@ function testExact(name, go1, c1) {
   const cSock  = await connect(C_PORT);
   await sleep(500);
 
-  goSock.write('connect AuditMove auditpass\n');
-  cSock.write('connect AuditMove auditpass\n');
+  goSock.write(GO_LOGIN + '\n');
+  cSock.write(C_LOGIN + '\n');
   await sleep(1000);
   await cap(goSock, 'think go-ready', 500);
   await cap(cSock, 'think c-ready', 500);
