@@ -1486,6 +1486,7 @@ func (g *Game) DoWait(player, cause gamedb.DBRef, args string) {
 		}
 		entry.WaitUntil = time.Now().Add(time.Duration(secs) * time.Second)
 		g.Queue.AddWait(entry)
+		g.WakeQueue() // Switch from idle tick (5s) to active tick (1s)
 		return
 	}
 
@@ -2369,15 +2370,18 @@ func (g *Game) semaphoreWait(target gamedb.DBRef, attr int, qe *QueueEntry) {
 }
 
 // semaphoreNotify implements the semaphore notify logic for @notify obj[/attr].
-// Decrements the semaphore count and wakes a waiter if one exists.
-// This matches C TinyMUSH's cque_nfy_que() behavior.
+// Wakes up to count waiters on the semaphore and decrements the counter.
+// This matches C TinyMUSH's nfy_que() behavior: iterate the queue once,
+// wake matching entries, then adjust the counter — NOT one-at-a-time looping.
 func (g *Game) semaphoreNotify(target gamedb.DBRef, attr int, count int) int {
-	woken := 0
-	for i := 0; i < count; i++ {
-		g.semaphoreAddTo(target, attr, -1)
-		w := g.Queue.NotifySemaphore(target, attr, 1)
-		woken += w
+	woken := g.Queue.NotifySemaphore(target, attr, count)
+	// Decrement semaphore counter by the number actually woken (or count for /all)
+	// C TinyMUSH: add_to(player, sem, -count, attr) — decrements once
+	decr := woken
+	if decr < count {
+		decr = count // /all should clear the counter even if fewer waiters exist
 	}
+	g.semaphoreAddTo(target, attr, -decr)
 	if woken > 0 {
 		g.WakeQueue()
 	}

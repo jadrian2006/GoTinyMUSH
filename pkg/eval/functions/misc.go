@@ -253,6 +253,8 @@ func fnCreate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 			obj.Next = pObj.Contents
 			pObj.Contents = ref
 		}
+		// Set home to player's current room (C compat: new_home(player))
+		obj.Link = ctx.GameState.PlayerLocation(owner)
 		buf.WriteString(fmt.Sprintf("#%d", ref))
 	}
 }

@@ -939,8 +939,8 @@ func fnHome(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 		// For exits, home() returns the source room (Exits field)
 		buf.WriteString(fmt.Sprintf("#%d", obj.Exits))
 	case gamedb.TypeRoom:
-		// For rooms, home() returns the dropto (Location field)
-		buf.WriteString(fmt.Sprintf("#%d", obj.Location))
+		// For rooms, home() returns the dropto (Link field)
+		buf.WriteString(fmt.Sprintf("#%d", obj.Link))
 	default:
 		// For players/things, home() returns Link
 		buf.WriteString(fmt.Sprintf("#%d", obj.Link))

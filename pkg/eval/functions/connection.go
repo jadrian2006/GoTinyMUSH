@@ -2,6 +2,7 @@ package functions
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/crystal-mush/gotinymush/pkg/eval"
@@ -88,10 +89,19 @@ func fnPmatch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		}
 		return
 	}
-	// C TinyMUSH: pmatch() does NOT expand "me" keyword — it's a pure player name lookup.
-	// C's pmatch() uses exact name match only (no prefix matching).
+	// C TinyMUSH: pmatch() does NOT expand "me"/"here" keywords — pure player name lookup.
+	// C's pmatch() tries exact name first, then prefix match among connected players.
+	if strings.EqualFold(name, "me") || strings.EqualFold(name, "here") {
+		buf.WriteString("#-1")
+		return
+	}
 	if ctx.GameState != nil {
 		ref := ctx.GameState.LookupPlayerExact(name)
+		if ref == gamedb.Nothing {
+			// C: find_connected_ambiguous — prefix match (connected players only in C,
+			// but Go doesn't track connected separately; use LookupPlayer which does prefix).
+			ref = ctx.GameState.LookupPlayer(name)
+		}
 		if ref == gamedb.Nothing {
 			buf.WriteString("#-1")
 		} else {
@@ -212,15 +222,78 @@ func fnAddrlog(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	buf.WriteString(ctx.GameState.AddrLog(ref, count))
 }
 
-// fnEntrances returns exits that link to this object.
+// fnEntrances returns objects that link to this object.
+// C: entrances([object[, type[, low[, high]]]])
+// type: A=all, E=exits, T=things, P=players, R=rooms. Default: all.
+// Exits match by Location (destination), rooms by Link (dropto),
+// things/players by Link (home).
 func fnEntrances(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 {
 		return
 	}
 	ref := resolveDBRef(ctx, args[0])
+
+	findEx, findTh, findPl, findRm := false, false, false, false
+	if len(args) >= 2 {
+		for _, ch := range strings.ToUpper(args[1]) {
+			switch ch {
+			case 'A':
+				findEx, findTh, findPl, findRm = true, true, true, true
+			case 'E':
+				findEx = true
+			case 'T':
+				findTh = true
+			case 'P':
+				findPl = true
+			case 'R':
+				findRm = true
+			default:
+				buf.WriteString("#-1 INVALID TYPE")
+				return
+			}
+		}
+	}
+	if !findEx && !findTh && !findPl && !findRm {
+		findEx, findTh, findPl, findRm = true, true, true, true
+	}
+
+	// Bounds default to full DB range; C uses 0..db_top-1
+	lowBound := gamedb.DBRef(0)
+	highBound := gamedb.DBRef(-1) // -1 = no upper limit
+	if len(args) >= 3 {
+		s := strings.TrimPrefix(strings.TrimSpace(args[2]), "#")
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			lowBound = gamedb.DBRef(n)
+		}
+	}
+	if len(args) >= 4 {
+		s := strings.TrimPrefix(strings.TrimSpace(args[3]), "#")
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			highBound = gamedb.DBRef(n)
+		}
+	}
+
+	controlThing := gsExaminable(ctx, ctx.Player, ref)
 	var entrances []string
 	for _, obj := range ctx.DB.Objects {
-		if obj.ObjType() == gamedb.TypeExit && obj.Location == ref && !obj.IsGoing() {
+		if obj.DBRef < lowBound || (highBound >= 0 && obj.DBRef > highBound) || obj.IsGoing() {
+			continue
+		}
+		if !controlThing && !gsExaminable(ctx, ctx.Player, obj.DBRef) {
+			continue
+		}
+		match := false
+		switch obj.ObjType() {
+		case gamedb.TypeExit:
+			match = findEx && obj.Location == ref
+		case gamedb.TypeRoom:
+			match = findRm && obj.Link == ref
+		case gamedb.TypeThing:
+			match = findTh && obj.Link == ref
+		case gamedb.TypePlayer:
+			match = findPl && obj.Link == ref
+		}
+		if match {
 			entrances = append(entrances, fmt.Sprintf("#%d", obj.DBRef))
 		}
 	}
@@ -291,6 +364,10 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	scopeInv := false    // i — search looker's inventory
 	scopeNeigh := false  // n — search room contents (neighbors)
 	scopeExits := false  // e — search room exits
+	scopeMe := false     // m — match "me" keyword
+	scopeHere := false   // h — match "here" keyword
+	scopeAbsDbref := false // a — match absolute #dbref
+	scopePlayer := false // p — match *player notation
 	hasScope := false
 	for _, ch := range typeFilter {
 		switch ch {
@@ -300,6 +377,10 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 			scopeInv = true
 			scopeNeigh = true
 			scopeExits = true
+			scopeMe = true
+			scopeHere = true
+			scopeAbsDbref = true
+			scopePlayer = true
 			hasScope = true
 		case 'R', 'E', 'P', 'T':
 			hasTypeFilter = true
@@ -313,10 +394,17 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		case 'e':
 			scopeExits = true
 			hasScope = true
+		case 'm':
+			scopeMe = true
+			hasScope = true
+		case 'h':
+			scopeHere = true
+			hasScope = true
 		case 'a':
-			scopeInv = true
-			scopeNeigh = true
-			scopeExits = true
+			scopeAbsDbref = true
+			hasScope = true
+		case 'p':
+			scopePlayer = true
 			hasScope = true
 		}
 	}
@@ -327,18 +415,53 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		scopeExits = true
 	}
 
-	// C TinyMUSH: locate() does NOT expand "me" or "here" keywords.
-	// Those are only expanded by the command-level MatchObject().
-	// locate() is a pure name/dbref search.
+	// C TinyMUSH match_everything: match_me, match_here, match_absolute,
+	// match_player first (exact matches), then exits, neighbors, possessions.
+
+	// matchTypeOK checks if the resolved ref passes the type filter.
+	matchTypeOK := func(ref gamedb.DBRef) bool {
+		if !hasTypeFilter || allTypes {
+			return true
+		}
+		if obj, ok := ctx.DB.Objects[ref]; ok {
+			return matchTypeByChars(obj, typeChars)
+		}
+		return false
+	}
+
+	// C: match_me — "me" keyword resolves to the looker
+	if scopeMe && strings.EqualFold(name, "me") {
+		if matchTypeOK(looker) {
+			buf.WriteString(fmt.Sprintf("#%d", looker))
+		} else {
+			buf.WriteString("#-1")
+		}
+		return
+	}
+
+	// C: match_here — "here" keyword resolves to looker's location
+	if scopeHere && strings.EqualFold(name, "here") {
+		if lookerObj, ok := ctx.DB.Objects[looker]; ok {
+			loc := lookerObj.Location
+			if loc != gamedb.Nothing && matchTypeOK(loc) {
+				buf.WriteString(fmt.Sprintf("#%d", loc))
+			} else {
+				buf.WriteString("#-1")
+			}
+		} else {
+			buf.WriteString("#-1")
+		}
+		return
+	}
 
 	// Handle #dbref absolute reference
 	if name[0] == '#' {
-		ref := resolveDBRef(ctx, name)
-		if obj, ok := ctx.DB.Objects[ref]; ok {
-			if hasTypeFilter && !allTypes && !matchTypeByChars(obj, typeChars) {
-				buf.WriteString("#-1")
-			} else {
+		if scopeAbsDbref {
+			ref := resolveDBRef(ctx, name)
+			if _, ok := ctx.DB.Objects[ref]; ok && matchTypeOK(ref) {
 				buf.WriteString(fmt.Sprintf("#%d", ref))
+			} else {
+				buf.WriteString("#-1")
 			}
 		} else {
 			buf.WriteString("#-1")
@@ -347,14 +470,10 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	}
 	// Handle *player notation
 	if name[0] == '*' {
-		ref := resolveDBRef(ctx, name)
-		if ref != gamedb.Nothing {
-			if obj, ok := ctx.DB.Objects[ref]; ok {
-				if hasTypeFilter && !allTypes && !matchTypeByChars(obj, typeChars) {
-					buf.WriteString("#-1")
-				} else {
-					buf.WriteString(fmt.Sprintf("#%d", ref))
-				}
+		if scopePlayer {
+			ref := resolveDBRef(ctx, name)
+			if ref != gamedb.Nothing && matchTypeOK(ref) {
+				buf.WriteString(fmt.Sprintf("#%d", ref))
 			} else {
 				buf.WriteString("#-1")
 			}
