@@ -321,10 +321,51 @@ func loadGameConfYAML(path string) (*GameConf, error) {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 
+	// Discover which keys the YAML file explicitly sets, so we can
+	// preserve DefaultGameConf() values for any key NOT in the file.
+	// Without this, yaml.Unmarshal zeroes every bool/int field that
+	// is absent from the file, clobbering "default true" settings.
+	var rawMap map[string]interface{}
+	if err := yaml.Unmarshal(data, &rawMap); err != nil {
+		return nil, fmt.Errorf("parsing YAML %s (raw): %w", path, err)
+	}
+	presentKeys := make(map[string]bool, len(rawMap))
+	for k := range rawMap {
+		presentKeys[strings.ToLower(k)] = true
+	}
+
 	gc := DefaultGameConf()
+	defaults := DefaultGameConf()
+
 	if err := yaml.Unmarshal(data, gc); err != nil {
 		return nil, fmt.Errorf("parsing YAML %s: %w", path, err)
 	}
+
+	// Restore defaults for bool fields not present in the YAML file.
+	// yaml.Unmarshal sets absent bools to false, which breaks "default true" fields.
+	applyBoolDefault := func(yamlKey string, field *bool, def bool) {
+		if !presentKeys[yamlKey] {
+			*field = def
+		}
+	}
+	applyBoolDefault("instant_recycle", &gc.InstantRecycle, defaults.InstantRecycle)
+	applyBoolDefault("examine_public_attrs", &gc.ExaminePublicAttrs, defaults.ExaminePublicAttrs)
+	applyBoolDefault("public_flags", &gc.PublicFlags, defaults.PublicFlags)
+	applyBoolDefault("require_cmds_flag", &gc.RequireCmdsFlag, defaults.RequireCmdsFlag)
+	applyBoolDefault("switch_default_all", &gc.SwitchDefaultAll, defaults.SwitchDefaultAll)
+	applyBoolDefault("trace_topdown", &gc.TraceTopdown, defaults.TraceTopdown)
+	applyBoolDefault("mail_enabled", &gc.MailEnabled, defaults.MailEnabled)
+	applyBoolDefault("comsys_enabled", &gc.ComsysEnabled, defaults.ComsysEnabled)
+	applyBoolDefault("hooks_enabled", &gc.HooksEnabled, defaults.HooksEnabled)
+	applyBoolDefault("instances_enabled", &gc.InstancesEnabled, defaults.InstancesEnabled)
+	applyBoolDefault("sensory_enabled", &gc.SensoryEnabled, defaults.SensoryEnabled)
+	applyBoolDefault("roomformat_enabled", &gc.RoomformatEnabled, defaults.RoomformatEnabled)
+	applyBoolDefault("multizone_enabled", &gc.MultizoneEnabled, defaults.MultizoneEnabled)
+	applyBoolDefault("mogrifier_enabled", &gc.MogrifierEnabled, defaults.MogrifierEnabled)
+	applyBoolDefault("watchsys_enabled", &gc.WatchsysEnabled, defaults.WatchsysEnabled)
+	applyBoolDefault("sql_reconnect", &gc.SQLReconnect, defaults.SQLReconnect)
+	applyBoolDefault("web_enabled", &gc.WebEnabled, defaults.WebEnabled)
+	applyBoolDefault("fix_escape_eval", &gc.FixEscapeEval, defaults.FixEscapeEval)
 
 	// Resolve alias_files paths relative to config dir
 	baseDir := filepath.Dir(path)
