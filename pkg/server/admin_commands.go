@@ -3210,6 +3210,9 @@ func cmdRemit(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	message = evalExpr(g, d.Player, message)
 	g.SendMarkedToRoom(room, "EMIT", message)
+	// Use Nothing as source: the emitter is remote, so don't exclude them
+	// from watch forwarding (they won't see the room message directly).
+	g.NotifyWatchActivity(room, gamedb.Nothing, message)
 }
 
 // --- Builder/Admin Utilities ---

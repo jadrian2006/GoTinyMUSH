@@ -260,6 +260,22 @@ type GameState interface {
 	// ChannelEmit sends a message to a channel. Returns "" on success, error on failure.
 	ChannelEmit(player gamedb.DBRef, channelName, message string) string
 
+	// Watchsys softcode function support
+
+	// WatchPlayerRooms returns watched room dbrefs for a player.
+	// Wizards can query any player; non-wizards only get their own.
+	WatchPlayerRooms(caller, target gamedb.DBRef) []gamedb.DBRef
+	// IsWatching returns true if player is subscribed to room.
+	IsWatching(player, room gamedb.DBRef) bool
+	// WatchRoomSubs returns subscriber dbrefs for a watch room. Wizard-only.
+	WatchRoomSubs(caller, room gamedb.DBRef) []gamedb.DBRef
+	// IsWatchRoom returns true if room is registered in the watch system.
+	IsWatchRoom(room gamedb.DBRef) bool
+	// WatchRoomColor returns the color setting for a watch room, or "".
+	WatchRoomColor(room gamedb.DBRef) string
+	// WatchRoomFormat returns the format string for a watch room, or "".
+	WatchRoomFormat(room gamedb.DBRef) string
+
 	// IsInstance returns true if obj has the Flag3Instance flag.
 	IsInstance(obj gamedb.DBRef) bool
 

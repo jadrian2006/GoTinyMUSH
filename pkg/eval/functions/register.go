@@ -605,6 +605,14 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("COMTITLE", fnComtitle, 2, 0)
 	ctx.RegisterFunction("CEMIT", fnCemit, 2, 0)
 
+	// Watchsys functions
+	ctx.RegisterFunction("CWATCHROOMS", fnCwatchrooms, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("ISWATCHING", fnIswatching, 2, 0)
+	ctx.RegisterFunction("WATCHSUBS", fnWatchsubs, 1, 0)
+	ctx.RegisterFunction("ISWATCHROOM", fnIswatchroom, 1, 0)
+	ctx.RegisterFunction("WATCHCOLOR", fnWatchcolor, 1, 0)
+	ctx.RegisterFunction("WATCHFORMAT", fnWatchformat, 1, 0)
+
 	// Attribute definition functions
 	ctx.RegisterFunction("LATTRDEF", fnLattrdef, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("ATTRDEFFLAGS", fnAttrdefflags, 1, 0)

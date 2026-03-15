@@ -619,6 +619,7 @@ func cmdSay(g *Game, d *Descriptor, args string, switches []string) {
 	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, msg)
 	g.AudibleRelay(loc, d.Player, msg)
+	g.NotifyWatchActivity(loc, d.Player, msg)
 }
 
 func cmdPose(g *Game, d *Descriptor, args string, switches []string) {
@@ -648,6 +649,7 @@ func cmdPose(g *Game, d *Descriptor, args string, switches []string) {
 	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, msg)
 	g.AudibleRelay(loc, d.Player, msg)
+	g.NotifyWatchActivity(loc, d.Player, msg)
 }
 
 func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
@@ -669,6 +671,7 @@ func cmdPoseNoSpc(g *Game, d *Descriptor, args string, _ []string) {
 		Data:   map[string]any{"pose": args, "player": playerName, "nospace": true},
 	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, msg)
+	g.NotifyWatchActivity(loc, d.Player, msg)
 }
 
 func cmdPage(g *Game, d *Descriptor, args string, switches []string) {
@@ -856,6 +859,8 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 			})
 			g.MatchListenPatterns(loc, d.Player, message)
 			g.AudibleRelay(loc, d.Player, message)
+			// Use Nothing: emitter may be remote; don't exclude them from watch
+			g.NotifyWatchActivity(loc, gamedb.Nothing, message)
 		}
 		return
 	}
@@ -879,6 +884,7 @@ func cmdEmit(g *Game, d *Descriptor, args string, switches []string) {
 	}, MsgSpeech)
 	g.MatchListenPatterns(loc, d.Player, args)
 	g.AudibleRelay(loc, d.Player, args)
+	g.NotifyWatchActivity(loc, d.Player, args)
 }
 
 func cmdThink(g *Game, d *Descriptor, args string, _ []string) {
@@ -950,6 +956,10 @@ func cmdPemit(g *Game, d *Descriptor, args string, switches []string) {
 		// C's notify_all_from_inside also has MSG_F_UP which triggers
 		// AUDIBLE outward relay when the target is an AUDIBLE container.
 		g.AudibleRelay(target, d.Player, message)
+		// Forward to remote watchers of this room/container.
+		// Use Nothing as source: the emitter may be remote, so don't
+		// exclude them from watch forwarding.
+		g.NotifyWatchActivity(target, gamedb.Nothing, message)
 		return
 	}
 
@@ -1994,8 +2004,8 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 	}
 
-	// Watch system: notify watchers of arrival (outside isDark check —
-	// dark players still trigger watches, matching softcode behavior)
+	// Watch system: notify watchers of arrival
+	// (NotifyWatch internally filters dark players)
 	g.NotifyWatch(player, dest, "arrived")
 }
 

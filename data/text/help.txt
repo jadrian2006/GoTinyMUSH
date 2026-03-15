@@ -18987,3 +18987,276 @@ TRUNC_LENGTH - Per-player examine output truncation
     You say, "4"
 
   See also: poidist(), poiinrange(), bearing().
+
+& watch system
+& watchsys
+
+  The Watch System lets you monitor activity in rooms you care about
+  without being physically present. When someone speaks, poses, emits,
+  enters, or leaves a watched room, you receive a notification with the
+  room name prefix, e.g.:
+
+    [Hangar Floor]> Otter says "Hello!"
+    [Hangar Floor]> Otter has arrived.
+
+  Player commands:
+    addwatch <room>     - Subscribe to a watch room
+    delwatch <room>     - Unsubscribe from a watch room
+    clearwatch          - Unsubscribe from all watch rooms
+    watchlist           - List your watched rooms and status
+    allwatch <on|off>   - Toggle quiet mode on all watches
+    watchwho            - Show who is in your watched rooms
+
+  Admin commands (wizard only):
+    @wregister <room>   - Register a room as watchable
+    @wunregister <room> - Unregister a room (removes all subscriptions)
+    @wcolor <room>=<c>  - Set ANSI color on room name prefix
+    @wtag <room>=<fmt>  - Set format string (| = room name placeholder)
+    @wlist              - List all registered watch rooms
+    @winfo <room>       - Show detailed info for a watch room
+    @wboot <player>=<room> - Remove a player's subscription
+
+  Softcode functions:
+    cwatchrooms()       - List rooms you are watching
+    iswatching(p,r)     - Is player p watching room r?
+    iswatchroom(r)      - Is room r a registered watch room?
+    watchcolor(r)       - Get the ANSI color code for room r
+    watchformat(r)      - Get the format string for room r
+    watchsubs(r)        - List subscribers of room r (wizard only)
+
+  Customization:
+    You can customize how watch notifications appear by setting marker
+    attributes on yourself:
+      &MARKER_WATCH me=<prefix>%0<suffix>
+      &MARKER_HANGAR_FLOOR me=<prefix>%0<suffix>
+    Per-room markers (MARKER_<ROOM_NAME>) take priority over the global
+    MARKER_WATCH. Room names are uppercased with spaces replaced by _.
+
+  See also: addwatch, delwatch, clearwatch, watchlist, allwatch, watchwho.
+
+& addwatch
+
+  Command: addwatch <room>
+
+  Subscribes you to watch notifications for <room>. The room must be
+  registered in the watch system by an admin. Once subscribed, you will
+  receive notifications whenever someone enters, leaves, speaks, poses,
+  or emits in that room (as long as you are not in the room yourself).
+
+  See also: delwatch, clearwatch, watchlist, watch system.
+
+& delwatch
+
+  Command: delwatch <room>
+
+  Unsubscribes you from watch notifications for <room>.
+
+  See also: addwatch, clearwatch, watchlist, watch system.
+
+& clearwatch
+
+  Command: clearwatch
+
+  Unsubscribes you from all watched rooms at once.
+
+  See also: addwatch, delwatch, watchlist, watch system.
+
+& watchlist
+
+  Command: watchlist
+
+  Lists all rooms you are currently watching, showing:
+    Room    - The room dbref
+    Name    - The room name
+    Active  - Whether notifications are on or off
+    Quiet   - Whether quiet mode is enabled (suppresses notifications)
+
+  See also: addwatch, delwatch, allwatch, watch system.
+
+& allwatch
+
+  Command: allwatch <on|off>
+
+  Toggles quiet mode on all your watch subscriptions at once.
+    allwatch off  - Enables quiet mode (suppresses all watch notifications)
+    allwatch on   - Disables quiet mode (resumes all watch notifications)
+
+  This does not add or remove subscriptions; it only toggles the quiet
+  flag. Individual rooms can also be toggled quiet via watchlist.
+
+  See also: watchlist, watch system.
+
+& watchwho
+
+  Command: watchwho [<room>]
+
+  Shows who is currently in your watched rooms. If <room> is specified,
+  shows only that room. Shows player names, online status, and idle time.
+
+  See also: watchlist, watch system.
+
+& cwatchrooms()
+
+  Function: cwatchrooms()
+  Function: cwatchrooms(<player>)
+
+  Returns a space-separated list of room dbrefs that you (or <player>,
+  wizard only) are watching.
+
+  Example:
+    > say [cwatchrooms()]
+    You say "#384 #393 #167"
+
+  See also: iswatching(), iswatchroom(), watch system.
+
+& iswatching()
+
+  Function: iswatching(<player>, <room>)
+
+  Returns 1 if <player> is subscribed to watch <room>, 0 otherwise.
+
+  Example:
+    > say [iswatching(%#, #384)]
+    You say "1"
+
+  See also: cwatchrooms(), iswatchroom(), watch system.
+
+& iswatchroom()
+
+  Function: iswatchroom(<room>)
+
+  Returns 1 if <room> is registered as a watchable room, 0 otherwise.
+
+  Example:
+    > say [iswatchroom(#384)]
+    You say "1"
+
+  See also: cwatchrooms(), iswatching(), watch system.
+
+& watchcolor()
+
+  Function: watchcolor(<room>)
+
+  Returns the ANSI color code set for a watch room's name prefix.
+  Returns an empty string if no color is set, or #-1 NOT A WATCH ROOM
+  if the room is not registered.
+
+  Color codes follow the %x convention (e.g., "c" for cyan, "r" for red).
+
+  Example:
+    > say [watchcolor(#384)]
+    You say "c"
+
+  See also: watchformat(), @wcolor, watch system.
+
+& watchformat()
+
+  Function: watchformat(<room>)
+
+  Returns the format string used for a watch room's notification prefix.
+  The | character in the format is replaced with the room name at display
+  time. Default format is "[|]> ".
+
+  Example:
+    > say [watchformat(#384)]
+    You say "[|]> "
+
+  See also: watchcolor(), @wtag, watch system.
+
+& watchsubs()
+
+  Function: watchsubs(<room>)
+
+  Wizard-only. Returns a space-separated list of player dbrefs subscribed
+  to watch <room>. Returns #-1 PERMISSION DENIED for non-wizards.
+
+  Example:
+    > say [watchsubs(#384)]
+    You say "#1 #2 #2185 #2289"
+
+  See also: cwatchrooms(), iswatching(), @winfo, watch system.
+
+& @wregister
+
+  Command: @wregister <room>
+  Permission: Wizard
+
+  Registers a room in the watch system, making it available for players
+  to subscribe to with addwatch. The registering wizard becomes the
+  room's owner.
+
+  See also: @wunregister, @wlist, @winfo, watch system.
+
+& @wunregister
+
+  Command: @wunregister <room>
+  Permission: Wizard
+
+  Unregisters a room from the watch system and removes all player
+  subscriptions to that room. This cannot be undone; players will need
+  to re-subscribe if the room is re-registered.
+
+  See also: @wregister, @wlist, watch system.
+
+& @wcolor
+
+  Command: @wcolor <room>=<color>
+  Permission: Wizard
+
+  Sets the ANSI color applied to the room name in watch notification
+  prefixes. Color codes use the %x convention:
+    c = cyan    r = red      g = green    y = yellow
+    b = blue    m = magenta  w = white    x = black
+    C = hi-cyan R = hi-red   G = hi-green Y = hi-yellow
+    B = hi-blue M = hi-magenta W = hi-white
+
+  Example:
+    @wcolor #384=c       Sets "Hangar Floor" to display in cyan.
+    @wcolor #384=        Clears the color (no ANSI).
+
+  See also: @wtag, watchcolor(), watch system.
+
+& @wtag
+
+  Command: @wtag <room>=<format>
+  Permission: Wizard
+
+  Sets the format string for a watch room's notification prefix. Use |
+  as a placeholder for the room name. Default is "[|]> ".
+
+  Examples:
+    @wtag #384=[|]>      Produces: [Hangar Floor]> message
+    @wtag #384=<|>       Produces: <Hangar Floor> message
+    @wtag #384=|:        Produces: Hangar Floor: message
+
+  See also: @wcolor, watchformat(), watch system.
+
+& @wlist
+
+  Command: @wlist
+  Permission: Wizard
+
+  Lists all registered watch rooms showing dbref, name, format, color,
+  and subscriber count.
+
+  See also: @winfo, @wregister, watch system.
+
+& @winfo
+
+  Command: @winfo <room>
+  Permission: Wizard
+
+  Shows detailed information about a watch room including owner, format,
+  color, and a full list of subscribers with their active/quiet status.
+
+  See also: @wlist, @wregister, watch system.
+
+& @wboot
+
+  Command: @wboot <player>=<room>
+  Permission: Wizard
+
+  Removes a player's subscription to a watch room. The player is
+  notified that they have been removed.
+
+  See also: @winfo, @wunregister, watch system.

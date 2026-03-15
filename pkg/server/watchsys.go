@@ -284,6 +284,8 @@ func (g *Game) WrapWatchMarker(player gamedb.DBRef, roomName string, msg string)
 
 // NotifyWatch sends watch notifications for a player entering or leaving a room.
 // action should be "arrived" or "left".
+// Dark players (DARK flag set) do NOT trigger watch notifications, matching
+// the expectation that dark movement is invisible to watchers.
 func (g *Game) NotifyWatch(movingPlayer gamedb.DBRef, room gamedb.DBRef, action string) {
 	if g.Watchsys == nil {
 		return
@@ -303,6 +305,12 @@ func (g *Game) NotifyWatch(movingPlayer gamedb.DBRef, room gamedb.DBRef, action 
 	if !ok {
 		return
 	}
+
+	// Dark players don't trigger watch arrival/departure notifications
+	if playerObj.HasFlag(gamedb.FlagDark) {
+		return
+	}
+
 	playerName := DisplayName(playerObj.Name)
 
 	roomObj, ok := g.DB.Objects[room]
@@ -331,6 +339,60 @@ func (g *Game) NotifyWatch(movingPlayer gamedb.DBRef, room gamedb.DBRef, action 
 		}
 		// Pagelock check: respect the watcher's page lock against the moving player
 		if !CouldDoIt(g, movingPlayer, sub.Player, aLPage) {
+			continue
+		}
+		// Wrap with player's per-room or global marker
+		wrapped := g.WrapWatchMarker(sub.Player, roomName, innerMsg)
+		g.Notify(sub.Player, wrapped)
+	}
+}
+
+// NotifyWatchActivity forwards room activity (say, pose, emit, etc.) to
+// remote watchers who are subscribed to the room but not physically present.
+// This matches the C softcode behavior where a ^* listen pattern on watched
+// rooms forwards all room messages with a [RoomName]> prefix.
+func (g *Game) NotifyWatchActivity(room gamedb.DBRef, source gamedb.DBRef, msg string) {
+	if g.Watchsys == nil {
+		return
+	}
+
+	wr := g.Watchsys.GetRoom(room)
+	if wr == nil {
+		return
+	}
+
+	subs := g.Watchsys.RoomSubscribers(room)
+	if len(subs) == 0 {
+		return
+	}
+
+	roomObj, ok := g.DB.Objects[room]
+	if !ok {
+		return
+	}
+	roomName := DisplayName(roomObj.Name)
+
+	// Build message: prefix + room activity text
+	prefix := g.FormatWatchPrefix(wr)
+	innerMsg := prefix + msg
+
+	for _, sub := range subs {
+		if !sub.IsActive || sub.QuietMode {
+			continue
+		}
+		// Don't forward to the person who generated the activity
+		if sub.Player == source {
+			continue
+		}
+		if !g.Conns.IsConnected(sub.Player) {
+			continue
+		}
+		// Skip if subscriber is IN the watched room (they already see it directly)
+		if subObj, ok := g.DB.Objects[sub.Player]; ok && subObj.Location == room {
+			continue
+		}
+		// Pagelock check
+		if !CouldDoIt(g, source, sub.Player, aLPage) {
 			continue
 		}
 		// Wrap with player's per-room or global marker

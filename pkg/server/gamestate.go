@@ -1244,3 +1244,71 @@ func (g *Game) AddrLog(player gamedb.DBRef, count int) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+// --- Watchsys softcode function support ---
+
+func (g *Game) WatchPlayerRooms(caller, target gamedb.DBRef) []gamedb.DBRef {
+	if g.Watchsys == nil {
+		return nil
+	}
+	if caller != target && !g.IsWizard(caller) {
+		return nil
+	}
+	subs := g.Watchsys.PlayerSubs(target)
+	rooms := make([]gamedb.DBRef, len(subs))
+	for i, s := range subs {
+		rooms[i] = s.Room
+	}
+	return rooms
+}
+
+func (g *Game) IsWatching(player, room gamedb.DBRef) bool {
+	if g.Watchsys == nil {
+		return false
+	}
+	return g.Watchsys.FindSub(player, room) != nil
+}
+
+func (g *Game) WatchRoomSubs(caller, room gamedb.DBRef) []gamedb.DBRef {
+	if g.Watchsys == nil {
+		return nil
+	}
+	if !g.IsWizard(caller) {
+		return nil
+	}
+	subs := g.Watchsys.RoomSubscribers(room)
+	players := make([]gamedb.DBRef, len(subs))
+	for i, s := range subs {
+		players[i] = s.Player
+	}
+	return players
+}
+
+func (g *Game) IsWatchRoom(room gamedb.DBRef) bool {
+	if g.Watchsys == nil {
+		return false
+	}
+	return g.Watchsys.IsWatched(room)
+}
+
+func (g *Game) WatchRoomColor(room gamedb.DBRef) string {
+	if g.Watchsys == nil {
+		return ""
+	}
+	wr := g.Watchsys.GetRoom(room)
+	if wr == nil {
+		return ""
+	}
+	return wr.Color
+}
+
+func (g *Game) WatchRoomFormat(room gamedb.DBRef) string {
+	if g.Watchsys == nil {
+		return ""
+	}
+	wr := g.Watchsys.GetRoom(room)
+	if wr == nil {
+		return ""
+	}
+	return wr.Format
+}
