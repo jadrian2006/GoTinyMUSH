@@ -28,7 +28,7 @@ func Open(path string) (*Store, error) {
 
 	// Ensure all buckets exist.
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketMailAlias, bucketArrays, bucketAPIKeys, bucketConnLog, bucketHooks, bucketEventQueues} {
+		for _, name := range [][]byte{bucketMeta, bucketObjects, bucketAttrDefs, bucketPlayers, bucketChannels, bucketChanAliases, bucketStructDefs, bucketStructInsts, bucketMail, bucketMailAlias, bucketArrays, bucketAPIKeys, bucketConnLog, bucketHooks, bucketEventQueues, bucketWatchRooms, bucketWatchSubs} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
@@ -937,4 +937,153 @@ func (s *Store) LoadEventQueues() ([]StoredEventQueue, error) {
 		})
 	})
 	return queues, err
+}
+
+// --- Watch System Storage ---
+
+// watchSubKey returns the bbolt key for a watch subscription: "player:room".
+func watchSubKey(player, room gamedb.DBRef) []byte {
+	return []byte(fmt.Sprintf("%d:%d", player, room))
+}
+
+// PutWatchRoom persists a watch room to bbolt, keyed by dbref.
+func (s *Store) PutWatchRoom(wr *gamedb.WatchRoom) error {
+	data, err := encodeWatchRoom(wr)
+	if err != nil {
+		return fmt.Errorf("boltstore: encode watch room #%d: %w", wr.Dbref, err)
+	}
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketWatchRooms).Put(refToKey(wr.Dbref), data)
+	})
+}
+
+// DeleteWatchRoom removes a watch room from bbolt.
+func (s *Store) DeleteWatchRoom(room gamedb.DBRef) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketWatchRooms).Delete(refToKey(room))
+	})
+}
+
+// LoadWatchRooms reads all watch rooms from bbolt.
+func (s *Store) LoadWatchRooms() ([]gamedb.WatchRoom, error) {
+	var rooms []gamedb.WatchRoom
+	err := s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketWatchRooms)
+		return b.ForEach(func(k, v []byte) error {
+			wr, err := decodeWatchRoom(v)
+			if err != nil {
+				return fmt.Errorf("decode watch room: %w", err)
+			}
+			rooms = append(rooms, *wr)
+			return nil
+		})
+	})
+	return rooms, err
+}
+
+// PutWatchSub persists a watch subscription to bbolt.
+func (s *Store) PutWatchSub(sub *gamedb.WatchSub) error {
+	data, err := encodeWatchSub(sub)
+	if err != nil {
+		return fmt.Errorf("boltstore: encode watch sub: %w", err)
+	}
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketWatchSubs).Put(watchSubKey(sub.Player, sub.Room), data)
+	})
+}
+
+// DeleteWatchSub removes a watch subscription from bbolt.
+func (s *Store) DeleteWatchSub(player, room gamedb.DBRef) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketWatchSubs).Delete(watchSubKey(player, room))
+	})
+}
+
+// DeleteWatchSubsForPlayer removes all watch subscriptions for a player.
+func (s *Store) DeleteWatchSubsForPlayer(player gamedb.DBRef) error {
+	prefix := []byte(fmt.Sprintf("%d:", player))
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketWatchSubs)
+		c := b.Cursor()
+		for k, _ := c.Seek(prefix); k != nil && len(k) >= len(prefix) && string(k[:len(prefix)]) == string(prefix); k, _ = c.Next() {
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// DeleteWatchSubsForRoom removes all watch subscriptions for a room.
+func (s *Store) DeleteWatchSubsForRoom(room gamedb.DBRef) error {
+	suffix := fmt.Sprintf(":%d", room)
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketWatchSubs)
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if strings.HasSuffix(string(k), suffix) {
+				if err := b.Delete(k); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// LoadWatchSubs reads all watch subscriptions from bbolt.
+func (s *Store) LoadWatchSubs() ([]gamedb.WatchSub, error) {
+	var subs []gamedb.WatchSub
+	err := s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketWatchSubs)
+		return b.ForEach(func(k, v []byte) error {
+			sub, err := decodeWatchSub(v)
+			if err != nil {
+				return fmt.Errorf("decode watch sub %q: %w", string(k), err)
+			}
+			subs = append(subs, *sub)
+			return nil
+		})
+	})
+	return subs, err
+}
+
+// HasWatchData returns true if the bbolt database contains watch room data.
+func (s *Store) HasWatchData() bool {
+	has := false
+	s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketWatchRooms)
+		if b.Stats().KeyN > 0 {
+			has = true
+		}
+		return nil
+	})
+	return has
+}
+
+// ImportWatchsys bulk-loads watch rooms and subscriptions into bbolt.
+func (s *Store) ImportWatchsys(rooms []gamedb.WatchRoom, subs []gamedb.WatchSub) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		rb := tx.Bucket(bucketWatchRooms)
+		for i := range rooms {
+			data, err := encodeWatchRoom(&rooms[i])
+			if err != nil {
+				return err
+			}
+			if err := rb.Put(refToKey(rooms[i].Dbref), data); err != nil {
+				return err
+			}
+		}
+		sb := tx.Bucket(bucketWatchSubs)
+		for i := range subs {
+			data, err := encodeWatchSub(&subs[i])
+			if err != nil {
+				return err
+			}
+			if err := sb.Put(watchSubKey(subs[i].Player, subs[i].Room), data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

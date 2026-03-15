@@ -1649,6 +1649,11 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 				}
 			}
 			g.RemoveFromContents(oldLoc, victim)
+
+			// Watch system: notify watchers of departure
+			if obj.ObjType() == gamedb.TypePlayer {
+				g.NotifyWatch(victim, oldLoc, "left")
+			}
 		}
 
 		// Step 3: Move object
@@ -1686,6 +1691,11 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 						DisplayName(obj.Name)+" "+msg)
 				}
 			}
+		}
+
+		// Watch system: notify watchers of arrival
+		if obj.ObjType() == gamedb.TypePlayer {
+			g.NotifyWatch(victim, dest, "arrived")
 		}
 	}
 

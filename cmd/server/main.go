@@ -362,6 +362,13 @@ func main() {
 		log.Printf("Comsys disabled by config")
 	}
 
+	// Load watch system if enabled
+	if gc.WatchsysEnabled {
+		loadWatchsys(srv.Game, store)
+	} else {
+		log.Printf("Watch system disabled by config")
+	}
+
 	// Load mail system if enabled
 	if gc.MailEnabled {
 		loadMail(srv.Game, store, gc.MailExpiration)
@@ -620,4 +627,25 @@ func startSetupMode(confFile string, port int, gc *server.GameConf, dataDir stri
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("Setup mode web server error: %v", err)
 	}
+}
+
+// loadWatchsys initializes the room watch system from bbolt.
+func loadWatchsys(game *server.Game, store *boltstore.Store) {
+	ws := server.NewWatchsys()
+
+	if store != nil && store.HasWatchData() {
+		rooms, err := store.LoadWatchRooms()
+		if err != nil {
+			log.Printf("WARNING: failed to load watch rooms from bolt: %v", err)
+		}
+		subs, err := store.LoadWatchSubs()
+		if err != nil {
+			log.Printf("WARNING: failed to load watch subs from bolt: %v", err)
+		}
+		if len(rooms) > 0 {
+			ws.LoadWatchData(rooms, subs)
+		}
+	}
+
+	game.Watchsys = ws
 }

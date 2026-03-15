@@ -127,6 +127,7 @@ type GameConf struct {
 	RoomformatEnabled bool `yaml:"roomformat_enabled"` // @roomformat custom room rendering
 	MultizoneEnabled  bool `yaml:"multizone_enabled"`  // @chzone/add, @chzone/remove, zones()
 	MogrifierEnabled  bool `yaml:"mogrifier_enabled"`  // Channel message mogrifiers
+	WatchsysEnabled   bool `yaml:"watchsys_enabled"`   // Room watch notification system
 
 	// --- Channels (stored for future comsys) ---
 	PublicChannel string `yaml:"public_channel"`
@@ -278,6 +279,7 @@ func DefaultGameConf() *GameConf {
 		RoomformatEnabled:       true,
 		MultizoneEnabled:        true,
 		MogrifierEnabled:        true,
+		WatchsysEnabled:         true,
 		PuebloEnabled:           false,
 		PuebloVersion:           "This world is Pueblo 1.0 enhanced",
 		SpellcheckEnabled:       false,
@@ -565,6 +567,8 @@ func (gc *GameConf) loadLegacyFile(path string, depth int) error {
 			gc.MailEnabled = parseBool(val)
 		case "comsys_enabled":
 			gc.ComsysEnabled = parseBool(val)
+		case "watchsys_enabled":
+			gc.WatchsysEnabled = parseBool(val)
 		case "mail_expiration":
 			gc.MailExpiration = atoi(val, gc.MailExpiration)
 		case "hooks_enabled":

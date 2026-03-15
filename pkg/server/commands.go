@@ -325,6 +325,21 @@ func InitCommands() map[string]*Command {
 	registerNG("@cset", cmdCset)
 	registerNG("@cinfo", cmdCinfo)
 
+	// Watch system
+	register("addwatch", cmdAddwatch)
+	register("delwatch", cmdDelwatch)
+	register("clearwatch", cmdClearwatch)
+	register("watchlist", cmdWatchlist)
+	register("allwatch", cmdAllwatch)
+	register("watchwho", cmdWatchwho)
+	registerNG("@wregister", cmdWregister)
+	registerNG("@wunregister", cmdWunregister)
+	registerNG("@wtag", cmdWtag)
+	registerNG("@wcolor", cmdWcolor)
+	register("@wlist", cmdWlist)
+	registerNG("@winfo", cmdWinfo)
+	registerNG("@wboot", cmdWboot)
+
 	// Event Bus (no guest)
 	registerNG("@queue", cmdQueue)
 
@@ -1689,6 +1704,7 @@ type Game struct {
 	Texts       *TextFiles       // Cached text files (connect.txt, motd.txt, etc.)
 	TextDir     string           // Path to text files directory (for @readcache)
 	Comsys      *Comsys          // Channel/communication system (nil if disabled)
+	Watchsys    *Watchsys        // Room watch notification system (nil if disabled)
 	Mail        *Mail            // Built-in mail system (nil if disabled)
 	Conf        *GameConf        // Game configuration from conf file
 	FuncAliases map[string]string // Function aliases (alias -> target, uppercase)
@@ -1926,6 +1942,9 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 			}
 		}
 		g.RemoveFromContents(oldLoc, player)
+
+		// Watch system: notify watchers of departure
+		g.NotifyWatch(player, oldLoc, "left")
 	}
 
 	// Set new location
@@ -1974,6 +1993,10 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 		g.MatchListenPatterns(dest, player,
 			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 	}
+
+	// Watch system: notify watchers of arrival (outside isDark check —
+	// dark players still trigger watches, matching softcode behavior)
+	g.NotifyWatch(player, dest, "arrived")
 }
 
 // RemoveFromContents removes an object from a location's contents chain.
@@ -4313,6 +4336,10 @@ func cmdEnter(g *Game, d *Descriptor, args string, _ []string) {
 
 	g.ShowRoom(d, enterDest)
 	g.QueueAttrAction(target, d.Player, 35, nil) // A_AENTER = 35
+
+	// Watch system: notify watchers
+	g.NotifyWatch(d.Player, loc, "left")
+	g.NotifyWatch(d.Player, enterDest, "arrived")
 }
 
 func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
@@ -4369,6 +4396,10 @@ func cmdLeave(g *Game, d *Descriptor, _ string, _ []string) {
 
 	g.ShowRoom(d, dest)
 	g.QueueAttrAction(loc, d.Player, 52, nil) // A_ALEAVE = 52
+
+	// Watch system: notify watchers
+	g.NotifyWatch(d.Player, loc, "left")
+	g.NotifyWatch(d.Player, dest, "arrived")
 }
 
 func cmdWhisper(g *Game, d *Descriptor, args string, _ []string) {

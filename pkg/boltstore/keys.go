@@ -23,6 +23,8 @@ var (
 	bucketConnLog     = []byte("connlog")
 	bucketHooks       = []byte("hooks")
 	bucketEventQueues = []byte("eventqueues")
+	bucketWatchRooms  = []byte("watchrooms")
+	bucketWatchSubs   = []byte("watchsubs")
 )
 
 // Meta key constants.

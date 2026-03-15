@@ -179,3 +179,39 @@ func decodeEventQueue(data []byte) (*StoredEventQueue, error) {
 	}
 	return &q, nil
 }
+
+// encodeWatchRoom serializes a WatchRoom to bytes using gob.
+func encodeWatchRoom(wr *gamedb.WatchRoom) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(wr); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decodeWatchRoom deserializes bytes back into a WatchRoom.
+func decodeWatchRoom(data []byte) (*gamedb.WatchRoom, error) {
+	var wr gamedb.WatchRoom
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&wr); err != nil {
+		return nil, err
+	}
+	return &wr, nil
+}
+
+// encodeWatchSub serializes a WatchSub to bytes using gob.
+func encodeWatchSub(ws *gamedb.WatchSub) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(ws); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decodeWatchSub deserializes bytes back into a WatchSub.
+func decodeWatchSub(data []byte) (*gamedb.WatchSub, error) {
+	var ws gamedb.WatchSub
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&ws); err != nil {
+		return nil, err
+	}
+	return &ws, nil
+}
