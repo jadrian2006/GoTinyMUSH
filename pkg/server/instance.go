@@ -2,10 +2,13 @@ package server
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 )
+
+var dbrefPattern = regexp.MustCompile(`#(\d+)`)
 
 // cmdInstance implements @instance/create and @instance/destroy for the
 // vehicle/container instance system.
@@ -153,6 +156,17 @@ func instanceCreate(g *Game, d *Descriptor, args string) {
 			g.PersistObject(newExitObj)
 
 			exitRef = exitObj.Next
+		}
+	}
+
+	// 4b. Rewrite dbref references in all cloned attrs using refMap
+	rewriteInstanceDbrefs(instanceObj, refMap)
+	for _, oldRoom := range templateRooms {
+		if newRef, ok := refMap[oldRoom]; ok {
+			if newObj, ok := g.DB.Objects[newRef]; ok {
+				rewriteInstanceDbrefs(newObj, refMap)
+				g.PersistObject(newObj)
+			}
 		}
 	}
 
@@ -323,4 +337,28 @@ func (g *Game) MoveInstanceOccupants(instance gamedb.DBRef) {
 
 	// Fire AMOVE (57) on the instance
 	g.QueueAttrAction(instance, instance, 57, nil) // A_AMOVE
+}
+
+// rewriteInstanceDbrefs rewrites #NNNN references in an object's attr values
+// using the provided refMap (old dbref -> new dbref). This ensures instanced
+// objects reference their own cloned rooms/things instead of the template's.
+func rewriteInstanceDbrefs(obj *gamedb.Object, refMap map[gamedb.DBRef]gamedb.DBRef) {
+	for i := range obj.Attrs {
+		val := obj.Attrs[i].Value
+		if !strings.Contains(val, "#") {
+			continue
+		}
+		newVal := dbrefPattern.ReplaceAllStringFunc(val, func(match string) string {
+			var num int
+			if _, err := fmt.Sscanf(match, "#%d", &num); err == nil {
+				if mapped, ok := refMap[gamedb.DBRef(num)]; ok {
+					return fmt.Sprintf("#%d", mapped)
+				}
+			}
+			return match
+		})
+		if newVal != val {
+			obj.Attrs[i].Value = newVal
+		}
+	}
 }
