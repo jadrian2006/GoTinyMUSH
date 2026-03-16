@@ -1578,7 +1578,6 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 			}
 		}
 	}
-
 	// If dest is an EXIT, follow it to its destination room.
 	// In C TinyMUSH, @tel obj=exit sends the object through the exit.
 	// An exit's Location field holds the destination room.

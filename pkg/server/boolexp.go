@@ -666,7 +666,9 @@ func wildMatchCI(pattern, str string) bool {
 // Used for locks that should be absolute (e.g., leave locks on vehicles).
 // Empty lock = unlocked (pass).
 func CouldDoItStrict(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
-	lockText := g.GetAttrText(thing, lockAttr)
+	// C TinyMUSH uses atr_get (NOT atr_pget) for lock evaluation —
+	// locks are NOT inherited from parents. Use GetAttrTextDirect.
+	lockText := g.GetAttrTextDirect(thing, lockAttr)
 	if lockText != "" {
 		parsed := ParseBoolExp(g, player, lockText)
 		return EvalBoolExp(g, player, thing, thing, parsed, 0)
@@ -684,8 +686,10 @@ func CouldDoIt(g *Game, player, thing gamedb.DBRef, lockAttr int) bool {
 		return true
 	}
 
-	// Check attribute-stored lock
-	lockText := g.GetAttrText(thing, lockAttr)
+	// Check attribute-stored lock.
+	// C TinyMUSH uses atr_get (NOT atr_pget) for lock evaluation —
+	// locks are NOT inherited from parents. Use GetAttrTextDirect.
+	lockText := g.GetAttrTextDirect(thing, lockAttr)
 	if lockText != "" {
 		parsed := ParseBoolExp(g, player, lockText)
 		return EvalBoolExp(g, player, thing, thing, parsed, 0)
