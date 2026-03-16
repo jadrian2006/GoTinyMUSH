@@ -35,6 +35,7 @@ var (
 	keySize          = []byte("size")
 	keyNextAttr      = []byte("nextattr")
 	keyRecordPlayers = []byte("recordplayers")
+	keyJWTSecret     = []byte("jwt_secret")
 )
 
 // refToKey converts a DBRef to an 8-byte big-endian key.

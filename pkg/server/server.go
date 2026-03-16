@@ -144,6 +144,18 @@ func (s *Server) Start() error {
 
 	// Start web server if enabled
 	if s.Game.Conf != nil && s.Game.Conf.WebEnabled {
+		// Resolve JWT secret: config > bolt DB > generate+persist.
+		jwtSecret := s.Game.Conf.JWTSecret
+		if jwtSecret == "" && s.Game.Store != nil {
+			jwtSecret = s.Game.Store.GetJWTSecret()
+		}
+		if jwtSecret == "" {
+			jwtSecret = GenerateJWTSecret()
+			log.Printf("Generated new JWT secret (persisting to bolt DB)")
+			if s.Game.Store != nil {
+				s.Game.Store.PutJWTSecret(jwtSecret)
+			}
+		}
 		cfg := WebConfig{
 			Port:        s.Game.Conf.WebPort,
 			Host:        s.Game.Conf.WebHost,
@@ -155,7 +167,7 @@ func (s *Server) Start() error {
 			ClientURL:   s.Game.Conf.WebClientURL,
 			CORSOrigins: s.Game.Conf.WebCORSOrigins,
 			RateLimit:   s.Game.Conf.WebRateLimit,
-			JWTSecret:   s.Game.Conf.JWTSecret,
+			JWTSecret:   jwtSecret,
 			JWTExpiry:   s.Game.Conf.JWTExpiry,
 		}
 		s.webServer = NewWebServer(s.Game, cfg)

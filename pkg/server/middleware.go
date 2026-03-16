@@ -136,6 +136,11 @@ func rateLimitMiddleware(rl *rateLimiter, next http.Handler) http.Handler {
 		if idx := strings.LastIndex(ip, ":"); idx >= 0 {
 			ip = ip[:idx]
 		}
+		// Exempt localhost from rate limiting (bots, admin panel)
+		if ip == "127.0.0.1" || ip == "::1" || ip == "[::1]" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !rl.allow(ip) {
 			http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
 			return

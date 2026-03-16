@@ -130,6 +130,26 @@ func (s *Store) PutMeta() error {
 	})
 }
 
+// GetJWTSecret returns the persisted JWT secret from the meta bucket, or "" if not set.
+func (s *Store) GetJWTSecret() string {
+	var secret string
+	s.bolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketMeta)
+		if v := b.Get(keyJWTSecret); v != nil {
+			secret = string(v)
+		}
+		return nil
+	})
+	return secret
+}
+
+// PutJWTSecret persists a JWT secret to the meta bucket.
+func (s *Store) PutJWTSecret(secret string) error {
+	return s.bolt.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketMeta).Put(keyJWTSecret, []byte(secret))
+	})
+}
+
 // ImportFromDatabase bulk-loads an in-memory Database into bbolt, batching 1000 objects per transaction.
 func (s *Store) ImportFromDatabase(db *gamedb.Database) error {
 	// Copy the database pointer as our cache.

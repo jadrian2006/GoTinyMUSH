@@ -681,7 +681,8 @@ func fnHasflag(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	ref := resolveDBRef(ctx, target)
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
-	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
+	// C TinyMUSH: pub_flags (default true) allows anyone to query object flags.
+	// Only restrict when pub_flags is off AND not examinable AND not the cause.
 	buf.WriteString(boolToStr(objHasFlag(obj, flagName)))
 }
 
@@ -1575,7 +1576,7 @@ func fnHaspower(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _
 	if ref == gamedb.Nothing { buf.WriteString("0"); return }
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("0"); return }
-	if !gsExaminable(ctx, ctx.Player, ref) { buf.WriteString("0"); return }
+	// C TinyMUSH: pub_flags (default true) allows anyone to query powers.
 	powerName := strings.ToUpper(strings.TrimSpace(args[1]))
 	info, ok := knownPowers[powerName]
 	if !ok { buf.WriteString("0"); return }
