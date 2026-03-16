@@ -387,8 +387,11 @@ func fnBefore(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	delim := " "
 	if len(args) > 1 && args[1] != "" { delim = args[1] }
 	s := args[0]
-	// C's before() trims leading delimiters first (trim_space_sep)
-	s = strings.TrimLeft(s, delim)
+	// C's before() only trims leading spaces when delimiter is a single space.
+	// It does NOT trim arbitrary delimiter chars from the start.
+	if delim == " " {
+		s = strings.TrimLeft(s, " ")
+	}
 	idx := strings.Index(s, delim)
 	if idx < 0 {
 		buf.WriteString(s)
@@ -402,8 +405,10 @@ func fnAfter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ game
 	delim := " "
 	if len(args) > 1 && args[1] != "" { delim = args[1] }
 	s := args[0]
-	// C's after() trims leading delimiters first (trim_space_sep)
-	s = strings.TrimLeft(s, delim)
+	// C's after() only trims leading spaces when delimiter is a single space.
+	if delim == " " {
+		s = strings.TrimLeft(s, " ")
+	}
 	idx := strings.Index(s, delim)
 	if idx < 0 { return }
 	buf.WriteString(s[idx+len(delim):])

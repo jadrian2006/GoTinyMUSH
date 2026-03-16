@@ -77,9 +77,10 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			pos++
 
 		case '\\':
-			// General escape - add following char literally.
-			// Go always strips the backslash (matching EV_STRIP_ESC behavior).
-			// C's default preserves \, but Go's softcode ecosystem assumes strip.
+			// General escape — C TinyMUSH exec() ALWAYS strips the backslash
+			// and outputs only the next char (eval.c line 554-565).
+			// The EV_STRIP_ESC conditional only exists in C's parse_to(),
+			// not in exec(). In Go, parseArgList handles the parse_to role.
 			atSpace = false
 			pos++
 			if pos < len(input) {
@@ -250,9 +251,19 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 				break
 			}
 
-			// Parse argument list
+			// Parse argument list.
+			// For NoEval functions, use parseArgListStripEsc which strips \
+			// during parsing (matching C's parse_to with EV_STRIP_ESC).
+			// This maintains paren structure while removing escape chars.
 			pos++ // skip '('
-			args, newPos, found := parseArgList(input, pos, ')')
+			var args []string
+			var newPos int
+			var found bool
+			if fn.Flags&FnNoEval != 0 {
+				args, newPos, found = parseArgListStripEsc(input, pos, ')')
+			} else {
+				args, newPos, found = parseArgList(input, pos, ')')
+			}
 			if !found {
 				buf.WriteByte('(')
 				pos--
@@ -267,10 +278,10 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			// Evaluate arguments (unless FN_NO_EVAL).
 			// Trim leading AND trailing spaces from each raw arg to match
 			// C TinyMUSH's EV_STRIP_LS | EV_STRIP_TS behavior in parse_arglist.
-			// "func(a, b)" passes "b" not " b", and "func(= , 78)" passes "="
-			// not "= ".
 			var evaledArgs []string
 			if fn.Flags&FnNoEval != 0 {
+				// NoEval: args already have \ stripped by parseArgListStripEsc.
+				// Just trim spaces — don't evaluate.
 				evaledArgs = make([]string, len(args))
 				for i, arg := range args {
 					evaledArgs[i] = strings.TrimSpace(arg)
@@ -888,6 +899,108 @@ func parseArgList(input string, pos int, closingDelim byte) ([]string, int, bool
 	return nil, pos, false
 }
 
+// parseArgListStripEsc is like parseArgList but strips backslash escapes from
+// the returned argument text, matching C TinyMUSH's parse_to with EV_STRIP_ESC.
+// The backslash still protects the next char from being a delimiter during parsing,
+// but the backslash itself is removed from the output. This preserves paren structure
+// while removing escape characters — e.g. \() in the source becomes () in the output
+// without the ( being counted as a structural paren.
+func parseArgListStripEsc(input string, pos int, closingDelim byte) ([]string, int, bool) {
+	var args []string
+	var buf strings.Builder
+	depth := 0
+	bracketLev := 0
+
+	for pos < len(input) {
+		ch := input[pos]
+
+		switch ch {
+		case '\\':
+			// Strip backslash, keep next char (EV_STRIP_ESC behavior)
+			pos++
+			if pos < len(input) {
+				buf.WriteByte(input[pos])
+				pos++
+			}
+			continue
+
+		case '%':
+			// Preserve % and next char as-is
+			buf.WriteByte(ch)
+			pos++
+			if pos < len(input) {
+				buf.WriteByte(input[pos])
+				pos++
+			}
+			continue
+
+		case '{':
+			bracketLev = 1
+			buf.WriteByte('{')
+			pos++
+			for pos < len(input) && bracketLev > 0 {
+				switch input[pos] {
+				case '\\':
+					// Strip backslash inside braces too
+					pos++
+					if pos < len(input) {
+						buf.WriteByte(input[pos])
+						pos++
+					}
+					continue
+				case '%':
+					buf.WriteByte(input[pos])
+					pos++
+					if pos < len(input) {
+						buf.WriteByte(input[pos])
+						pos++
+					}
+					continue
+				case '{':
+					bracketLev++
+				case '}':
+					bracketLev--
+				}
+				if bracketLev > 0 {
+					buf.WriteByte(input[pos])
+					pos++
+				}
+			}
+			if bracketLev == 0 {
+				buf.WriteByte('}')
+				pos++
+			}
+			continue
+
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 && ch == closingDelim {
+				args = append(args, buf.String())
+				return args, pos, true
+			}
+			depth--
+
+		case ',':
+			if depth == 0 {
+				args = append(args, buf.String())
+				buf.Reset()
+				pos++
+				continue
+			}
+		}
+		buf.WriteByte(ch)
+		pos++
+	}
+
+	// No closing delimiter found
+	return nil, pos, false
+}
+
 // isSpecial returns true for characters that need special processing in the eval loop.
 func isSpecial(ch byte) bool {
 	switch ch {
@@ -1007,3 +1120,4 @@ func ansiCharLookup(ch byte) string {
 	}
 	return ""
 }
+
