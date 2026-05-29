@@ -41,9 +41,9 @@ fresh: dev
 clean:
 	rm -f $(BINARY) $(BINARY).exe $(BOLT)
 
-# Run tests
+# Run tests with race detector
 test:
-	go test ./...
+	go test -race ./...
 
 # Run go vet
 vet:

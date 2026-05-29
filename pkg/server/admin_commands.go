@@ -4085,10 +4085,14 @@ func (g *Game) StartAutoSave(intervalMinutes int) {
 				continue
 			}
 			log.Printf("Auto-saving database...")
-			if err := flatfile.Save(g.DBPath, g.DB); err != nil {
+			g.mu.RLock()
+			err := flatfile.Save(g.DBPath, g.DB)
+			objCount := len(g.DB.Objects)
+			g.mu.RUnlock()
+			if err != nil {
 				log.Printf("ERROR: Auto-save failed: %v", err)
 			} else {
-				log.Printf("Auto-save complete: %d objects", len(g.DB.Objects))
+				log.Printf("Auto-save complete: %d objects", objCount)
 			}
 		}
 	}()

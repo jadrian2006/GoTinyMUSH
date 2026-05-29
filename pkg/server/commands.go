@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/boltstore"
@@ -1704,6 +1705,13 @@ func cmdSetDoing(g *Game, d *Descriptor, args string, _ []string) {
 
 // Game holds the complete game state.
 type Game struct {
+	// mu serialises all game-state mutations. Taken as a write lock by every
+	// command-execution entry point (DispatchCommand, ProcessQueue).
+	// Taken as a read lock by background readers (auto-save, archive).
+	// sync.Mutex is not reentrant — callers must never call a locked entry
+	// point from within an already-locked path (use the unlocked helpers).
+	mu sync.RWMutex
+
 	DB          *gamedb.Database
 	Conns       *ConnManager
 	Commands    map[string]*Command

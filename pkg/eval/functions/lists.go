@@ -2,6 +2,7 @@ package functions
 
 import (
 	"math/rand/v2"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,7 +141,7 @@ func fnRemove(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	words := splitList(args[0], delim)
 	target := args[1]
 	found := false
-	var result []string
+	result := make([]string, 0, len(words))
 	for _, w := range words {
 		if !found && w == target {
 			found = true
@@ -167,7 +168,7 @@ func fnInsert(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	if idx >= len(words) {
 		words = append(words, newWord)
 	} else {
-		words = append(words[:idx], append([]string{newWord}, words[idx:]...)...)
+		words = slices.Insert(words, idx, newWord)
 	}
 	buf.WriteString(strings.Join(words, delim))
 }
@@ -183,7 +184,7 @@ func fnLdelete(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	for _, p := range positions {
 		deleteSet[toInt(p)-1] = true
 	}
-	var result []string
+	result := make([]string, 0, len(words))
 	for i, w := range words {
 		if !deleteSet[i] {
 			result = append(result, w)
@@ -256,7 +257,7 @@ func fnSetunion(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	a := splitList(args[0], delim)
 	b := splitList(args[1], delim)
 	seen := make(map[string]bool)
-	var result []string
+	result := make([]string, 0, len(a)+len(b))
 	for _, w := range a {
 		if !seen[w] { seen[w] = true; result = append(result, w) }
 	}
@@ -279,7 +280,7 @@ func fnSetdiff(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	bSet := make(map[string]bool)
 	for _, w := range b { bSet[w] = true }
 	a := splitList(args[0], delim)
-	var result []string
+	result := make([]string, 0, len(a))
 	seen := make(map[string]bool)
 	for _, w := range a {
 		if !bSet[w] && !seen[w] { seen[w] = true; result = append(result, w) }
@@ -300,7 +301,7 @@ func fnSetinter(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 	bSet := make(map[string]bool)
 	for _, w := range b { bSet[w] = true }
 	a := splitList(args[0], delim)
-	var result []string
+	result := make([]string, 0, len(a))
 	seen := make(map[string]bool)
 	for _, w := range a {
 		if bSet[w] && !seen[w] { seen[w] = true; result = append(result, w) }
@@ -438,7 +439,7 @@ func fnGraball(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	if len(args) > 3 && args[3] != "" { outDelim = args[3] }
 	words := splitList(args[0], delim)
 	pattern := args[1]
-	var result []string
+	result := make([]string, 0, len(words))
 	for _, w := range words {
 		if wildMatch(pattern, w) {
 			result = append(result, w)
@@ -780,7 +781,7 @@ func fnListmatch(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	if len(args) > 2 && args[2] != "" { delim = args[2] }
 	words := splitList(args[0], delim)
 	pattern := args[1]
-	var results []string
+	results := make([]string, 0, len(words))
 	for _, w := range words {
 		if wildMatch(pattern, w) {
 			results = append(results, w)

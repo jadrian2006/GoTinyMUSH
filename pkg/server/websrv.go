@@ -378,14 +378,18 @@ func wsReadLoop(ws *WebServer, d *Descriptor, wc *wsConn) {
 
 		switch msg.Type {
 		case "command":
+			ws.game.mu.Lock()
 			if d.State == ConnLogin {
 				handleWSLogin(ws, d, wc, msg.Command)
 			} else {
 				d.CmdCount++
 				DispatchCommand(ws.game, d, msg.Command)
 			}
+			ws.game.mu.Unlock()
 		case "login":
+			ws.game.mu.Lock()
 			handleWSLogin(ws, d, wc, msg.Command)
+			ws.game.mu.Unlock()
 		default:
 			wc.sendJSON(WSMessage{Type: "error", Text: fmt.Sprintf("Unknown message type: %s", msg.Type)})
 		}

@@ -1902,12 +1902,14 @@ func (g *Game) StartQueueProcessor() {
 							log.Printf("PANIC in queue processor: %v", r)
 						}
 					}()
+					g.mu.Lock()
 					hadWork := g.ProcessQueue()
 					// Event bus phase — runs after master queue, independent budget
 					if g.EventQueues != nil {
 						busWork := g.EventQueues.ProcessEventBus(g.GameAdapter())
 						hadWork = hadWork || busWork
 					}
+					g.mu.Unlock()
 					if hadWork && idle {
 						idle = false
 						ticker.Reset(queueTick)
@@ -1924,11 +1926,13 @@ func (g *Game) StartQueueProcessor() {
 							log.Printf("PANIC in queue processor (wake): %v", r)
 						}
 					}()
+					g.mu.Lock()
 					g.ProcessQueue()
 					// Event bus phase on wake too
 					if g.EventQueues != nil {
 						g.EventQueues.ProcessEventBus(g.GameAdapter())
 					}
+					g.mu.Unlock()
 					if idle {
 						idle = false
 						ticker.Reset(queueTick)

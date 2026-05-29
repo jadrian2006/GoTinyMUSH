@@ -292,34 +292,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			d.CmdCount++
 		}
 
-		if d.State == ConnLogin {
-			s.handleLoginCommand(d, line)
-		} else {
-			// Clear AutoDark tracking flag but keep DARK set —
-			// player must manually @set me=!DARK to become visible.
-			if d.AutoDark {
-				d.AutoDark = false
-			}
-			log.Printf("[%d] CMD state=%d player=#%d input=%q", d.ID, d.State, d.Player, line)
-			if d.ProgData != nil {
-				if strings.HasPrefix(line, "|") {
-					// Pipe escape: execute remainder as normal command
-					DispatchCommand(s.Game, d, line[1:])
-					// Re-send prompt if still in program mode
-					if d.ProgData != nil {
-						d.SendNoNewline(progPrompt)
-					}
-				} else if strings.EqualFold(strings.TrimSpace(line), "@quitprogram") {
-					// Allow @quitprogram to work normally
-					DispatchCommand(s.Game, d, line)
-				} else {
-					// Feed input to program handler
-					s.Game.HandleProgInput(d, line)
-				}
-			} else {
-				DispatchCommand(s.Game, d, line)
-			}
-		}
+		s.processLine(d, line)
 
 		if d.IsClosed() {
 			return
@@ -358,6 +331,36 @@ func (s *Server) buildMSSPData() map[string]string {
 	}
 
 	return data
+}
+
+// processLine is the single locked entry point for per-line input from a
+// connection goroutine. It serialises access to all game state.
+func (s *Server) processLine(d *Descriptor, line string) {
+	s.Game.mu.Lock()
+	defer s.Game.mu.Unlock()
+
+	if d.State == ConnLogin {
+		s.handleLoginCommand(d, line)
+	} else {
+		if d.AutoDark {
+			d.AutoDark = false
+		}
+		log.Printf("[%d] CMD state=%d player=#%d input=%q", d.ID, d.State, d.Player, line)
+		if d.ProgData != nil {
+			if strings.HasPrefix(line, "|") {
+				DispatchCommand(s.Game, d, line[1:])
+				if d.ProgData != nil {
+					d.SendNoNewline(progPrompt)
+				}
+			} else if strings.EqualFold(strings.TrimSpace(line), "@quitprogram") {
+				DispatchCommand(s.Game, d, line)
+			} else {
+				s.Game.HandleProgInput(d, line)
+			}
+		} else {
+			DispatchCommand(s.Game, d, line)
+		}
+	}
 }
 
 // handleLoginCommand processes pre-login commands.
