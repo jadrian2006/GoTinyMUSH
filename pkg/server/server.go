@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	mushcrypt "github.com/crystal-mush/gotinymush/pkg/crypt"
+
 	"github.com/crystal-mush/gotinymush/pkg/boltstore"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 	"github.com/crystal-mush/gotinymush/pkg/oob"
@@ -360,6 +362,10 @@ func (s *Server) processLine(d *Descriptor, line string) {
 		} else {
 			DispatchCommand(s.Game, d, line)
 		}
+		// Any command may have queued entries (@dolist, @trigger, @wait 0…) —
+		// wake the processor so they drain immediately, like C's main loop
+		// running do_top() right after processing input.
+		s.Game.WakeQueue()
 	}
 }
 
@@ -457,6 +463,7 @@ func (s *Server) handleConnect(d *Descriptor, user, password string, dark bool) 
 
 	// Successful login
 	s.Game.Conns.Login(d, player)
+	s.Game.RefreshAnsiCache(d)
 	playerObj := s.Game.DB.Objects[player]
 
 	// Set CONNECTED flag (C TinyMUSH sets this on login)
@@ -555,9 +562,11 @@ func (s *Server) handleCreate(d *Descriptor, user, password string) {
 	ref := s.Game.CreateObject(user, gamedb.TypePlayer, gamedb.Nothing)
 	playerObj := s.Game.DB.Objects[ref]
 	playerObj.Owner = ref
+	// C create_obj: new players start with mudconf.paystart (starting_money)
+	playerObj.Pennies = s.Game.Conf.StartingMoney
 
-	// Set password (plaintext for now, TODO: add encryption)
-	s.Game.SetAttr(ref, aPass, password)
+	// Set password (crypt with "XX" salt, matching C s_Pass)
+	s.Game.SetAttr(ref, aPass, mushcrypt.Crypt(password, "XX"))
 
 	// Set start room and home from config
 	startRoom := s.Game.StartingRoom()
@@ -582,6 +591,7 @@ func (s *Server) handleCreate(d *Descriptor, user, password string) {
 
 	// Log them in
 	s.Game.Conns.Login(d, ref)
+	s.Game.RefreshAnsiCache(d)
 
 	d.Send(fmt.Sprintf("Welcome to GoTinyMUSH, %s! Your character has been created as #%d.", user, ref))
 

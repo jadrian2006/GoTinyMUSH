@@ -10,11 +10,79 @@ import (
 
 // Exec evaluates a MUSH expression string and returns the result.
 // This is the main entry point corresponding to TinyMUSH's exec() function.
+// lbufMax mirrors C's LBUF_SIZE-1: the longest string an evaluation buffer
+// can hold. safe_str silently stops appending at this point.
+const lbufMax = 7999
+
+// clampLbuf truncates a builder that has outgrown the C LBUF limit.
+func clampLbuf(buf *strings.Builder) {
+	if buf.Len() > lbufMax {
+		s := buf.String()[:lbufMax]
+		buf.Reset()
+		buf.WriteString(s)
+	}
+}
+
 func (ctx *EvalContext) Exec(input string, evalFlags int, cargs []string) string {
 	var buf strings.Builder
 	buf.Grow(len(input) * 2)
+	if ctx.TraceOn {
+		ctx.traceDepth++
+	}
 	ctx.exec(&buf, input, evalFlags, cargs)
-	return buf.String()
+	clampLbuf(&buf)
+	result := buf.String()
+	if ctx.TraceOn {
+		// C exec(): every evaluation that CHANGED the string is traced as
+		// "Name(#N)} 'orig' -> 'result'" to the owner, innermost first
+		// (trace_topdown off). Capped at trace_output_limit.
+		if input != result {
+			limit := ctx.TraceLimit
+			if limit <= 0 {
+				limit = 200
+			}
+			if len(ctx.traceLines) < limit {
+				name := ""
+				if obj, ok := ctx.DB.Objects[ctx.Player]; ok {
+					name = obj.Name
+					if idx := strings.IndexByte(name, ';'); idx >= 0 {
+						name = name[:idx]
+					}
+				}
+				ctx.traceLines = append(ctx.traceLines,
+					fmt.Sprintf("%s(#%d)} '%s' -> '%s'", name, ctx.Player, input, result))
+			} else {
+				ctx.traceDiscarded++
+			}
+		}
+		ctx.traceDepth--
+		if ctx.traceDepth == 0 && (len(ctx.traceLines) > 0 || ctx.traceDiscarded > 0) {
+			target := ctx.Player
+			if obj, ok := ctx.DB.Objects[ctx.Player]; ok {
+				target = obj.Owner
+			}
+			// C trace_topdown (default on): the tcache is a LIFO flushed only
+			// at the top — outermost entries print first. With it off, each
+			// exec flushes as it completes — innermost first.
+			if ctx.TraceTopDown {
+				for i, j := 0, len(ctx.traceLines)-1; i < j; i, j = i+1, j-1 {
+					ctx.traceLines[i], ctx.traceLines[j] = ctx.traceLines[j], ctx.traceLines[i]
+				}
+			}
+			for _, line := range ctx.traceLines {
+				ctx.Notifications = append(ctx.Notifications, Notification{Target: target, Message: line})
+			}
+			if ctx.traceDiscarded > 0 {
+				ctx.Notifications = append(ctx.Notifications, Notification{
+					Target:  target,
+					Message: fmt.Sprintf("%d lines of trace output discarded.", ctx.traceDiscarded),
+				})
+			}
+			ctx.traceLines = ctx.traceLines[:0]
+			ctx.traceDiscarded = 0
+		}
+	}
+	return result
 }
 
 // exec is the internal recursive evaluator.
@@ -259,7 +327,16 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 			var args []string
 			var newPos int
 			var found bool
-			if fn.Flags&FnNoEval != 0 {
+			if fn.Flags&FnRawArg != 0 {
+				// C nargs == -1: everything up to the matching ')' is a
+				// single argument — commas are NOT separators here.
+				var raw string
+				raw, newPos, found = parseTo(input, pos, ')')
+				if fn.Flags&FnNoEval != 0 {
+					raw = stripEscapes(raw)
+				}
+				args = []string{raw}
+			} else if fn.Flags&FnNoEval != 0 {
 				args, newPos, found = parseArgListStripEsc(input, pos, ')')
 			} else {
 				args, newPos, found = parseArgList(input, pos, ')')
@@ -347,6 +424,9 @@ func (ctx *EvalContext) exec(buf *strings.Builder, input string, evalFlags int, 
 					fn.Name, fn.NArgs, nfargs))
 			}
 			ctx.FuncNestLev--
+			// C: every evaluation buffer is an LBUF — output silently stops
+			// growing at LBUF_SIZE-1 (7999) characters (safe_str semantics).
+			clampLbuf(buf)
 			if evalFlags&EvFCheckPersist == 0 {
 				evalFlags &^= EvFCheck
 			}
@@ -755,6 +835,36 @@ func (ctx *EvalContext) handlePercent(buf *strings.Builder, input string, pos in
 		buf.WriteByte(ch)
 		return pos + 1
 	}
+}
+
+// stripEscapes removes backslash escapes (\x → x) while preserving %-pairs,
+// matching C's EV_STRIP_ESC handling during parse_to. Used for raw-argument
+// NoEval functions (lit, nescape, nsecure).
+func stripEscapes(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch ch {
+		case '\\':
+			i++
+			if i < len(s) {
+				b.WriteByte(s[i])
+			}
+		case '%':
+			b.WriteByte(ch)
+			i++
+			if i < len(s) {
+				b.WriteByte(s[i])
+			}
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
 }
 
 // parseTo finds a delimiter character while respecting nesting of [], (), {}.

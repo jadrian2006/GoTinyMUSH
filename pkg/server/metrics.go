@@ -96,7 +96,10 @@ func (m *Metrics) Update() {
 	m.playersConnected.WithLabelValues("tcp").Set(float64(stats["tcp"].(int)))
 	m.playersConnected.WithLabelValues("websocket").Set(float64(stats["websocket"].(int)))
 
-	m.objectsTotal.Set(float64(len(m.game.DB.Objects)))
+	m.game.mu.RLock()
+	objCount := len(m.game.DB.Objects)
+	m.game.mu.RUnlock()
+	m.objectsTotal.Set(float64(objCount))
 
 	m.commandsTotal.Add(0) // Counter — incremented elsewhere or snapshot
 	m.bytesSentTotal.Add(0)

@@ -290,6 +290,7 @@ func (ws *WebServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			// Web clients always support ANSI rendering
 			pObj.Flags[1] |= gamedb.Flag2Ansi
 		}
+		d.SetAnsi(true)
 		wc.sendJSON(WSMessage{
 			Type: "login",
 			Data: map[string]any{
@@ -410,6 +411,7 @@ func handleWSLogin(ws *WebServer, d *Descriptor, wc *wsConn, input string) {
 			// Web clients always support ANSI rendering
 			pObj.Flags[1] |= gamedb.Flag2Ansi
 		}
+		d.SetAnsi(true)
 		playerName := ws.game.PlayerName(player)
 		wc.sendJSON(WSMessage{
 			Type: "login",

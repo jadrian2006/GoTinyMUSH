@@ -190,6 +190,94 @@ func cmdDestroy(g *Game, d *Descriptor, args string, switches []string) {
 	g.Notify(d.Player, fmt.Sprintf("You will be rewarded shortly for %s(#%d).", DisplayName(obj.Name), target))
 }
 
+// isCleanGarbage mirrors C TinyMUSH's IS_CLEAN macro (object.c): a garbage
+// object still flagged GOING, fully unlinked, and owned by God.
+func (g *Game) isCleanGarbage(ref gamedb.DBRef) bool {
+	obj, ok := g.DB.Objects[ref]
+	if !ok {
+		return false
+	}
+	return obj.ObjType() == gamedb.TypeGarbage && obj.HasFlag(gamedb.FlagGoing) &&
+		obj.Location == gamedb.Nothing && obj.Contents == gamedb.Nothing &&
+		obj.Exits == gamedb.Nothing && obj.Next == gamedb.Nothing &&
+		obj.Owner == g.GodPlayer()
+}
+
+// MakeFreelist rebuilds the garbage free list (C: make_freelist in object.c).
+// Clean garbage at the top of the db is trimmed off entirely (C: db_top--);
+// the remaining clean garbage is chained through Link, lowest dbref at the head.
+// Called at startup and on each dbck cycle, before PurgeGoing — garbage reaped
+// by the current cycle only becomes reusable on the next one, as in C.
+func (g *Game) MakeFreelist() {
+	g.Freelist = gamedb.Nothing
+	for g.NextRef > 0 && g.isCleanGarbage(g.NextRef-1) {
+		ref := g.NextRef - 1
+		delete(g.DB.Objects, ref)
+		if g.Store != nil {
+			_ = g.Store.DeleteObject(ref)
+		}
+		g.NextRef--
+	}
+	for ref := g.NextRef - 1; ref >= 0; ref-- {
+		if g.isCleanGarbage(ref) {
+			obj := g.DB.Objects[ref]
+			obj.Link = g.Freelist
+			g.Freelist = ref
+			g.PersistObject(obj)
+		}
+	}
+}
+
+// cmdFreelist implements @freelist — move a clean garbage object to the head
+// of the free list so it is reused by the next creation (C: do_freelist).
+func cmdFreelist(g *Game, d *Descriptor, args string, _ []string) {
+	// C: @freelist is CA_WIZARD command access — God passes regardless of flags
+	if !Wizard(g, d.Player) && !IsGod(g, d.Player) {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+	args = strings.TrimSpace(args)
+	if !strings.HasPrefix(args, "#") || len(args) < 2 {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	n, err := strconv.Atoi(args[1:])
+	if err != nil || n < 0 || gamedb.DBRef(n) >= g.NextRef {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	thing := gamedb.DBRef(n)
+	if !g.isCleanGarbage(thing) {
+		g.Notify(d.Player, "That object is not clean garbage.")
+		return
+	}
+	if g.Freelist == thing {
+		g.Notify(d.Player, "That object is already at the head of the freelist.")
+		return
+	}
+	// Unchain from its predecessor to avoid circular linkage.
+	for ref := gamedb.DBRef(0); ref < g.NextRef; ref++ {
+		obj, ok := g.DB.Objects[ref]
+		if !ok || obj.Link != thing {
+			continue
+		}
+		if g.isCleanGarbage(ref) {
+			if thingObj, tok := g.DB.Objects[thing]; tok {
+				obj.Link = thingObj.Link
+				g.PersistObject(obj)
+			}
+			break
+		}
+		g.Notify(d.Player, "Unable to relink freelist at this time.")
+		return
+	}
+	tobj := g.DB.Objects[thing]
+	tobj.Link = g.Freelist
+	g.Freelist = thing
+	g.PersistObject(tobj)
+	g.Notify(d.Player, "Object placed at the head of the freelist.")
+}
+
 // PurgeGoing reaps objects marked GOING by @destroy.
 // Matches C TinyMUSH's purge_going() in object.c — runs on the dbck interval (10 min).
 // Removes objects from location/exit chains, halts queued commands, refunds build credits,
@@ -252,17 +340,7 @@ func (g *Game) PurgeGoing() {
 		// C TinyMUSH: refund quota on destroy
 		g.RefundQuota(owner, quotaCostForType(g, obj.ObjType()), obj.ObjType())
 
-		// Convert to garbage
-		obj.Name = fmt.Sprintf("Garbage(#%d)", ref)
-		obj.Flags = [3]int{int(gamedb.TypeGarbage)} // TYPE_GARBAGE in word 0
-		obj.Contents = gamedb.Nothing
-		obj.Exits = gamedb.Nothing
-		obj.Link = gamedb.Nothing
-		obj.Next = gamedb.Nothing
-		obj.Parent = gamedb.Nothing
-		obj.Owner = gamedb.DBRef(1) // GOD
-		obj.Attrs = nil
-		g.PersistObject(obj)
+		g.convertToGarbage(obj)
 		reaped++
 	}
 	if reaped > 0 {
@@ -350,15 +428,26 @@ func (g *Game) destroyImmediate(player, ref gamedb.DBRef) {
 		g.Notify(player, "Destroyed.")
 	}
 
-	// Convert to garbage
-	obj.Name = fmt.Sprintf("Garbage(#%d)", ref)
-	obj.Flags = [3]int{int(gamedb.TypeGarbage)}
+	g.convertToGarbage(obj)
+}
+
+// convertToGarbage resets an object to clean garbage, matching the exact
+// post-destroy state of C TinyMUSH's destroy_obj (object.c): name cleared,
+// flags = TYPE_GARBAGE|GOING, everything unlinked, owned by God, no money.
+func (g *Game) convertToGarbage(obj *gamedb.Object) {
+	obj.Name = ""
+	obj.Flags = [3]int{int(gamedb.TypeGarbage) | gamedb.FlagGoing}
+	obj.Powers = [2]int{}
+	obj.Location = gamedb.Nothing
 	obj.Contents = gamedb.Nothing
 	obj.Exits = gamedb.Nothing
 	obj.Link = gamedb.Nothing
 	obj.Next = gamedb.Nothing
 	obj.Parent = gamedb.Nothing
-	obj.Owner = gamedb.DBRef(1)
+	obj.Zone = gamedb.Nothing
+	obj.Zones = nil
+	obj.Owner = g.GodPlayer()
+	obj.Pennies = 0
 	obj.Attrs = nil
 	g.PersistObject(obj)
 }
@@ -1509,10 +1598,60 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 		destStr = ctx.Exec(strings.TrimSpace(args), eval.EvFCheck|eval.EvEval, nil)
 	}
 
-	if strings.EqualFold(destStr, "home") {
-		if obj, ok := g.DB.Objects[victim]; ok {
-			destStr = fmt.Sprintf("#%d", obj.Link)
+	// C do_teleport (wiz.c): Fixed players (or their owners) may not
+	// teleport unless Tel_Anywhere (wizard or POW_TEL_ANYWHR).
+	telAnywhere := Wizard(g, d.Player)
+	telAnything := Wizard(g, d.Player)
+	if pObj, ok := g.DB.Objects[d.Player]; ok {
+		telAnywhere = telAnywhere || pObj.HasPower(0, gamedb.PowTelAnywhr)
+		telAnything = telAnything || pObj.HasPower(0, gamedb.PowTelUnrst)
+		ownerFixed := false
+		if oObj, ok2 := g.DB.Objects[pObj.Owner]; ok2 {
+			ownerFixed = oObj.HasFlag2(gamedb.Flag2Fixed)
 		}
+		if (pObj.HasFlag2(gamedb.Flag2Fixed) || ownerFixed) && !telAnywhere {
+			// C: notify(player, mudconf.fixed_tel_msg) — default is empty
+			g.Notify(d.Player, "")
+			return
+		}
+	}
+
+	vObj, vOK := g.DB.Objects[victim]
+	if !vOK {
+		g.Notify(d.Player, "I don't see that here.")
+		return
+	}
+	isExitVictim := vObj.ObjType() == gamedb.TypeExit
+
+	// C: victim must have a location, or be an exit
+	if vObj.ObjType() != gamedb.TypePlayer && vObj.ObjType() != gamedb.TypeThing && !isExitVictim {
+		g.Notify(d.Player, "You can't teleport that.")
+		return
+	}
+
+	// C: an exit needs control of the exit (if linked) or of its source room;
+	// anything else needs control of the victim or its location, or Tel_Anything.
+	if isExitVictim {
+		if vObj.Location != gamedb.Nothing && !Controls(g, d.Player, victim) &&
+			!Controls(g, d.Player, vObj.Exits) {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+	} else if !Controls(g, d.Player, victim) &&
+		!Controls(g, d.Player, vObj.Location) && !telAnything {
+		g.Notify(d.Player, "Permission denied.")
+		return
+	}
+
+	// C: teleporting home — move_via_teleport(victim, HOME): bypasses the
+	// TELOUT lock entirely, no "Teleported." message. Exits have no homes.
+	if strings.EqualFold(strings.TrimSpace(destStr), "home") {
+		if isExitVictim {
+			g.Notify(d.Player, "Permission denied.")
+		} else {
+			g.moveViaTeleport(d.Player, victim, gamedb.Nothing, true, switches)
+		}
+		return
 	}
 
 	dest := g.ResolveRef(d.Player, destStr)
@@ -1520,74 +1659,117 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 		g.Notify(d.Player, "No match.")
 		return
 	}
-
-	// Permission checks (matching C TinyMUSH do_teleport):
-
-	// C: FIXED flag blocks teleport for non-wizards
-	if pObj, ok := g.DB.Objects[d.Player]; ok {
-		if pObj.HasFlag2(gamedb.Flag2Fixed) && !Wizard(g, d.Player) &&
-			!pObj.HasPower(0, gamedb.PowTelAnywhr) {
-			g.Notify(d.Player, "Permission denied.")
-			return
-		}
+	dObj, dOK := g.DB.Objects[dest]
+	if !dOK {
+		g.Notify(d.Player, "No match.")
+		return
 	}
-
-	// 1. Must control the victim OR be wizard OR have TEL_ANYTHING power
-	hasTelAnything := false
-	if pObj, ok := g.DB.Objects[d.Player]; ok {
-		hasTelAnything = pObj.HasPower(0, gamedb.PowTelUnrst)
-	}
-	if !Controls(g, d.Player, victim) && !Wizard(g, d.Player) && !hasTelAnything {
-		g.Notify(d.Player, "Permission denied.")
+	if victim == dest || dObj.IsGoing() {
+		g.Notify(d.Player, "Bad destination.")
 		return
 	}
 
-	// C TinyMUSH: check TportLock on the victim (can this object be teleported?)
-	if !Wizard(g, d.Player) && !hasTelAnything {
-		if !CouldDoIt(g, d.Player, victim, aLTport) {
-			g.Notify(d.Player, "You can't teleport that!")
+	// C: an exit victim is re-sourced onto the destination (@open permissions)
+	if isExitVictim {
+		canHoldExits := dObj.ObjType() == gamedb.TypeRoom ||
+			dObj.ObjType() == gamedb.TypeThing || dObj.ObjType() == gamedb.TypePlayer
+		if !canHoldExits || !Controls(g, d.Player, dest) {
+			g.Notify(d.Player, "Permission denied.")
 			return
 		}
-	}
-
-	// C TinyMUSH: check TeloutLock on victim's current location (can things leave?)
-	if !Wizard(g, d.Player) && !hasTelAnything {
-		if vObj, ok := g.DB.Objects[victim]; ok && vObj.Location != gamedb.Nothing {
-			if !CouldDoIt(g, d.Player, vObj.Location, aLTelout) {
-				g.Notify(d.Player, "You can't teleport out of there!")
-				return
+		if oldSrc := vObj.Exits; oldSrc != gamedb.Nothing {
+			g.RemoveFromExits(oldSrc, victim)
+			if srcObj, ok := g.DB.Objects[oldSrc]; ok {
+				g.PersistObject(srcObj)
 			}
 		}
+		vObj.Next = dObj.Exits
+		dObj.Exits = victim
+		vObj.Exits = dest
+		g.PersistObjects(vObj, dObj)
+		g.Notify(d.Player, "Teleported.")
+		return
 	}
 
-	// 2. Destination must be JUMP_OK or player must control dest or be wizard/TEL_ANYWHERE
-	hasTelAnywhere := false
-	if pObj, ok := g.DB.Objects[d.Player]; ok {
-		hasTelAnywhere = pObj.HasPower(0, gamedb.PowTelAnywhr)
-	}
-	if destObj, ok := g.DB.Objects[dest]; ok {
-		if !Wizard(g, d.Player) && !Controls(g, d.Player, dest) && !hasTelAnywhere {
-			if !destObj.HasFlag(gamedb.FlagJumpOK) {
-				g.Notify(d.Player, "You can't teleport there!")
-				return
+	if dObj.ObjType() == gamedb.TypeRoom ||
+		dObj.ObjType() == gamedb.TypeThing || dObj.ObjType() == gamedb.TypePlayer {
+		// C: control dest, or JUMP_OK dest whose TPORT lock the victim
+		// passes, or Tel_Anywhere.
+		if !(Controls(g, d.Player, dest) ||
+			(dObj.HasFlag(gamedb.FlagJumpOK) && CouldDoIt(g, victim, dest, aLTport)) ||
+			telAnywhere) {
+			if d.Player != victim {
+				g.Notify(d.Player, "Permission denied.")
 			}
-			// Check teleport lock on destination
-			if !CouldDoIt(g, victim, dest, 97) { // A_TLOCK = 97
-				g.Notify(d.Player, "You can't teleport there!")
-				return
-			}
-		}
-	}
-	// If dest is an EXIT, follow it to its destination room.
-	// In C TinyMUSH, @tel obj=exit sends the object through the exit.
-	// An exit's Location field holds the destination room.
-	if destObj, ok := g.DB.Objects[dest]; ok && destObj.ObjType() == gamedb.TypeExit {
-		exitDest := destObj.Location
-		if exitDest == gamedb.Nothing {
-			g.Notify(d.Player, "That exit doesn't lead anywhere.")
+			g.DidItDefault(victim, dest, aTFail, "You can't teleport there!", aOTFail, "", aATFail)
 			return
 		}
-		dest = exitDest
+		if g.moveViaTeleport(d.Player, victim, dest, false, switches) {
+			if d.Player != victim {
+				if pObj, ok := g.DB.Objects[d.Player]; !ok || !pObj.HasFlag(gamedb.FlagQuiet) {
+					g.Notify(d.Player, "Teleported.")
+				}
+			}
+		}
+		return
+	}
+
+	// C: destination is an exit in the victim's location — go through it
+	if dObj.ObjType() == gamedb.TypeExit {
+		if dObj.Exits == vObj.Location {
+			if dObj.Location == gamedb.Nothing {
+				g.Notify(d.Player, "That exit doesn't lead anywhere.")
+				return
+			}
+			g.moveViaTeleport(d.Player, victim, dObj.Location, false, switches)
+		} else {
+			g.Notify(d.Player, "I can't find that exit.")
+		}
+		return
+	}
+	g.Notify(d.Player, "Bad destination.")
+}
+
+// moveViaTeleport mirrors C move_via_teleport (move.c): the victim must pass
+// the TELOUT lock of every container up to the enclosing room (skipped when
+// going home), then the move runs with the full teleport message sequence.
+// Returns true if the move happened.
+func (g *Game) moveViaTeleport(cause, victim, destIn gamedb.DBRef, toHome bool, switches []string) bool {
+	vObj, vOK := g.DB.Objects[victim]
+	if !vOK {
+		return false
+	}
+	src := vObj.Location
+	if !toHome && src != gamedb.Nothing {
+		curr := src
+		for count := 0; count < 20; count++ { // C: mudconf.ntfy_nest_lim
+			if !CouldDoIt(g, victim, curr, aLTelout) {
+				var failmsg string
+				if victim == cause || cause == gamedb.Nothing {
+					failmsg = "You can't teleport out!"
+				} else {
+					failmsg = "You can't be teleported out!"
+					g.Notify(cause, "You can't teleport that out!")
+				}
+				g.DidItDefault(victim, src, aTOFail, failmsg, aOTOFail, "", aATOFail)
+				return false
+			}
+			cObj, cOK := g.DB.Objects[curr]
+			if !cOK || cObj.ObjType() == gamedb.TypeRoom {
+				break
+			}
+			curr = cObj.Location
+			if curr == gamedb.Nothing {
+				break
+			}
+		}
+	}
+	dest := destIn
+	if toHome {
+		dest = vObj.Link
+		if dest == gamedb.Nothing {
+			return false
+		}
 	}
 
 	// Find descriptor for victim (if connected)
@@ -1601,20 +1783,6 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 	// 5. MOVE to victim, OMOVE to new room, AMOVE action
 	// 6. ENTER/OENTER/AENTER on new location
 	// 7. "has left"/"has arrived" default messages
-	const (
-		aOXTPort = 81 // A_OXTPORT
-		aTPort   = 79 // A_TPORT
-		aOTPort  = 80 // A_OTPORT
-		aATPort  = 82 // A_ATPORT
-		aMove    = 55 // A_MOVE
-		aOMove   = 56 // A_OMOVE
-		aAMove   = 57 // A_AMOVE
-		aOLeave  = 51 // A_OLEAVE
-		aALeave  = 52 // A_ALEAVE
-		aOEnter  = 53 // A_OENTER
-		aAEnter  = 35 // A_AENTER
-	)
-
 	if obj, ok := g.DB.Objects[victim]; ok {
 		oldLoc := obj.Location
 		isDark := obj.HasFlag(gamedb.FlagDark)
@@ -1629,30 +1797,11 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 		// Step 1: OXTPORT to old room (before move)
 		g.DidIt(victim, victim, 0, aOXTPort, 0)
 
-		// Step 2: LEAVE/OLEAVE/ALEAVE on old location
+		// Step 2: LEAVE messaging — same path as ordinary movement
+		// (C: move_via_teleport calls the shared process_leave_loc)
 		if oldLoc != gamedb.Nothing {
-			if !isDark {
-				g.QueueAttrAction(oldLoc, victim, aALeave, nil)
-				if oleave := g.GetAttrText(oldLoc, aOLeave); oleave != "" {
-					ctx := MakeEvalContextForObj(g, oldLoc, victim, func(c *eval.EvalContext) {
-						functions.RegisterAll(c)
-					})
-					msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-					if msg != "" {
-						g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
-							DisplayName(obj.Name)+" "+msg)
-					}
-				} else {
-					g.Conns.SendToRoomExcept(g.DB, oldLoc, victim,
-						fmt.Sprintf("%s has left.", DisplayName(obj.Name)))
-				}
-			}
+			g.announceLeave(victim, oldLoc, isDark)
 			g.RemoveFromContents(oldLoc, victim)
-
-			// Watch system: notify watchers of departure
-			if obj.ObjType() == gamedb.TypePlayer {
-				g.NotifyWatch(victim, oldLoc, "left")
-			}
 		}
 
 		// Step 3: Move object
@@ -1675,36 +1824,14 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 		// Step 5: MOVE to victim, OMOVE to new room, AMOVE action
 		g.DidIt(victim, victim, aMove, aOMove, aAMove)
 
-		// Step 6+7: "has arrived" + OENTER/AENTER on destination
-		if !isDark {
-			g.Conns.SendToRoomExcept(g.DB, dest, victim,
-				fmt.Sprintf("%s has arrived.", DisplayName(obj.Name)))
-			g.QueueAttrAction(dest, victim, aAEnter, nil)
-			if oenter := g.GetAttrText(dest, aOEnter); oenter != "" {
-				ctx := MakeEvalContextForObj(g, dest, victim, func(c *eval.EvalContext) {
-					functions.RegisterAll(c)
-				})
-				msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-				if msg != "" {
-					g.Conns.SendToRoomExcept(g.DB, dest, victim,
-						DisplayName(obj.Name)+" "+msg)
-				}
-			}
-		}
-
-		// Watch system: notify watchers of arrival
-		if obj.ObjType() == gamedb.TypePlayer {
-			g.NotifyWatch(victim, dest, "arrived")
-		}
+		// Step 6+7: ENTER messaging — same path as ordinary movement
+		// (C: move_via_teleport calls the shared process_enter_loc)
+		g.announceEnter(victim, dest, isDark)
 	}
 
-	if victim == d.Player {
-		g.ShowRoom(d, dest)
-	} else {
-		g.Notify(d.Player, fmt.Sprintf("Teleported %s to %s(#%d).", g.ObjName(victim), g.ObjName(dest), dest))
-		if len(descs) > 0 {
-			g.ShowRoom(descs[0], dest)
-		}
+	// The moved object looks at its new location (C: move_object → look)
+	if len(descs) > 0 {
+		g.ShowRoom(descs[0], dest)
 	}
 
 	// Instance movement: if the teleported object is an instance, notify occupants
@@ -1713,6 +1840,7 @@ func cmdTeleport(g *Game, d *Descriptor, args string, switches []string) {
 			g.MoveInstanceOccupants(victim)
 		}
 	}
+	return true
 }
 
 func cmdForce(g *Game, d *Descriptor, args string, switches []string) {
@@ -2172,7 +2300,8 @@ func cmdToad(g *Game, d *Descriptor, args string, switches []string) {
 // cmdPcreate implements @pcreate name=password — wizard creates a player
 // without logging them in. Matches C TinyMUSH create.c:do_pcreate.
 func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
-	if !Wizard(g, d.Player) {
+	// C: @pcreate is CA_WIZARD command access — God passes regardless of flags
+	if !Wizard(g, d.Player) && !IsGod(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
@@ -2187,9 +2316,11 @@ func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
 		g.Notify(d.Player, "Usage: @pcreate name = password")
 		return
 	}
-	// Check if name already exists
+	// Check if name already exists — C: create_obj notifies "The name %s is
+	// already taken.", then do_pcreate adds "Failure creating '%s'"
 	if LookupPlayer(g.DB, name) != gamedb.Nothing {
-		g.Notify(d.Player, "That name is already taken.")
+		g.Notify(d.Player, fmt.Sprintf("The name %s is already taken.", name))
+		g.Notify(d.Player, fmt.Sprintf("Failure creating '%s'", name))
 		return
 	}
 	if len(name) < 2 {
@@ -2210,6 +2341,8 @@ func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
 	ref := g.CreateObject(name, gamedb.TypePlayer, d.Player)
 	playerObj := g.DB.Objects[ref]
 	playerObj.Owner = ref
+	// C create_obj: new players start with mudconf.paystart (starting_money)
+	playerObj.Pennies = g.Conf.StartingMoney
 	// Set password
 	hash := mushcrypt.Crypt(pass, "XX")
 	g.SetAttr(ref, aPass, hash)
@@ -2228,7 +2361,8 @@ func cmdPcreate(g *Game, d *Descriptor, args string, _ []string) {
 	}
 	g.InitPlayerQuota(ref)
 	log.Printf("PCREATE: %s(#%d) created player %s(#%d)", g.PlayerName(d.Player), d.Player, name, ref)
-	g.Notify(d.Player, fmt.Sprintf("Player %s created as #%d.", name, ref))
+	// C do_pcreate (create.c) success message
+	g.Notify(d.Player, fmt.Sprintf("New player '%s' (#%d) created with password '%s'", name, ref, pass))
 }
 
 // cmdBotcreate implements @botcreate name — wizard creates a bot player.
@@ -2745,8 +2879,12 @@ func stripBraces(s string) string {
 }
 
 func cmdSet(g *Game, d *Descriptor, args string, switches []string) {
-	// @set/quiet — suppress "Set." / "Cleared." confirmation messages
+	// C: confirmations are suppressed by /quiet AND by the QUIET flag on the
+	// player (flag_set: !(key & SET_QUIET) && !Quiet(player))
 	quiet := HasSwitch(switches, "quiet")
+	if pObj, ok := g.DB.Objects[d.Player]; ok && pObj.HasFlag(gamedb.FlagQuiet) {
+		quiet = true
+	}
 
 	eqIdx := strings.IndexByte(args, '=')
 	if eqIdx < 0 {
@@ -3724,7 +3862,12 @@ func cmdSearch(g *Game, d *Descriptor, args string, _ []string) {
 				g.Notify(d.Player, "\nPLAYERS:")
 				first = false
 			}
-			g.Notify(d.Player, g.unparseObject(d.Player, ref))
+			line := g.unparseObject(d.Player, ref)
+			// C search_perform: wizard searchers see player locations
+			if Wizard(g, d.Player) || IsGod(g, d.Player) {
+				line += " [location: " + g.unparseObject(d.Player, obj.Location) + "]"
+			}
+			g.Notify(d.Player, line)
 			pcount++
 		}
 	}
@@ -4086,6 +4229,11 @@ func (g *Game) StartAutoSave(intervalMinutes int) {
 			}
 			log.Printf("Auto-saving database...")
 			g.mu.RLock()
+			if g.Store != nil {
+				if serr := g.Store.Sync(); serr != nil {
+					log.Printf("ERROR: bolt sync: %v", serr)
+				}
+			}
 			err := flatfile.Save(g.DBPath, g.DB)
 			objCount := len(g.DB.Objects)
 			g.mu.RUnlock()
@@ -4670,6 +4818,14 @@ func cmdArchiveList(g *Game, d *Descriptor) {
 }
 
 // StartAutoArchive starts a periodic archive goroutine.
+// objectCountLocked reads the object count under the game read-lock — for
+// background goroutines (archive ticker) that don't hold g.mu.
+func (g *Game) objectCountLocked() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return len(g.DB.Objects)
+}
+
 func (g *Game) StartAutoArchive(intervalMinutes int) {
 	if intervalMinutes < 1 {
 		return
@@ -4691,7 +4847,7 @@ func (g *Game) StartAutoArchive(intervalMinutes int) {
 			params := archive.ArchiveParams{
 				ArchiveDir:  archiveDir,
 				MudName:     mudName,
-				ObjectCount: len(g.DB.Objects),
+				ObjectCount: g.objectCountLocked(),
 				DictDir:     g.DictDir,
 				TextDir:     g.TextDir,
 				ConfPath:    g.ConfPath,
@@ -4812,7 +4968,11 @@ func cmdAdmin(g *Game, d *Descriptor, args string, _ []string) {
 		return
 	}
 	g.Notify(d.Player, fmt.Sprintf("Set: %s = %s", param, value))
-	log.Printf("@admin: %s set %s = %s", g.DB.Objects[d.Player].Name, param, value)
+	adminName := "?"
+	if pObj, pok := g.DB.Objects[d.Player]; pok {
+		adminName = pObj.Name
+	}
+	log.Printf("@admin: %s set %s = %s", adminName, param, value)
 }
 
 // adminParamMap maps TinyMUSH @admin parameter names to get/set closures.
@@ -6398,13 +6558,20 @@ func cmdListGlobals(g *Game, d *Descriptor) {
 // cmdDbck implements @dbck — manual database consistency check.
 // C TinyMUSH: purges GOING objects, verifies chains, checks dead refs.
 func cmdDbck(g *Game, d *Descriptor, _ string, _ []string) {
-	if !Wizard(g, d.Player) {
+	// C: @dbck is CA_WIZARD command access — God passes regardless of flags
+	if !Wizard(g, d.Player) && !IsGod(g, d.Player) {
 		g.Notify(d.Player, "Permission denied.")
 		return
 	}
+	// C do_dbck: make_freelist runs before purge_going, so objects reaped this
+	// cycle only become reusable on the next one.
+	g.MakeFreelist()
 	g.PurgeGoing()
-	containers, objects := g.RepairAllChains()
-	g.Notify(d.Player, fmt.Sprintf("Done. (%d containers, %d objects checked)", containers, objects))
+	g.RepairAllChains()
+	// C: plain "Done." unless the player is QUIET
+	if obj, ok := g.DB.Objects[d.Player]; !ok || !obj.HasFlag(gamedb.FlagQuiet) {
+		g.Notify(d.Player, "Done.")
+	}
 }
 
 // cmdSweep implements @sweep — scan for listeners/commands in current location.
@@ -6479,9 +6646,11 @@ func cmdSweep(g *Game, d *Descriptor, _ string, switches []string) {
 		sweep(loc, "here")
 	}
 
+	locObj, locOK := g.DB.Objects[loc]
+
 	// Sweep contents of room
-	if checkHere {
-		current := g.DB.Objects[loc].Contents
+	if checkHere && locOK {
+		current := locObj.Contents
 		for current != gamedb.Nothing {
 			obj, ok := g.DB.Objects[current]
 			if !ok {
@@ -6493,8 +6662,8 @@ func cmdSweep(g *Game, d *Descriptor, _ string, switches []string) {
 	}
 
 	// Sweep exits
-	if checkExits {
-		current := g.DB.Objects[loc].Exits
+	if checkExits && locOK {
+		current := locObj.Exits
 		for current != gamedb.Nothing {
 			obj, ok := g.DB.Objects[current]
 			if !ok {
@@ -6506,8 +6675,8 @@ func cmdSweep(g *Game, d *Descriptor, _ string, switches []string) {
 	}
 
 	// Sweep player's inventory
-	if checkInventory {
-		current := g.DB.Objects[d.Player].Contents
+	if pObj, pok := g.DB.Objects[d.Player]; checkInventory && pok {
+		current := pObj.Contents
 		for current != gamedb.Nothing {
 			obj, ok := g.DB.Objects[current]
 			if !ok {

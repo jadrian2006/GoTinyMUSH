@@ -225,6 +225,7 @@ const A_USER_START = 256
 // WellKnownAttrFlags maps built-in attribute numbers to their default flags.
 // Matches the attr flag definitions in C TinyMUSH's attrs.h.
 var WellKnownAttrFlags = map[int]int{
+	6:   AFDefault | AFVisual | AFNoProg,            // A_DESC (C db.c: AF_DEFAULT|AF_VISUAL|AF_NOPROG)
 	5:   AFDark | AFInternal,                       // A_PASS — password hash
 	25:  AFInternal,                                 // A_MONEY
 	30:  AFVisual | AFWizard | AFNoCMD | AFNoProg | AFNoClone, // A_LAST — last login time

@@ -327,8 +327,9 @@ func matchTypeByChars(obj *gamedb.Object, typeChars string) bool {
 
 // fnLocate does advanced object matching: locate(looker, name, type)
 func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	if len(args) < 2 {
-		buf.WriteString("#-1")
+	// C: LOCATE is declared with exactly 3 arguments
+	if len(args) != 3 {
+		buf.WriteString("#-1 FUNCTION (LOCATE) EXPECTS 3 ARGUMENTS")
 		return
 	}
 	looker := resolveDBRef(ctx, args[0])
@@ -408,14 +409,12 @@ func fnLocate(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 			hasScope = true
 		}
 	}
-	// Default: if no scope flags specified, search everything
-	// C TinyMUSH match_everything includes absolute dbrefs and *player
+	// C fun_locate: the lowercase letters register the match_* searchers.
+	// With no valid scope letter (e.g. only type prefs, or junk like 't'),
+	// NO searcher runs and match_result() is NOTHING.
 	if !hasScope {
-		scopeInv = true
-		scopeNeigh = true
-		scopeExits = true
-		scopeAbsDbref = true
-		scopePlayer = true
+		buf.WriteString("#-1")
+		return
 	}
 
 	// C TinyMUSH match_everything: match_me, match_here, match_absolute,

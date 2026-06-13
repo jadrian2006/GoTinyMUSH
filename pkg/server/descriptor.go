@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crystal-mush/gotinymush/pkg/eval"
+	"github.com/crystal-mush/gotinymush/pkg/eval/functions"
 	"github.com/crystal-mush/gotinymush/pkg/events"
 	"github.com/crystal-mush/gotinymush/pkg/gamedb"
 	"github.com/crystal-mush/gotinymush/pkg/oob"
@@ -61,8 +64,31 @@ type Descriptor struct {
 	// If nil, the default event→text→Send path is used.
 	ReceiveFunc func(ev events.Event)
 
+	// ansiOn caches the player's ANSI flag for the output path, mirroring
+	// C's queue_string (netcommon.c): non-ANSI players get escape codes
+	// stripped. A cache (refreshed at login and on @set ANSI) avoids reading
+	// game state from output goroutines without the game lock.
+	ansiOn atomic.Bool
+
 	mu        sync.Mutex
 	closed    bool
+}
+
+// SetAnsi updates the cached ANSI-flag state for this connection.
+func (d *Descriptor) SetAnsi(on bool) { d.ansiOn.Store(on) }
+
+var ansiSeqRe = regexp.MustCompile("\033\\[[0-9;]*m")
+
+// filterAnsi strips ANSI color codes unless the player has the ANSI flag.
+// C TinyMUSH queue_string: if (!Ansi(d->player) && strchr(s, ESC)) strip_ansi(s).
+func (d *Descriptor) filterAnsi(msg string) string {
+	if !strings.ContainsRune(msg, '\033') {
+		return msg
+	}
+	if d.ansiOn.Load() {
+		return msg
+	}
+	return ansiSeqRe.ReplaceAllString(msg, "")
 }
 
 // NewDescriptor wraps a net.Conn into a Descriptor.
@@ -91,6 +117,7 @@ func (d *Descriptor) Send(msg string) {
 		d.SendFunc(msg)
 		return
 	}
+	msg = d.filterAnsi(msg)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -128,6 +155,7 @@ func (d *Descriptor) SendNoNewline(msg string) {
 		d.SendFunc(msg)
 		return
 	}
+	msg = d.filterAnsi(msg)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -432,74 +460,76 @@ func (cm *ConnManager) SendToRoomExcept(db *gamedb.Database, room gamedb.DBRef, 
 	}
 }
 
-// MakeEvalContext creates an EvalContext for a connected player.
-func MakeEvalContext(db *gamedb.Database, player gamedb.DBRef, registerFn func(*eval.EvalContext)) *eval.EvalContext {
+// RefreshAnsiCache updates a descriptor's cached ANSI state from the player's
+// flag. Must be called with the game lock held (it reads DB state).
+func (g *Game) RefreshAnsiCache(d *Descriptor) {
+	obj, ok := g.DB.Objects[d.Player]
+	d.SetAnsi(ok && obj.HasFlag2(gamedb.Flag2Ansi))
+}
+
+// newEvalCtx is the single core EvalContext builder. executor is the object
+// whose attributes/privileges drive evaluation (%!); enactor caused it (%#).
+// g may be nil when only a bare database context is available.
+func newEvalCtx(g *Game, db *gamedb.Database, executor, enactor gamedb.DBRef, registerFn func(*eval.EvalContext)) *eval.EvalContext {
+	if g != nil {
+		db = g.DB
+	}
 	ctx := eval.NewEvalContext(db)
-	ctx.Player = player
-	ctx.Cause = player
-	ctx.Caller = player
-	if registerFn != nil {
-		registerFn(ctx)
-	}
-	return ctx
-}
-
-// MakeEvalContextWithGame creates an EvalContext with GameState for connection queries.
-func MakeEvalContextWithGame(g *Game, player gamedb.DBRef, registerFn func(*eval.EvalContext)) *eval.EvalContext {
-	ctx := eval.NewEvalContext(g.DB)
-	ctx.Player = player
-	ctx.Cause = player
-	ctx.Caller = player
-	ctx.GameState = g
-	ctx.VersionStr = VersionString()
-	if !g.StartTime.IsZero() {
-		ctx.StartTime = g.StartTime.Unix()
-	}
-	if g.Conf != nil {
-		ctx.MudName = g.Conf.MudName
-		ctx.FuncInvkLim = g.Conf.FunctionInvocationLimit
-		ctx.CIsCommand = g.Conf.CIsCommand
-		if g.Conf.IterLimit > 0 {
-			ctx.IterLim = g.Conf.IterLimit
-		}
-		if g.Conf.EvalOutputLimit > 0 {
-			ctx.OutputLimit = g.Conf.EvalOutputLimit
-		}
-		if g.Conf.CommandInvocationLimit > 0 {
-			ctx.CmdInvkLim = g.Conf.CommandInvocationLimit
-		}
-	}
-	if registerFn != nil {
-		registerFn(ctx)
-	}
-	applyGameFuncs(g, ctx)
-	return ctx
-}
-
-// MakeEvalContextForObj creates an EvalContext where the executor (%!) is the
-// given object and the enactor (%#) is the player who triggered the evaluation.
-// This is the correct context for evaluating an object's attributes (DESC, etc.)
-// where v(), get(me/...), etc. should resolve attributes on the object, not the player.
-func MakeEvalContextForObj(g *Game, executor gamedb.DBRef, enactor gamedb.DBRef, registerFn func(*eval.EvalContext)) *eval.EvalContext {
-	ctx := eval.NewEvalContext(g.DB)
 	ctx.Player = executor
 	ctx.Cause = enactor
 	ctx.Caller = enactor
-	ctx.GameState = g
-	ctx.VersionStr = VersionString()
-	if !g.StartTime.IsZero() {
-		ctx.StartTime = g.StartTime.Unix()
+	if g != nil {
+		ctx.GameState = g
+		ctx.VersionStr = VersionString()
+		if !g.StartTime.IsZero() {
+			ctx.StartTime = g.StartTime.Unix()
+		}
+		if g.Conf != nil {
+			ctx.MudName = g.Conf.MudName
+			ctx.FuncInvkLim = g.Conf.FunctionInvocationLimit
+			ctx.CIsCommand = g.Conf.CIsCommand
+			if g.Conf.IterLimit > 0 {
+				ctx.IterLim = g.Conf.IterLimit
+			}
+			if g.Conf.EvalOutputLimit > 0 {
+				ctx.OutputLimit = g.Conf.EvalOutputLimit
+			}
+			if g.Conf.CommandInvocationLimit > 0 {
+				ctx.CmdInvkLim = g.Conf.CommandInvocationLimit
+			}
+			ctx.TraceLimit = g.Conf.TraceOutputLimit
+			ctx.TraceTopDown = g.Conf.TraceTopdown
+		}
 	}
-	if g.Conf != nil {
-		ctx.MudName = g.Conf.MudName
-		ctx.FuncInvkLim = g.Conf.FunctionInvocationLimit
-		ctx.CIsCommand = g.Conf.CIsCommand
+	// C: TRACE flag on the executor enables eval tracing
+	if obj, ok := db.Objects[executor]; ok && obj.HasFlag(gamedb.FlagTrace) {
+		ctx.TraceOn = true
 	}
 	if registerFn != nil {
 		registerFn(ctx)
 	}
-	applyGameFuncs(g, ctx)
+	if g != nil {
+		applyGameFuncs(g, ctx)
+	}
 	return ctx
+}
+
+// MakeEvalContext creates a bare EvalContext (no game state) for a player.
+func MakeEvalContext(db *gamedb.Database, player gamedb.DBRef, registerFn func(*eval.EvalContext)) *eval.EvalContext {
+	return newEvalCtx(nil, db, player, player, registerFn)
+}
+
+// MakeEvalContextWithGame creates an EvalContext where the player is both
+// executor and enactor.
+func MakeEvalContextWithGame(g *Game, player gamedb.DBRef, registerFn func(*eval.EvalContext)) *eval.EvalContext {
+	return newEvalCtx(g, nil, player, player, registerFn)
+}
+
+// MakeEvalContextForObj creates an EvalContext where the executor (%!) is the
+// given object and the enactor (%#) is the player who triggered the
+// evaluation — the correct context for evaluating an object's attributes.
+func MakeEvalContextForObj(g *Game, executor gamedb.DBRef, enactor gamedb.DBRef, registerFn func(*eval.EvalContext)) *eval.EvalContext {
+	return newEvalCtx(g, nil, executor, enactor, registerFn)
 }
 
 // applyGameFuncs copies @function-defined functions from Game to an EvalContext,
@@ -508,20 +538,39 @@ func applyGameFuncs(g *Game, ctx *eval.EvalContext) {
 	if g == nil {
 		return
 	}
+	// @function-defined softcode functions: alias the game-level map (reads
+	// and writes both happen under the game lock).
 	if g.GameFuncs != nil {
-		for name, uf := range g.GameFuncs {
-			ctx.UFunctions[name] = uf
+		ctx.UFunctions = g.GameFuncs
+	}
+	// Builtins with function_access overrides: use the per-game table built
+	// in ApplyGameConf (clones only the overridden entries). Falls back to
+	// the shared base when no overrides exist.
+	if g.evalFuncs != nil {
+		ctx.Functions = g.evalFuncs
+	}
+}
+
+// buildEvalFuncs constructs the per-game builtin table: the shared base map
+// with function_access overrides applied to cloned entries.
+func buildEvalFuncs(gc *GameConf) map[string]*eval.Function {
+	if gc == nil || len(gc.FunctionAccess) == 0 {
+		return nil // shared base is fine
+	}
+	base := functions.Base()
+	t := make(map[string]*eval.Function, len(base))
+	for k, v := range base {
+		t[k] = v
+	}
+	for name, level := range gc.FunctionAccess {
+		upper := strings.ToUpper(name)
+		if fn, ok := t[upper]; ok {
+			clone := *fn
+			clone.Perms = parseFuncAccessLevel(level)
+			t[upper] = &clone
 		}
 	}
-	// Apply function_access config permissions
-	if g.Conf != nil && g.Conf.FunctionAccess != nil {
-		for name, level := range g.Conf.FunctionAccess {
-			upper := strings.ToUpper(name)
-			if fn, ok := ctx.Functions[upper]; ok {
-				fn.Perms = parseFuncAccessLevel(level)
-			}
-		}
-	}
+	return t
 }
 
 // parseFuncAccessLevel converts a string access level to the eval constant.

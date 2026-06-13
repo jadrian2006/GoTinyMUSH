@@ -61,6 +61,11 @@ func Write(w io.Writer, db *gamedb.Database) error {
 
 	for _, ref := range refs {
 		obj := db.Objects[gamedb.DBRef(ref)]
+		// C db_write skips garbage — they round-trip as numbering gaps
+		// below +S, re-materialized as clean garbage on load.
+		if obj.ObjType() == gamedb.TypeGarbage {
+			continue
+		}
 		if err := wr.writeObject(obj); err != nil {
 			return fmt.Errorf("writing object #%d: %w", ref, err)
 		}

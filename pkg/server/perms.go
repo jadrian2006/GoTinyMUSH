@@ -63,6 +63,9 @@ func Inherits(g *Game, obj gamedb.DBRef) bool {
 // Wizard returns true if obj is an effective wizard.
 // Matches C TinyMUSH: Wizard(x) = has WIZARD flag directly, OR owner has
 // WIZARD and object Inherits. Players always inherit their own privileges.
+// NOTE: God without the WIZARD flag is deliberately NOT a wizard here — in C,
+// God bypasses command access (check_access) but does NOT pass Controls/
+// Control_All without the flag. God bootstraps by setting WIZARD on himself.
 func Wizard(g *Game, obj gamedb.DBRef) bool {
 	o, ok := g.DB.Objects[obj]
 	if !ok {

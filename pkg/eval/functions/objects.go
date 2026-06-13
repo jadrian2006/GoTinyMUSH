@@ -288,7 +288,14 @@ func resolveDBRef(ctx *eval.EvalContext, s string) gamedb.DBRef {
 	}
 	if strings.HasPrefix(s, "#") {
 		n, err := strconv.Atoi(s[1:])
-		if err == nil { return gamedb.DBRef(n) }
+		if err == nil {
+			ref := gamedb.DBRef(n)
+			// C match_absolute requires Good_obj — garbage is unmatchable
+			if obj, ok := ctx.DB.Objects[ref]; ok && obj.ObjType() != gamedb.TypeGarbage {
+				return ref
+			}
+			return gamedb.Nothing
+		}
 	}
 	// C TinyMUSH: player lookup only when name starts with * (LOOKUP_TOKEN).
 	// Bare names resolve via contents/exits/inventory, not global player scan.
@@ -384,13 +391,18 @@ func fnName(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	}
 
 	// 1-arg form: name(obj) — read name
-	if obj, ok := ctx.DB.Objects[ref]; ok {
+	if obj, ok := ctx.DB.Objects[ref]; ok && obj.ObjType() != gamedb.TypeGarbage {
 		name := obj.Name
 		// Return just the display name (before first ;) — aliases are separated by semicolons
 		if idx := strings.IndexByte(name, ';'); idx >= 0 { name = name[:idx] }
 		buf.WriteString(name)
 	} else {
-		buf.WriteString("#-1 NO MATCH")
+		// C handle_name → match_thing → noisy_match_result: notify the
+		// player and return empty.
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target:  ctx.Player,
+			Message: "I don't see that here.",
+		})
 	}
 }
 
@@ -498,13 +510,39 @@ func fnType(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 	}
 }
 
+// viewerIsWizard reports whether the viewer passes C's check_access(p, CA_WIZARD):
+// wizard flag (own or inherited from owner) or God.
+func viewerIsWizard(ctx *eval.EvalContext, viewer gamedb.DBRef) bool {
+	if ctx.GameState != nil && ctx.GameState.GodRef() == viewer {
+		return true
+	}
+	obj, ok := ctx.DB.Objects[viewer]
+	if !ok {
+		return false
+	}
+	if obj.HasFlag(gamedb.FlagWizard) {
+		return true
+	}
+	owner, ok := ctx.DB.Objects[obj.Owner]
+	return ok && owner.HasFlag(gamedb.FlagWizard)
+}
+
+func viewerIsGod(ctx *eval.EvalContext, viewer gamedb.DBRef) bool {
+	return ctx.GameState != nil && ctx.GameState.GodRef() == viewer
+}
+
 func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	ref := resolveDBRef(ctx, args[0])
 	obj, ok := ctx.DB.Objects[ref]
 	if !ok { buf.WriteString("#-1 NO MATCH"); return }
-	// C TinyMUSH: requires Examinable to see flags on other objects
-	if !gsExaminable(ctx, ctx.Player, ref) { return }
+	// C fun_flags: not Examinable → safe_noperm
+	if !gsExaminable(ctx, ctx.Player, ref) {
+		buf.WriteString("#-1 PERMISSION DENIED")
+		return
+	}
+	wizView := viewerIsWizard(ctx, ctx.Player)
+	godView := viewerIsGod(ctx, ctx.Player)
 
 	// Type letter first
 	switch obj.ObjType() {
@@ -514,109 +552,48 @@ func fnFlags(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 	default: // THING has no letter
 	}
 
-	// Flag characters in C TinyMUSH gen_flags[] order
-	f1 := obj.Flags[0]
-	f2 := obj.Flags[1]
-	// Uppercase flags (gen_flags order: A B C D F G H I J K L M N O Q S T U V W X Y Z)
-	if f2&gamedb.Flag2Abode != 0 { buf.WriteByte('A') }
-	if f2&gamedb.Flag2Blind != 0 { buf.WriteByte('B') }
-	if f1&gamedb.FlagChownOK != 0 { buf.WriteByte('C') }
-	if f1&gamedb.FlagDark != 0 { buf.WriteByte('D') }
-	if f2&gamedb.Flag2Floating != 0 { buf.WriteByte('F') }
-	if f1&gamedb.FlagGoing != 0 { buf.WriteByte('G') }
-	if f1&gamedb.FlagHaven != 0 { buf.WriteByte('H') }
-	if f1&gamedb.FlagInherit != 0 { buf.WriteByte('I') }
-	if f1&gamedb.FlagJumpOK != 0 { buf.WriteByte('J') }
-	if f2&gamedb.Flag2Key != 0 { buf.WriteByte('K') }
-	if f1&gamedb.FlagLinkOK != 0 { buf.WriteByte('L') }
-	if f1&gamedb.FlagMonitor != 0 { buf.WriteByte('M') }
-	if f1&gamedb.FlagNoSpoof != 0 { buf.WriteByte('N') }
-	if f1&gamedb.FlagOpaque != 0 { buf.WriteByte('O') }
-	if f1&gamedb.FlagQuiet != 0 { buf.WriteByte('Q') }
-	if f1&gamedb.FlagSticky != 0 { buf.WriteByte('S') }
-	if f1&gamedb.FlagTrace != 0 { buf.WriteByte('T') }
-	if f2&gamedb.Flag2Unfindable != 0 { buf.WriteByte('U') }
-	if f1&gamedb.FlagVisual != 0 { buf.WriteByte('V') }
-	if f1&gamedb.FlagWizard != 0 { buf.WriteByte('W') }
-	if f2&gamedb.Flag2Ansi != 0 { buf.WriteByte('X') }
-	if f2&gamedb.Flag2ParentOK != 0 { buf.WriteByte('Y') }
-	if f1&gamedb.FlagRoyalty != 0 { buf.WriteByte('Z') }
-	// Lowercase flags (gen_flags order: a b c d e f g h i j k l m n o p q r s t u v w x y z)
-	if f1&gamedb.FlagHearThru != 0 { buf.WriteByte('a') }
-	if f2&gamedb.Flag2Bounce != 0 { buf.WriteByte('b') }
-	if f2&gamedb.Flag2Connected != 0 { buf.WriteByte('c') }
-	if f1&gamedb.FlagDestroyOK != 0 { buf.WriteByte('d') }
-	if f1&gamedb.FlagEnterOK != 0 { buf.WriteByte('e') }
-	if f2&gamedb.Flag2Fixed != 0 { buf.WriteByte('f') }
-	if f2&gamedb.Flag2Uninspected != 0 { buf.WriteByte('g') }
-	if f1&gamedb.FlagHalt != 0 { buf.WriteByte('h') }
-	if f1&gamedb.FlagImmortal != 0 { buf.WriteByte('i') }
-	if f2&gamedb.Flag2Gagged != 0 { buf.WriteByte('j') }
-	if f2&gamedb.Flag2Light != 0 { buf.WriteByte('l') }
-	if f1&gamedb.FlagMyopic != 0 { buf.WriteByte('m') }
-	if f2&gamedb.Flag2ZoneParent != 0 { buf.WriteByte('o') }
-	if f1&gamedb.FlagPuppet != 0 { buf.WriteByte('p') }
-	if f1&gamedb.FlagTerse != 0 { buf.WriteByte('q') }
-	if f1&gamedb.FlagRobot != 0 { buf.WriteByte('r') }
-	if f1&gamedb.FlagSafe != 0 { buf.WriteByte('s') }
-	if f1&gamedb.FlagSeeThru != 0 { buf.WriteByte('t') }
-	if f2&gamedb.Flag2Suspect != 0 { buf.WriteByte('u') }
-	if f1&gamedb.FlagVerbose != 0 { buf.WriteByte('v') }
-	if f2&gamedb.Flag2Staff != 0 { buf.WriteByte('w') }
-	if f2&gamedb.Flag2Slave != 0 { buf.WriteByte('x') }
-	if f2&gamedb.Flag2ControlOK != 0 { buf.WriteByte('z') }
-	// Symbol flags (HAS_COMMANDS '$' is internal — C's decode_flags skips it)
-	if f2&gamedb.Flag2StopMatch != 0 { buf.WriteByte('!') }
-	if f2&gamedb.Flag2NoBLeed != 0 { buf.WriteByte('-') }
-	if f2&gamedb.Flag2Watcher != 0 { buf.WriteByte('+') }
-	// Internal flags (=, *, &, @) are suppressed by C's flags() — skip them
-	if f2&gamedb.Flag2HTML != 0 { buf.WriteByte('~') }
-	if f2&gamedb.Flag2HeadFlag != 0 { buf.WriteByte('?') }
-	if f2&gamedb.Flag2Vacation != 0 { buf.WriteByte('|') }
-	// Flag word 3
-	f3 := obj.Flags[2]
-	if f3&gamedb.Flag3Instance != 0 { buf.WriteByte('^') }
+	// Letters render from gamedb.FlagDefs — the single canonical inventory
+	// (C gen_flags[] order) — filtered by the viewer's listperm.
+	for _, fd := range gamedb.FlagDefs {
+		if fd.Letter == 0 || obj.Flags[fd.Word]&fd.Bit == 0 {
+			continue
+		}
+		switch fd.ListPerm {
+		case gamedb.FlagPermWiz:
+			if !wizView {
+				continue
+			}
+		case gamedb.FlagPermGod:
+			if !godView {
+				continue
+			}
+		}
+		buf.WriteByte(fd.Letter)
+	}
 }
 
-// knownFlags maps flag names to [word, bitmask]. Word -1 means type check.
-var knownFlags = map[string][2]int{
-	"WIZARD": {0, gamedb.FlagWizard}, "DARK": {0, gamedb.FlagDark},
-	"HAVEN": {0, gamedb.FlagHaven}, "HALT": {0, gamedb.FlagHalt},
-	"SAFE": {0, gamedb.FlagSafe}, "INHERIT": {0, gamedb.FlagInherit},
-	"NOSPOOF": {0, gamedb.FlagNoSpoof}, "VISUAL": {0, gamedb.FlagVisual},
-	"OPAQUE": {0, gamedb.FlagOpaque}, "QUIET": {0, gamedb.FlagQuiet},
-	"PUPPET": {0, gamedb.FlagPuppet}, "STICKY": {0, gamedb.FlagSticky},
-	"MONITOR": {0, gamedb.FlagMonitor}, "ROBOT": {0, gamedb.FlagRobot},
-	"ROYALTY": {0, gamedb.FlagRoyalty}, "ENTER_OK": {0, gamedb.FlagEnterOK},
-	"LINK_OK": {0, gamedb.FlagLinkOK}, "JUMP_OK": {0, gamedb.FlagJumpOK},
-	"VERBOSE": {0, gamedb.FlagVerbose}, "TERSE": {0, gamedb.FlagTerse},
-	"TRACE": {0, gamedb.FlagTrace}, "MYOPIC": {0, gamedb.FlagMyopic},
-	"CHOWN_OK": {0, gamedb.FlagChownOK}, "DESTROY_OK": {0, gamedb.FlagDestroyOK},
-	"GOING": {0, gamedb.FlagGoing}, "IMMORTAL": {0, gamedb.FlagImmortal},
-	"CONNECTED": {1, gamedb.Flag2Connected}, "ANSI": {1, gamedb.Flag2Ansi},
-	"UNFINDABLE": {1, gamedb.Flag2Unfindable}, "ABODE": {1, gamedb.Flag2Abode},
-	"PARENT_OK": {1, gamedb.Flag2ParentOK}, "LIGHT": {1, gamedb.Flag2Light},
-	"CONTROL_OK": {1, gamedb.Flag2ControlOK}, "SLAVE": {1, gamedb.Flag2Slave},
-	"BOUNCE": {1, gamedb.Flag2Bounce}, "STOP": {1, gamedb.Flag2StopMatch},
-	"NO_BLEED": {1, gamedb.Flag2NoBLeed}, "NOBLEED": {1, gamedb.Flag2NoBLeed},
-	"GAGGED": {1, gamedb.Flag2Gagged}, "FIXED": {1, gamedb.Flag2Fixed},
-	"OOB": {1, gamedb.Flag2OOB}, "AUDITORIUM": {1, gamedb.Flag2Auditorium},
-	"BLIND": {1, gamedb.Flag2Blind}, "HTML": {1, gamedb.Flag2HTML},
-	"STAFF": {1, gamedb.Flag2Staff}, "WATCHER": {1, gamedb.Flag2Watcher},
-	"SUSPECT": {1, gamedb.Flag2Suspect}, "HEAD": {1, gamedb.Flag2HeadFlag},
-	"UNINSPECTED": {1, gamedb.Flag2Uninspected},
-	"VACATION": {1, gamedb.Flag2Vacation}, "ZONE_PARENT": {1, gamedb.Flag2ZoneParent},
-	"HEAR_THROUGH": {0, gamedb.FlagHearThru}, "AUDIBLE": {0, gamedb.FlagHearThru},
-	"SEE_THROUGH": {0, gamedb.FlagSeeThru}, "TRANSPARENT": {0, gamedb.FlagSeeThru},
-	"HAS_STARTUP": {0, gamedb.FlagHasStartup},
-	"HAS_COMMANDS": {1, gamedb.Flag2HasCommands}, "COMMANDS": {1, gamedb.Flag2HasCommands},
-	"INSTANCE": {2, gamedb.Flag3Instance},
-	"KEY": {1, gamedb.Flag2Key}, "CONSTANT": {1, gamedb.Flag2ConstAttrs},
-	"FREE": {1, gamedb.Flag2Floating}, "FLOATING": {1, gamedb.Flag2Floating},
-	"ZONE": {1, gamedb.Flag2ZoneParent},
-	"ORPHAN": {2, gamedb.Flag3Orphan},
-	"PLAYER": {-1, int(gamedb.TypePlayer)}, "ROOM": {-1, int(gamedb.TypeRoom)},
-	"EXIT": {-1, int(gamedb.TypeExit)}, "THING": {-1, int(gamedb.TypeThing)},
+// knownFlags maps flag names to [word, bitmask], derived from
+// gamedb.FlagDefs + aliases. Word -1 means object-type pseudo-flag.
+var knownFlags = buildKnownFlags()
+
+func buildKnownFlags() map[string][2]int {
+	t := make(map[string][2]int, len(gamedb.FlagDefs)*2)
+	for _, fd := range gamedb.FlagDefs {
+		t[fd.Name] = [2]int{fd.Word, fd.Bit}
+		if fd.Letter != 0 {
+			t[string(fd.Letter)] = [2]int{fd.Word, fd.Bit}
+		}
+	}
+	for alias, canon := range gamedb.FlagAliases {
+		if v, ok := t[canon]; ok {
+			t[alias] = v
+		}
+	}
+	t["PLAYER"] = [2]int{-1, int(gamedb.TypePlayer)}
+	t["ROOM"] = [2]int{-1, int(gamedb.TypeRoom)}
+	t["EXIT"] = [2]int{-1, int(gamedb.TypeExit)}
+	t["THING"] = [2]int{-1, int(gamedb.TypeThing)}
+	return t
 }
 
 // objHasFlag checks if an object has a named flag.
@@ -683,7 +660,24 @@ func fnHasflag(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 	if !ok { buf.WriteString("0"); return }
 	// C TinyMUSH: pub_flags (default true) allows anyone to query object flags.
 	// Only restrict when pub_flags is off AND not examinable AND not the cause.
-	buf.WriteString(boolToStr(objHasFlag(obj, flagName)))
+	set := objHasFlag(obj, flagName)
+	// C has_flag listperm filtering: wizard-only flags read 0 for mortals,
+	// god-internal flags read 0 for non-god — driven by the canonical table.
+	if set {
+		if fd, ok := gamedb.FlagByName(flagName); ok {
+			switch fd.ListPerm {
+			case gamedb.FlagPermWiz:
+				if !viewerIsWizard(ctx, ctx.Player) {
+					set = false
+				}
+			case gamedb.FlagPermGod:
+				if !viewerIsGod(ctx, ctx.Player) {
+					set = false
+				}
+			}
+		}
+	}
+	buf.WriteString(boolToStr(set))
 }
 
 // knownAttrFlags maps attribute flag names to AF_ constants for hasflag(obj/ATTR, flag).
@@ -985,9 +979,21 @@ func fnZone(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gam
 
 func fnControls(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 2 { buf.WriteString("0"); return }
+	// C fun_controls: match_thing is noisy and unmatched args are errors
 	controller := resolveDBRef(ctx, args[0])
+	if controller == gamedb.Nothing {
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target: ctx.Player, Message: "I don't see that here."})
+		buf.WriteString("#-1 ARG1 NOT FOUND")
+		return
+	}
 	target := resolveDBRef(ctx, args[1])
-	if controller == gamedb.Nothing || target == gamedb.Nothing { buf.WriteString("0"); return }
+	if target == gamedb.Nothing {
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target: ctx.Player, Message: "I don't see that here."})
+		buf.WriteString("#-1 ARG2 NOT FOUND")
+		return
+	}
 	// Use full Controls() via GameState if available
 	if ctx.GameState != nil {
 		buf.WriteString(boolToStr(ctx.GameState.Controls(controller, target)))

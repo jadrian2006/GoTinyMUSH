@@ -143,8 +143,16 @@ func (ws *WebServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 	ws.game.Conns.Add(d)
 	ws.game.Conns.Login(d, claims.PlayerRef)
 	defer ws.game.Conns.Remove(d)
+	ws.game.mu.RLock()
+	ws.game.RefreshAnsiCache(d)
+	ws.game.mu.RUnlock()
 
+	// DispatchCommand mutates game state — it requires the game lock, same
+	// as the TCP (processLine) and WebSocket paths.
+	ws.game.mu.Lock()
 	DispatchCommand(ws.game, d, req.Command)
+	ws.game.mu.Unlock()
+	ws.game.WakeQueue()
 
 	// Wait for async queue entries to process. Queued commands ($-commands,
 	// @trigger, etc.) fire on the game loop's 10ms tick, so we poll briefly

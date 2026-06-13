@@ -166,10 +166,13 @@ func (c *gameServerController) CreateArchive() (string, error) {
 		mudName = g.Conf.MudName
 	}
 
+	g.mu.RLock()
+	objCount := len(g.DB.Objects)
+	g.mu.RUnlock()
 	params := archive.ArchiveParams{
 		ArchiveDir:  archiveDir,
 		MudName:     mudName,
-		ObjectCount: len(g.DB.Objects),
+		ObjectCount: objCount,
 		DictDir:     g.DictDir,
 		TextDir:     g.TextDir,
 		ConfPath:    g.ConfPath,

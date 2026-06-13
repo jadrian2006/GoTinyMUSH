@@ -25,6 +25,12 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("boltstore: open %s: %w", path, err)
 	}
+	// C TinyMUSH's gdbm layer writes through the OS cache and reaches
+	// durability points at dumps/checkpoints — not per attribute write.
+	// Skipping the per-transaction fsync matches that model and turns the
+	// ~1.3ms fsync per @set into a memory-speed operation; Sync() is called
+	// at @dump, auto-save, the 60s heartbeat, and Close.
+	db.NoSync = true
 
 	// Ensure all buckets exist.
 	err = db.Update(func(tx *bbolt.Tx) error {
@@ -46,10 +52,20 @@ func Open(path string) (*Store, error) {
 	}, nil
 }
 
-// Close closes the underlying bbolt database.
+// Close syncs and closes the underlying bbolt database.
 func (s *Store) Close() error {
 	if s.bolt != nil {
+		_ = s.bolt.Sync()
 		return s.bolt.Close()
+	}
+	return nil
+}
+
+// Sync flushes the bbolt file to stable storage — the durability point
+// (C equivalent: the dump/checkpoint fsync).
+func (s *Store) Sync() error {
+	if s.bolt != nil {
+		return s.bolt.Sync()
 	}
 	return nil
 }

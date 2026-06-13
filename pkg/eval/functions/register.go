@@ -1,11 +1,41 @@
 package functions
 
 import (
+	"sync"
+
 	"github.com/crystal-mush/gotinymush/pkg/eval"
 )
 
-// RegisterAll registers all built-in functions on the given EvalContext.
+var (
+	baseOnce  sync.Once
+	baseFuncs map[string]*eval.Function
+)
+
+// Base returns the shared, effectively-immutable builtin function table.
+// Built once: registering ~550 functions per context was the dominant
+// allocation cost of every command/attribute evaluation.
+func Base() map[string]*eval.Function {
+	baseOnce.Do(func() {
+		scratch := eval.NewEvalContext(nil)
+		registerAllInto(scratch)
+		baseFuncs = scratch.Functions
+	})
+	return baseFuncs
+}
+
+// RegisterAll attaches the shared builtin function table to the context.
+// The table is shared across all contexts and MUST NOT be mutated; per-game
+// permission overrides clone affected entries (see server.applyGameFuncs).
 func RegisterAll(ctx *eval.EvalContext) {
+	ctx.Functions = Base()
+}
+
+// RegisterAllFresh builds a private function table on the context (the
+// pre-optimization behavior) — kept for benchmarks and isolation tests.
+func RegisterAllFresh(ctx *eval.EvalContext) { registerAllInto(ctx) }
+
+// registerAllInto registers all built-in functions on the given EvalContext.
+func registerAllInto(ctx *eval.EvalContext) {
 	// Math functions
 	ctx.RegisterFunction("ADD", fnAdd, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("SUB", fnSub, 2, 0)
@@ -119,14 +149,14 @@ func RegisterAll(ctx *eval.EvalContext) {
 	// String functions
 	ctx.RegisterFunction("CAT", fnCat, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("STRCAT", fnStrcat, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("STRLEN", fnStrlen, 1, 0)
+	ctx.RegisterFunction("STRLEN", fnStrlen, 1, eval.FnRawArg)
 	ctx.RegisterFunction("MID", fnMid, 3, 0)
 	ctx.RegisterFunction("LEFT", fnLeft, 2, 0)
 	ctx.RegisterFunction("STRTRUNC", fnLeft, 2, 0)
 	ctx.RegisterFunction("RIGHT", fnRight, 2, 0)
-	ctx.RegisterFunction("LCSTR", fnLcstr, 1, 0)
-	ctx.RegisterFunction("UCSTR", fnUcstr, 1, 0)
-	ctx.RegisterFunction("CAPSTR", fnCapstr, 1, 0)
+	ctx.RegisterFunction("LCSTR", fnLcstr, 1, eval.FnRawArg)
+	ctx.RegisterFunction("UCSTR", fnUcstr, 1, eval.FnRawArg)
+	ctx.RegisterFunction("CAPSTR", fnCapstr, 1, eval.FnRawArg)
 	ctx.RegisterFunction("POS", fnPos, 2, 0)
 	ctx.RegisterFunction("LPOS", fnLpos, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("EDIT", fnEdit, 3, 0)
@@ -138,13 +168,13 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("CENTER", fnCenter, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("REPEAT", fnRepeat, 2, 0)
 	ctx.RegisterFunction("SPACE", fnSpace, 1, 0)
-	ctx.RegisterFunction("ESCAPE", fnEscape, 1, 0)
-	ctx.RegisterFunction("SECURE", fnSecure, 1, 0)
+	ctx.RegisterFunction("ESCAPE", fnEscape, 1, eval.FnRawArg)
+	ctx.RegisterFunction("SECURE", fnSecure, 1, eval.FnRawArg)
 	ctx.RegisterFunction("ANSI", fnAnsi, 2, 0)
 	ctx.RegisterFunction("STRIPANSI", fnStripansi, 1, 0)
 	ctx.RegisterFunction("BEFORE", fnBefore, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("AFTER", fnAfter, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("REVERSE", fnReverse, 1, 0)
+	ctx.RegisterFunction("REVERSE", fnReverse, 1, eval.FnRawArg)
 	ctx.RegisterFunction("SCRAMBLE", fnScramble, 1, 0)
 	ctx.RegisterFunction("STRMATCH", fnStrmatch, 2, 0)
 	ctx.RegisterFunction("MATCH", fnMatch, 0, eval.FnVarArgs)
@@ -159,8 +189,8 @@ func RegisterAll(ctx *eval.EvalContext) {
 
 	// Additional string functions
 	ctx.RegisterFunction("ART", fnArt, 1, 0)
-	ctx.RegisterFunction("NESCAPE", fnNescape, 1, 0)
-	ctx.RegisterFunction("NSECURE", fnNsecure, 1, 0)
+	ctx.RegisterFunction("NESCAPE", fnNescape, 1, eval.FnRawArg|eval.FnNoEval)
+	ctx.RegisterFunction("NSECURE", fnNsecure, 1, eval.FnRawArg|eval.FnNoEval)
 	ctx.RegisterFunction("WORDPOS", fnWordpos, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("INDEX", fnIndex, 4, 0)
 	ctx.RegisterFunction("ENCRYPT", fnEncrypt, 2, 0)
@@ -309,7 +339,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("V", fnV, 1, 0)
 	ctx.RegisterFunction("U", fnU, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("ULOCAL", fnUlocal, 0, eval.FnVarArgs)
-	ctx.RegisterFunction("S", fnS, 1, 0)
+	ctx.RegisterFunction("S", fnS, 1, eval.FnRawArg)
 	ctx.RegisterFunction("OBJEVAL", fnObjeval, 2, eval.FnNoEval)
 	ctx.RegisterFunction("DEFAULT", fnDefault, 2, eval.FnNoEval)
 	ctx.RegisterFunction("CON", fnCon, 1, 0)
@@ -447,7 +477,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	// Misc
 	ctx.RegisterFunction("NULL", fnNull, 1, 0)
 	ctx.RegisterFunction("@@", fnNull, 1, eval.FnVarArgs|eval.FnNoEval)
-	ctx.RegisterFunction("LIT", fnLit, 1, eval.FnNoEval)
+	ctx.RegisterFunction("LIT", fnLit, 1, eval.FnRawArg|eval.FnNoEval)
 	ctx.RegisterFunction("SUBEVAL", fnSubeval, 1, 0)
 	ctx.RegisterFunction("RAND", fnRand, 1, 0)
 	ctx.RegisterFunction("DIE", fnDie, 2, 0)
@@ -468,7 +498,7 @@ func RegisterAll(ctx *eval.EvalContext) {
 	ctx.RegisterFunction("EVAL", fnEvalFn, 2, 0)
 	ctx.RegisterFunction("BEEP", fnBeep, 0, 0)
 	ctx.Functions["BEEP"].Perms = eval.FnAccessWizard // C default: CA_WIZARD
-	ctx.RegisterFunction("SEARCH", fnSearch, 0, eval.FnVarArgs)
+	ctx.RegisterFunction("SEARCH", fnSearch, 1, eval.FnRawArg)
 	ctx.RegisterFunction("LSEARCH", fnSearch, 0, eval.FnVarArgs|eval.FnNoEval)
 	ctx.RegisterFunction("STATS", fnStats, 0, eval.FnVarArgs)
 	ctx.RegisterFunction("HASMODULE", fnHasmodule, 1, 0)

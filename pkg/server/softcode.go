@@ -142,7 +142,12 @@ func (g *Game) MatchDollarCommands(player, cause gamedb.DBRef, input string) boo
 // hasCommandsFlag checks if an object or any of its parents has HAS_COMMANDS.
 // C TinyMUSH sets HAS_COMMANDS on child objects during db load if a parent
 // has $-commands. We check the parent chain at runtime instead.
+// C Has_Commands(x): when require_cmds_flag is off (CrystalMUSH runs "no"),
+// every object is scanned for $-commands regardless of the flag.
 func (g *Game) hasCommandsFlag(ref gamedb.DBRef) bool {
+	if g.Conf != nil && !g.Conf.RequireCmdsFlag {
+		return true
+	}
 	visited := make(map[gamedb.DBRef]bool)
 	for ref != gamedb.Nothing && !visited[ref] {
 		visited[ref] = true
@@ -1880,17 +1885,44 @@ func (g *Game) WakeQueue() {
 // Uses a 1-second tick to match C TinyMUSH's timeslice pacing for queue-spawned
 // commands (@trigger chains, semaphore releases). Player-initiated commands wake
 // the processor immediately via WakeQueue() so they don't wait for the next tick.
+// drainQueueCascades processes immediate queue entries, then keeps going as
+// entries spawned during processing land on the queue — matching the C main
+// loop, which calls do_top() every network-loop iteration so cascades drain
+// within milliseconds. The lock is RELEASED between passes so player input
+// interleaves with queue chunks exactly as C's network loop does; bounded to
+// avoid spinning on self-perpetuating queues (per-object rate limit applies).
+func (g *Game) drainQueueCascades() bool {
+	hadWork := false
+	for pass := 0; pass < 50; pass++ {
+		g.mu.Lock()
+		work := g.ProcessQueue()
+		g.mu.Unlock()
+		if !work {
+			break
+		}
+		hadWork = true
+		time.Sleep(2 * time.Millisecond) // yield to player input between chunks
+	}
+	return hadWork
+}
+
 func (g *Game) StartQueueProcessor() {
 	go func() {
-		const queueTick = 1 * time.Second  // Match C TinyMUSH timeslice (~1 entry/sec queue pacing)
-		const idleTick = 5 * time.Second   // Check less often when idle
+		const queueTick = 1 * time.Second // C's main loop wakes at least once per second
+		// C's network loop select() timeout never exceeds ~1s — a 5s idle tick
+		// would make @wait/@dolist output lag seconds behind C.
+		const idleTick = 1 * time.Second
 		ticker := time.NewTicker(idleTick)
 		defer ticker.Stop()
 		heartbeat := time.NewTicker(60 * time.Second)
 		defer heartbeat.Stop()
 		// dbck/reaper timer — matches C TinyMUSH check_interval (default 600s / 10 min)
 		// Gives players time to @set obj=!GOING to reverse a @destroy
-		dbckTimer := time.NewTicker(10 * time.Minute)
+		dbckEvery := 600 * time.Second
+		if g.Conf != nil && g.Conf.CheckInterval > 0 {
+			dbckEvery = time.Duration(g.Conf.CheckInterval) * time.Second
+		}
+		dbckTimer := time.NewTicker(dbckEvery)
 		defer dbckTimer.Stop()
 		idle := true
 		for {
@@ -1902,14 +1934,14 @@ func (g *Game) StartQueueProcessor() {
 							log.Printf("PANIC in queue processor: %v", r)
 						}
 					}()
-					g.mu.Lock()
-					hadWork := g.ProcessQueue()
+					hadWork := g.drainQueueCascades()
 					// Event bus phase — runs after master queue, independent budget
 					if g.EventQueues != nil {
+						g.mu.Lock()
 						busWork := g.EventQueues.ProcessEventBus(g.GameAdapter())
+						g.mu.Unlock()
 						hadWork = hadWork || busWork
 					}
-					g.mu.Unlock()
 					if hadWork && idle {
 						idle = false
 						ticker.Reset(queueTick)
@@ -1926,13 +1958,13 @@ func (g *Game) StartQueueProcessor() {
 							log.Printf("PANIC in queue processor (wake): %v", r)
 						}
 					}()
-					g.mu.Lock()
-					g.ProcessQueue()
+					g.drainQueueCascades()
 					// Event bus phase on wake too
 					if g.EventQueues != nil {
+						g.mu.Lock()
 						g.EventQueues.ProcessEventBus(g.GameAdapter())
+						g.mu.Unlock()
 					}
-					g.mu.Unlock()
 					if idle {
 						idle = false
 						ticker.Reset(queueTick)
@@ -1954,11 +1986,25 @@ func (g *Game) StartQueueProcessor() {
 				if imm > 0 || wait > 0 || sem > 0 {
 					log.Printf("Queue heartbeat: %d immediate, %d waiting, %d semaphore", imm, wait, sem)
 				}
+				// Durability point: flush bolt to disk (writes run NoSync,
+				// like C's gdbm cache between checkpoint dumps)
+				if g.Store != nil {
+					if err := g.Store.Sync(); err != nil {
+						log.Printf("ERROR: bolt sync: %v", err)
+					}
+				}
 			case <-dbckTimer.C:
-				// Reap GOING objects — deferred @destroy cleanup (C's purge_going)
+				// C do_dbck: rebuild the freelist first, then reap GOING objects —
+				// garbage reaped this cycle only becomes reusable on the next.
+				g.mu.Lock()
+				g.MakeFreelist()
 				g.PurgeGoing()
-				// C TinyMUSH: check_idle — disconnect idle connections
+				g.mu.Unlock()
+				// C TinyMUSH: check_idle — disconnect idle connections.
+				// Reads flags and runs ADISCONNECT softcode → needs the lock.
+				g.mu.Lock()
 				g.CheckIdleConnections()
+				g.mu.Unlock()
 			}
 		}
 	}()

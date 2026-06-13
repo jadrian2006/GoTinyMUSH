@@ -314,6 +314,7 @@ func (s *Server) handleGuest(d *Descriptor) {
 
 	// Phase 4: Log in
 	s.Game.Conns.Login(d, ref)
+	s.Game.RefreshAnsiCache(d)
 	if guestObj, ok := s.Game.DB.Objects[ref]; ok {
 		guestObj.Flags[1] |= gamedb.Flag2Connected
 	}

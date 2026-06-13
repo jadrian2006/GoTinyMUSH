@@ -172,33 +172,23 @@ func fnTrim(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamed
 func fnSquish(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { return }
 	s := args[0]
-	delim := " "
-	if len(args) > 1 && args[1] != "" { delim = args[1] }
-	if delim == " " {
-		s = strings.TrimSpace(s)
-	} else {
-		s = strings.Trim(s, delim)
-	}
-	// Compress runs of delimiter
+	delim := byte(' ')
+	if len(args) > 1 && args[1] != "" { delim = args[1][0] }
+	// C fun_squish: runs of the delimiter collapse to a single occurrence —
+	// leading/trailing delimiters are preserved (as one), never stripped.
 	prev := false
-	for i := 0; i < len(s); {
-		if strings.HasPrefix(s[i:], delim) {
+	for i := 0; i < len(s); i++ {
+		if s[i] == delim {
 			if !prev {
-				buf.WriteString(delim)
+				buf.WriteByte(delim)
 				prev = true
 			}
-			i += len(delim)
-		} else {
-			buf.WriteByte(s[i])
-			prev = false
-			i++
+			continue
 		}
+		prev = false
+		buf.WriteByte(s[i])
 	}
 }
-
-// visualLen returns the display width of a string, ignoring ANSI escape
-// sequences. In TinyMUSH, ljust/rjust/center pad based on visible characters,
-// not raw byte length, so ANSI color codes don't count toward width.
 func visualLen(s string) int {
 	n := 0
 	for i := 0; i < len(s); i++ {
@@ -512,9 +502,33 @@ func fnTranslate(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ 
 // Type checking
 func fnIsnum(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	if len(args) < 1 { buf.WriteString("0"); return }
-	s := strings.TrimSpace(args[0])
-	_, err := strconv.ParseFloat(s, 64)
-	buf.WriteString(boolToStr(err == nil && s != ""))
+	buf.WriteString(boolToStr(cIsNumber(args[0])))
+}
+
+// cIsNumber mirrors C TinyMUSH is_number (stringutil.c): optional spaces,
+// optional sign, digits with at most one '.', optional trailing spaces.
+// No exponents, no hex.
+func cIsNumber(s string) bool {
+	i := 0
+	for i < len(s) && s[i] == ' ' { i++ }
+	if i < len(s) && (s[i] == '-' || s[i] == '+') { i++ }
+	digits, dot := 0, false
+	for i < len(s) {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+			digits++
+			i++
+		case c == '.' && !dot:
+			dot = true
+			i++
+		default:
+			goto tail
+		}
+	}
+tail:
+	for i < len(s) && s[i] == ' ' { i++ }
+	return i == len(s) && digits > 0
 }
 
 func fnIsdbref(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {

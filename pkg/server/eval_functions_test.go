@@ -26,7 +26,7 @@ type evalTestEnv struct {
 	ctx  *eval.EvalContext
 }
 
-func newEvalTestEnv(t *testing.T) *evalTestEnv {
+func newEvalTestEnv(t testing.TB) *evalTestEnv {
 	t.Helper()
 	db := gamedb.NewDatabase()
 
@@ -210,7 +210,7 @@ func TestFnName(t *testing.T) {
 		"[name(#0)]":  "Room Zero",
 		"[name(#7)]":  "North", // exit returns first alias
 		"[name(me)]":  "Wizard",
-		"[name(#99)]": "#-1 NO MATCH",
+		"[name(#99)]": "", // C: match fails, notifies "I don't see that here.", returns empty
 	}
 	for expr, want := range tests {
 		got := e.eval(expr)
@@ -510,11 +510,12 @@ func TestFnLparent(t *testing.T) {
 func TestFnLocate(t *testing.T) {
 	e := newEvalTestEnv(t)
 	tests := map[string]string{
-		"[locate(#1,me)]":         "#-1", // C compat: locate() doesn't expand me/here keywords
-		"[locate(#1,here)]":       "#-1",
-		"[locate(#1,#2)]":         "#2",
-		"[locate(#1,TestObject)]": "#2",
-		"[locate(#1,nosuch)]":     "#-1",
+		// C: LOCATE is declared with exactly 3 arguments — 2-arg is an arity error
+		"[locate(#1,me)]":           "#-1 FUNCTION (LOCATE) EXPECTS 3 ARGUMENTS",
+		"[locate(#1,#2,a)]":         "#2",
+		"[locate(#1,TestObject,n)]": "#2",
+		"[locate(#1,nosuch,n)]":     "#-1",
+		"[locate(#1,#2,T)]":         "#-1", // type pref only, no scope letters → no searchers run
 	}
 	for expr, want := range tests {
 		got := e.eval(expr)

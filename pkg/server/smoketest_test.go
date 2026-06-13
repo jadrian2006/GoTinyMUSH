@@ -1273,9 +1273,11 @@ func TestInstanceFlagDisplay(t *testing.T) {
 	// Set Flag3Instance directly on TestObject #2
 	env.game.DB.Objects[2].Flags[2] |= gamedb.Flag3Instance
 
+	// INSTANCE is a Go extension with no display letter: '^' belongs to
+	// C's PRESENCE flag (C parity). It must NOT leak into the flag string.
 	flags := flagString(env.game.DB.Objects[2])
-	if !strings.Contains(flags, "^") {
-		t.Errorf("flagString: expected '^' for INSTANCE flag, got %q", flags)
+	if strings.Contains(flags, "^") {
+		t.Errorf("flagString: INSTANCE must not display '^' (reserved for PRESENCE), got %q", flags)
 	}
 }
 

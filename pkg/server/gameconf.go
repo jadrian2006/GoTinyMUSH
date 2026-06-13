@@ -157,6 +157,9 @@ type GameConf struct {
 	SQLTimeout    int    `yaml:"sql_timeout"`     // Query timeout in seconds (default 5)
 	SQLReconnect  bool   `yaml:"sql_reconnect"`   // Auto-reconnect on failure
 
+	// --- Database check ---
+	CheckInterval int `yaml:"check_interval"` // Seconds between dbck cycles (C: mudconf.check_interval, default 600)
+
 	// --- Archive/Backup ---
 	ArchiveDir      string `yaml:"archive_dir"`       // Archive output directory (default: "backups")
 	ArchiveInterval int    `yaml:"archive_interval"`  // Auto-archive interval in minutes, 0 = disabled
@@ -269,6 +272,7 @@ func DefaultGameConf() *GameConf {
 		GuestPassword:           "guest",
 		GuestStartRoom:          -1,
 		GodDBRef:                1,
+		CheckInterval:           600,
 		ZoneNestLimit:           20,
 		MailEnabled:             true,
 		ComsysEnabled:           true,
@@ -757,6 +761,20 @@ func (g *Game) ApplyGameConf(gc *GameConf) {
 	for _, aa := range gc.AttrAccess {
 		g.ApplyAttrAccess(aa)
 	}
+
+	// Build the per-game builtin function table (function_access overrides)
+	g.evalFuncs = buildEvalFuncs(gc)
+
+	// Garbage objects are owned by God (C db_grow/destroy_obj). The flatfile
+	// importer materializes garbage gaps with owner #1 before the config (and
+	// thus god_dbref) is known — normalize them now.
+	god := g.GodPlayer()
+	for _, obj := range g.DB.Objects {
+		if obj.ObjType() == gamedb.TypeGarbage && obj.Owner != god {
+			obj.Owner = god
+			g.PersistObject(obj)
+		}
+	}
 }
 
 // MasterRoomRef returns the configured master room dbref.
@@ -844,6 +862,9 @@ func parseBool(s string) bool {
 	s = strings.ToLower(strings.TrimSpace(s))
 	return s == "yes" || s == "true" || s == "1" || s == "on"
 }
+
+// GodRef implements eval.GameState — the configured God player dbref.
+func (g *Game) GodRef() gamedb.DBRef { return g.GodPlayer() }
 
 // GodPlayer returns the configured God player dbref.
 func (g *Game) GodPlayer() gamedb.DBRef {

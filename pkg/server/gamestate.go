@@ -194,7 +194,10 @@ func (g *Game) RepairAllChains() (int, int) {
 			changed = true
 		}
 		for i, ref := range members {
-			obj := g.DB.Objects[ref]
+			obj, mok := g.DB.Objects[ref]
+			if !mok {
+				continue
+			}
 			newNext := gamedb.Nothing
 			if i < len(members)-1 {
 				newNext = members[i+1]
@@ -216,7 +219,10 @@ func (g *Game) RepairAllChains() (int, int) {
 			changed = true
 		}
 		for i, ref := range exitMembers {
-			obj := g.DB.Objects[ref]
+			obj, eok := g.DB.Objects[ref]
+			if !eok {
+				continue
+			}
 			newNext := gamedb.Nothing
 			if i < len(exitMembers)-1 {
 				newNext = exitMembers[i+1]

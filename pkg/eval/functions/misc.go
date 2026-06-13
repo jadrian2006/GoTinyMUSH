@@ -518,7 +518,8 @@ func fnConvsecs(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		buf.WriteString("#-1 INVALID ARGUMENT")
 		return
 	}
-	t := time.Unix(secs, 0).UTC()
+	// C convsecs uses localtime()
+	t := time.Unix(secs, 0)
 	buf.WriteString(t.Format("Mon Jan _2 15:04:05 2006"))
 }
 
@@ -535,7 +536,8 @@ func fnConvtime(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 		time.RFC1123Z,
 	}
 	for _, layout := range layouts {
-		t, err := time.ParseInLocation(layout, strings.TrimSpace(args[0]), time.UTC)
+		// C convtime parses as local time (mktime)
+		t, err := time.ParseInLocation(layout, strings.TrimSpace(args[0]), time.Local)
 		if err == nil {
 			buf.WriteString(strconv.FormatInt(t.Unix(), 10))
 			return
@@ -549,11 +551,12 @@ func fnTimefmt(_ *eval.EvalContext, args []string, buf *strings.Builder, _, _ ga
 		return
 	}
 	format := args[0]
-	t := time.Now().UTC()
+	// C timefmt uses localtime()
+	t := time.Now()
 	if len(args) > 1 {
 		secs, err := strconv.ParseInt(strings.TrimSpace(args[1]), 10, 64)
 		if err == nil {
-			t = time.Unix(secs, 0).UTC()
+			t = time.Unix(secs, 0)
 		}
 	}
 	// Convert strftime-style format to Go format
@@ -1080,9 +1083,9 @@ func fnToss(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb
 func fnRestarttime(ctx *eval.EvalContext, _ []string, buf *strings.Builder, _, _ gamedb.DBRef) {
 	var t time.Time
 	if ctx.StartTime > 0 {
-		t = time.Unix(ctx.StartTime, 0).UTC()
+		t = time.Unix(ctx.StartTime, 0)
 	} else {
-		t = time.Now().UTC()
+		t = time.Now()
 	}
 	buf.WriteString(t.Format("Mon Jan _2 15:04:05 2006"))
 }
@@ -1458,56 +1461,110 @@ func fnSearch(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ g
 
 // fnStats — return database statistics.
 func fnStats(ctx *eval.EvalContext, args []string, buf *strings.Builder, _, _ gamedb.DBRef) {
-	// stats(player) — full stats for owner
-	// stats(player, type) — count of objects of that type owned by player
-	owner := gamedb.Nothing
-	if len(args) >= 1 && strings.TrimSpace(args[0]) != "" {
-		owner = resolveDBRef(ctx, args[0])
+	// C fun_stats (funobj.c): stats([player|all]) returns
+	// "total rooms exits things players unknown going garbage".
+	// Declared with exactly 1 arg in C — more is an arity error.
+	if len(args) > 1 {
+		buf.WriteString("#-1 FUNCTION (STATS) EXPECTS 1 ARGUMENTS")
+		return
+	}
+	arg := ""
+	if len(args) == 1 {
+		arg = strings.TrimSpace(args[0])
+	}
+	who := gamedb.Nothing
+	if arg != "" && !strings.EqualFold(arg, "all") {
+		// C: lookup_player — accepts name, *name, #dbref, "me"
+		name := strings.TrimPrefix(arg, "*")
+		if strings.EqualFold(name, "me") {
+			who = ctx.Player
+		} else if strings.HasPrefix(name, "#") {
+			if n, err := strconv.Atoi(name[1:]); err == nil {
+				who = gamedb.DBRef(n)
+			}
+		} else if ctx.GameState != nil {
+			who = ctx.GameState.LookupPlayer(name)
+		}
+		if obj, ok := ctx.DB.Objects[who]; !ok || obj.ObjType() != gamedb.TypePlayer {
+			buf.WriteString("#-1 NOT FOUND")
+			return
+		}
 	}
 
-	// Count by type, filtered by owner if specified
-	rooms, things, exits, players, garbage := 0, 0, 0, 0, 0
-	for _, obj := range ctx.DB.Objects {
-		if owner != gamedb.Nothing && obj.Owner != owner {
-			continue
-		}
-		switch obj.ObjType() {
-		case gamedb.TypeRoom:
-			rooms++
-		case gamedb.TypeThing:
-			things++
-		case gamedb.TypeExit:
-			exits++
-		case gamedb.TypePlayer:
-			players++
-		default:
-			garbage++
-		}
-	}
-	total := rooms + things + exits + players + garbage
-
-	if len(args) >= 2 {
-		// 2-arg form: return count for specific type
-		typeArg := strings.ToUpper(strings.TrimSpace(args[1]))
-		switch typeArg {
-		case "ROOM", "ROOMS", "R":
-			fmt.Fprintf(buf, "%d", rooms)
-		case "EXIT", "EXITS", "E":
-			fmt.Fprintf(buf, "%d", exits)
-		case "THING", "THINGS", "T":
-			fmt.Fprintf(buf, "%d", things)
-		case "PLAYER", "PLAYERS", "P":
-			fmt.Fprintf(buf, "%d", players)
-		case "GARBAGE", "G":
-			fmt.Fprintf(buf, "%d", garbage)
-		default:
-			fmt.Fprintf(buf, "%d", total)
-		}
+	// C get_stats (walkdb.c): permission — must control target or Stat_Any
+	if who != gamedb.Nothing && ctx.GameState != nil &&
+		!ctx.GameState.Controls(ctx.Player, who) {
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target:  ctx.Player,
+			Message: "Permission denied.",
+		})
+		buf.WriteString("#-1 ERROR GETTING STATS")
 		return
 	}
 
-	buf.WriteString(fmt.Sprintf("%d objects = %d rooms, %d exits, %d things, %d players",
-		total, rooms, exits, things, players))
+	// C get_stats: payfor(player, searchcost) — wizards and FREE money exempt
+	if !statsPayfor(ctx, ctx.Player, 100) {
+		ctx.Notifications = append(ctx.Notifications, eval.Notification{
+			Target:  ctx.Player,
+			Message: "You don't have enough building credits.",
+		})
+		buf.WriteString("#-1 ERROR GETTING STATS")
+		return
+	}
+
+	total, rooms, exits, things, players, unknown, going, garbage := 0, 0, 0, 0, 0, 0, 0, 0
+	for _, obj := range ctx.DB.Objects {
+		if who != gamedb.Nothing && obj.Owner != who {
+			continue
+		}
+		total++
+		t := obj.ObjType()
+		// C: GOING objects of good type (< TYPE_GARBAGE) count as "going"
+		if obj.HasFlag(gamedb.FlagGoing) && t < gamedb.TypeGarbage {
+			going++
+			continue
+		}
+		switch t {
+		case gamedb.TypeRoom:
+			rooms++
+		case gamedb.TypeExit:
+			exits++
+		case gamedb.TypeThing:
+			things++
+		case gamedb.TypePlayer:
+			players++
+		case gamedb.TypeGarbage:
+			garbage++
+		default:
+			unknown++
+		}
+	}
+	fmt.Fprintf(buf, "%d %d %d %d %d %d %d %d",
+		total, rooms, exits, things, players, unknown, going, garbage)
+}
+
+// statsPayfor mirrors C payfor (predicates.c): wizards, owners with WIZARD,
+// and FREE-money powers pay nothing; otherwise the owner's pennies are charged.
+func statsPayfor(ctx *eval.EvalContext, who gamedb.DBRef, cost int) bool {
+	obj, ok := ctx.DB.Objects[who]
+	if !ok {
+		return false
+	}
+	owner, ownerOK := ctx.DB.Objects[obj.Owner]
+	isWiz := obj.HasFlag(gamedb.FlagWizard) || (ownerOK && owner.HasFlag(gamedb.FlagWizard))
+	freeMoney := obj.HasPower(0, gamedb.PowFreeMoney) || (ownerOK && owner.HasPower(0, gamedb.PowFreeMoney))
+	if isWiz || freeMoney {
+		return true
+	}
+	payer := obj
+	if ownerOK {
+		payer = owner
+	}
+	if payer.Pennies >= cost {
+		payer.Pennies -= cost
+		return true
+	}
+	return false
 }
 
 // fnHasmodule — check if a module is loaded. Stub: always returns 0.

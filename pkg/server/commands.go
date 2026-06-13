@@ -201,6 +201,7 @@ func InitCommands() map[string]*Command {
 	registerNG("@instance", cmdInstance)
 	register("@list", cmdList)
 	registerNG("@dbck", cmdDbck)
+	registerNG("@freelist", cmdFreelist)
 	register("@sweep", cmdSweep)
 
 	// Attribute-setting @commands (all no guest)
@@ -353,6 +354,31 @@ func InitCommands() map[string]*Command {
 	return cmds
 }
 
+// noSlaveCommands mirrors C's CA_NO_SLAVE masks in cmdtabs.h — SLAVE players
+// are refused these with "Permission denied." (check_access in command.c).
+// The single-character prefixes ("=say, :/;=pose, \=emit, #=force, &=setvattr)
+// carry the same restriction and are handled in the prefix switch below.
+var noSlaveCommands = map[string]bool{
+	"@alias": true, "@boot": true, "@chown": true, "@chzone": true,
+	"@clone": true, "@cpattr": true, "@create": true, "@cron": true,
+	"@crondel": true, "@crontab": true, "@destroy": true, "@dig": true,
+	"@drain": true, "@edit": true, "@emit": true, "@eval": true,
+	"@femit": true, "@force": true, "@fpose": true, "@fsay": true,
+	"@halt": true, "@link": true, "@lock": true, "@mvattr": true,
+	"@name": true, "@notify": true, "@oemit": true, "@open": true,
+	"@parent": true, "@pemit": true, "@npemit": true, "@robot": true,
+	"@set": true, "@unlink": true, "@unlock": true, "@verb": true,
+	"@wipe": true, "drop": true, "kill": true, "page": true,
+	"pose": true, "reply": true, "say": true, "think": true,
+	"use": true, "whisper": true,
+}
+
+// Slave reports whether the object carries the SLAVE flag (C Slave(x)).
+func Slave(g *Game, ref gamedb.DBRef) bool {
+	obj, ok := g.DB.Objects[ref]
+	return ok && obj.HasFlag2(gamedb.Flag2Slave)
+}
+
 // DispatchCommand parses and dispatches a player command.
 func DispatchCommand(g *Game, d *Descriptor, input string) {
 	input = strings.TrimSpace(input)
@@ -368,6 +394,29 @@ func DispatchCommand(g *Game, d *Descriptor, input string) {
 			g.Notify(owner, fmt.Sprintf("Attempt to execute command by destroyed object #%d", d.Player))
 		}
 		return
+	}
+
+	// C process_command: VERBOSE objects echo every command to their owner
+	// as "Name] command" before execution.
+	if obj, ok := g.DB.Objects[d.Player]; ok && obj.HasFlag(gamedb.FlagVerbose) {
+		g.Notify(obj.Owner, fmt.Sprintf("%s] %s", DisplayName(obj.Name), input))
+	}
+
+	// C check_access: CA_NO_SLAVE commands are refused for SLAVE players.
+	if Slave(g, d.Player) {
+		switch input[0] {
+		case '"', ':', ';', '\\', '#', '&':
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
+		cmdWord := strings.ToLower(input)
+		if sp := strings.IndexAny(cmdWord, " /="); sp > 0 {
+			cmdWord = cmdWord[:sp]
+		}
+		if noSlaveCommands[cmdWord] {
+			g.Notify(d.Player, "Permission denied.")
+			return
+		}
 	}
 
 	// Handle single-character prefixes: " for say, : for pose, ; for pose-nospc, & for setvattr, # for force, \ for emit
@@ -1313,10 +1362,26 @@ func cmdExamine(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	// Check if player can examine this object
+	// Check if player can examine this object (C do_examine !control paths)
 	if !Examinable(g, d.Player, target) {
-		// Non-examinable: just show the description like look
-		g.ShowObject(d, target)
+		ownerName := ""
+		targetName := ""
+		if obj, ok := g.DB.Objects[target]; ok {
+			targetName = DisplayName(obj.Name)
+			if oObj, ok2 := g.DB.Objects[obj.Owner]; ok2 {
+				ownerName = DisplayName(oObj.Name)
+			}
+		}
+		// C: default examine with exam_public off → just the owner line
+		if !HasSwitch(switches, "brief") && !HasSwitch(switches, "owner") {
+			g.Notify(d.Player, fmt.Sprintf("%s is owned by %s", targetName, ownerName))
+			return
+		}
+		// C: /brief etc — desc only if nearby or read_rem_desc, else far-away
+		if !g.Nearby(d.Player, target) {
+			g.Notify(d.Player, "<Too far away to get a good look>")
+		}
+		g.Notify(d.Player, fmt.Sprintf("%s is owned by %s", targetName, ownerName))
 		return
 	}
 
@@ -1399,9 +1464,9 @@ func cmdExamine(g *Game, d *Descriptor, args string, switches []string) {
 		return
 	}
 
-	// examine/brief — show header + attrs only, no description/contents/exits
+	// examine/brief — C EXAM_BRIEF: the full examine minus the attribute list
 	if HasSwitch(switches, "brief") {
-		g.Notify(d.Player, g.unparseObject(d.Player, target))
+		g.ShowExamine(d, target, true)
 		return
 	}
 
@@ -1717,6 +1782,10 @@ type Game struct {
 	Commands    map[string]*Command
 	Queue       *CommandQueue
 	NextRef     gamedb.DBRef
+	// Freelist is the head of the garbage-object free list (C: mudstate.freelist).
+	// Threaded through the Link field of clean garbage objects, lowest dbref first.
+	// Rebuilt by MakeFreelist at startup and on each dbck cycle.
+	Freelist    gamedb.DBRef
 	DBPath      string           // Path for saving the database
 	Store       *boltstore.Store // nil = no bbolt persistence
 	Texts       *TextFiles       // Cached text files (connect.txt, motd.txt, etc.)
@@ -1741,7 +1810,10 @@ type Game struct {
 	FullMOTD    string            // Full MOTD (@motd/full)
 	Spell       *SpellChecker     // Spellcheck engine (nil if disabled)
 	SQLDB       *SQLStore         // SQLite3 database (nil if disabled)
-	GameFuncs   map[string]*eval.UFunction // @function-defined functions (uppercase name -> def)
+	GameFuncs   map[string]*eval.UFunction
+	// evalFuncs is the per-game builtin function table (nil = shared base);
+	// built by ApplyGameConf when function_access overrides exist.
+	evalFuncs map[string]*eval.Function // @function-defined functions (uppercase name -> def)
 	ConfPath    string   // Path to game config file (for archive)
 	DictDir     string   // Path to dictionary directory (for archive)
 	AliasConfs  []string // Paths to alias config files (for archive)
@@ -1807,11 +1879,11 @@ func (g *Game) PersistObjects(objs ...*gamedb.Object) {
 
 // NewGame creates a new Game instance.
 func NewGame(db *gamedb.Database) *Game {
-	// Find the next available dbref, clear stale CONNECTED flags,
-	// and auto-set HAS_COMMANDS on objects with $-command attributes.
-	// C TinyMUSH sets HAS_COMMANDS during db load; we do it here.
+	// Find the next available dbref and clear stale CONNECTED flags.
+	// NOTE: no HAS_COMMANDS auto-set — C only sets the bit when an attr is
+	// added at runtime; the flatfile bit is authoritative, and the matcher
+	// honors require_cmds_flag (off on CrystalMUSH) instead.
 	maxRef := gamedb.DBRef(0)
-	hasCommandsFixed := 0
 	for ref, obj := range db.Objects {
 		if ref > maxRef {
 			maxRef = ref
@@ -1821,20 +1893,6 @@ func NewGame(db *gamedb.Database) *Game {
 		if obj.Flags[1]&gamedb.Flag2Connected != 0 {
 			obj.Flags[1] &^= gamedb.Flag2Connected
 		}
-		// Auto-set HAS_COMMANDS on objects with $-command attributes.
-		if !obj.HasFlag2(gamedb.Flag2HasCommands) {
-			for _, attr := range obj.Attrs {
-				text := eval.StripAttrPrefix(attr.Value)
-				if strings.HasPrefix(text, "$") {
-					obj.Flags[1] |= gamedb.Flag2HasCommands
-					hasCommandsFixed++
-					break
-				}
-			}
-		}
-	}
-	if hasCommandsFixed > 0 {
-		log.Printf("Auto-set HAS_COMMANDS on %d objects with $-command attributes", hasCommandsFixed)
 	}
 	bus := events.NewBus()
 	cm := NewConnManager()
@@ -1845,6 +1903,7 @@ func NewGame(db *gamedb.Database) *Game {
 		Commands:  InitCommands(),
 		Queue:     NewCommandQueue(),
 		NextRef:   maxRef + 1,
+		Freelist:  gamedb.Nothing,
 		GameFuncs: make(map[string]*eval.UFunction),
 		EventBus:    bus,
 		EventQueues: eventbus.NewQueueManager(),
@@ -1931,6 +1990,59 @@ func (g *Game) RoomOf(ref gamedb.DBRef) gamedb.DBRef {
 }
 
 // MovePlayer moves a player to a new location.
+// announceLeave runs the source-location half of C's process_leave_loc:
+// ALEAVE action, OLEAVE (or "has left") with presence filtering, watchers.
+func (g *Game) announceLeave(victim, loc gamedb.DBRef, dark bool) {
+	if loc == gamedb.Nothing {
+		return
+	}
+	name := ""
+	if obj, ok := g.DB.Objects[victim]; ok {
+		name = DisplayName(obj.Name)
+	}
+	if !dark {
+		g.QueueAttrAction(loc, victim, aALeave, nil)
+		if oleave := g.GetAttrText(loc, aOLeave); oleave != "" {
+			ctx := MakeEvalContextForObj(g, loc, victim, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			if msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil); msg != "" {
+				g.NotifyRoomExcept(loc, victim, victim, name+" "+msg, MsgMove)
+			}
+		} else {
+			g.NotifyRoomExcept(loc, victim, victim, fmt.Sprintf("%s has left.", name), MsgMove)
+		}
+	}
+	g.NotifyWatch(victim, loc, "left")
+}
+
+// announceEnter runs the destination half of C's process_enter_loc:
+// "has arrived" with presence filtering, AENTER action, OENTER, listeners,
+// watchers.
+func (g *Game) announceEnter(victim, loc gamedb.DBRef, dark bool) {
+	if loc == gamedb.Nothing {
+		return
+	}
+	name := ""
+	if obj, ok := g.DB.Objects[victim]; ok {
+		name = DisplayName(obj.Name)
+	}
+	if !dark {
+		g.NotifyRoomExcept(loc, victim, victim, fmt.Sprintf("%s has arrived.", name), MsgMove)
+		g.QueueAttrAction(loc, victim, aAEnter, nil)
+		if oenter := g.GetAttrText(loc, aOEnter); oenter != "" {
+			ctx := MakeEvalContextForObj(g, loc, victim, func(c *eval.EvalContext) {
+				functions.RegisterAll(c)
+			})
+			if msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil); msg != "" {
+				g.NotifyRoomExcept(loc, victim, victim, name+" "+msg, MsgMove)
+			}
+		}
+		g.MatchListenPatterns(loc, victim, fmt.Sprintf("%s has arrived.", name))
+	}
+	g.NotifyWatch(victim, loc, "arrived")
+}
+
 func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	player := d.Player
 	playerObj, ok := g.DB.Objects[player]
@@ -1941,28 +2053,10 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	oldLoc := playerObj.Location
 	isDark := playerObj.HasFlag(gamedb.FlagDark)
 
-	// Source room: ALEAVE action (52), OLEAVE to room (51)
+	// Source room: C process_leave_loc
 	if oldLoc != gamedb.Nothing {
-		if !isDark {
-			g.QueueAttrAction(oldLoc, player, 52, nil) // ALEAVE
-			if oleave := g.GetAttrText(oldLoc, 51); oleave != "" {
-				ctx := MakeEvalContextForObj(g, oldLoc, player, func(c *eval.EvalContext) {
-					functions.RegisterAll(c)
-				})
-				msg := ctx.Exec(oleave, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-				if msg != "" {
-					g.NotifyRoomExcept(oldLoc, player, player,
-						DisplayName(playerObj.Name)+" "+msg, MsgMove)
-				}
-			} else {
-				g.NotifyRoomExcept(oldLoc, player, player,
-					fmt.Sprintf("%s has left.", DisplayName(playerObj.Name)), MsgMove)
-			}
-		}
+		g.announceLeave(player, oldLoc, isDark)
 		g.RemoveFromContents(oldLoc, player)
-
-		// Watch system: notify watchers of departure
-		g.NotifyWatch(player, oldLoc, "left")
 	}
 
 	// Set new location
@@ -1971,7 +2065,9 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	// Add to new location's contents chain
 	g.AddToContents(dest, player)
 
-	// Announce arrival (default, before ShowRoom evaluates OSUCC)
+	// Arrival announce happens below via announceEnter (after ShowRoom in
+	// the AENTER/OENTER block) — but the default "has arrived" line precedes
+	// ShowRoom in C's ordering, so emit just that part here.
 	if !isDark {
 		g.NotifyRoomExcept(dest, player, player,
 			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)), MsgMove)
@@ -1993,27 +2089,22 @@ func (g *Game) MovePlayer(d *Descriptor, dest gamedb.DBRef) {
 	// ShowRoom handles SUCC/OSUCC/ASUCC display via the lock-check path.
 	g.ShowRoom(d, dest)
 
-	// Dest room: AENTER action (35), OENTER to room (53) - skip if DARK
+	// Dest room: AENTER/OENTER/listeners/watchers — C process_enter_loc.
+	// The default "has arrived" was already emitted before ShowRoom.
 	if !isDark {
-		g.QueueAttrAction(dest, player, 35, nil) // AENTER
-		if oenter := g.GetAttrText(dest, 53); oenter != "" {
+		g.QueueAttrAction(dest, player, aAEnter, nil)
+		if oenter := g.GetAttrText(dest, aOEnter); oenter != "" {
 			ctx := MakeEvalContextForObj(g, dest, player, func(c *eval.EvalContext) {
 				functions.RegisterAll(c)
 			})
-			msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil)
-			if msg != "" {
+			if msg := ctx.Exec(oenter, eval.EvFCheck|eval.EvEval|eval.EvStrip, nil); msg != "" {
 				g.NotifyRoomExcept(dest, player, player,
 					DisplayName(playerObj.Name)+" "+msg, MsgMove)
 			}
 		}
-
-		// Notify listeners on arrival
 		g.MatchListenPatterns(dest, player,
 			fmt.Sprintf("%s has arrived.", DisplayName(playerObj.Name)))
 	}
-
-	// Watch system: notify watchers of arrival
-	// (NotifyWatch internally filters dark players)
 	g.NotifyWatch(player, dest, "arrived")
 }
 
@@ -2486,7 +2577,9 @@ func (g *Game) ShowObject(d *Descriptor, target gamedb.DBRef) {
 }
 
 // ShowExamine shows detailed object info (wizard/owner command).
-func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
+func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef, brief ...bool) {
+	// C EXAM_BRIEF: identical output minus the attribute list
+	suppressAttrs := len(brief) > 0 && brief[0]
 	obj, ok := g.DB.Objects[target]
 	if !ok {
 		g.Notify(d.Player, "I don't see that here.")
@@ -2501,6 +2594,27 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 
 		// 2. Type/Flags line with full flag names (C: if mushconf.ex_flags)
 		g.Notify(d.Player, flagDescription(g, d.Player, obj))
+
+		// 2b. Desc — C prints it via view_atr before the Owner line and
+		// excludes it from the later attribute listing.
+		for _, attr := range obj.Attrs {
+			if attr.Number != 6 { // A_DESC
+				continue
+			}
+			text := eval.StripAttrPrefix(attr.Value)
+			if text == "" {
+				break
+			}
+			info := ParseAttrInfo(attr.Value)
+			def := g.LookupAttrDef(attr.Number)
+			annotation := attrAnnotation(g, d.Player, target, ResolveOwner(g, target), info, def)
+			if annotation != "" {
+				g.Notify(d.Player, fmt.Sprintf("\x1b[1mDesc %s:\x1b[0m %s", annotation, text))
+			} else {
+				g.Notify(d.Player, fmt.Sprintf("\x1b[1mDesc:\x1b[0m %s", text))
+			}
+			break
+		}
 
 		// 3. Owner/Key/Pennies line
 		// C: "Owner: Name  Key: lockexpr  Pennies: N"
@@ -2527,26 +2641,10 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		g.Notify(d.Player, fmt.Sprintf("Owner: %s  Key: %s %s: %d",
 			g.PlayerName(obj.Owner), lockDisplay, coinName, obj.Pennies))
 
-		// 4. Timestamps
-		if !obj.LastAccess.IsZero() || !obj.LastMod.IsZero() {
-			// C shows "Created:" on its own line, but we don't have CreatedTime in our struct.
-			// C shows "Accessed: <time>    Modified: <time>" on one line.
-			accessStr := ""
-			modStr := ""
-			if !obj.LastAccess.IsZero() {
-				accessStr = obj.LastAccess.Format("Mon Jan 02 15:04:05 2006")
-			}
-			if !obj.LastMod.IsZero() {
-				modStr = obj.LastMod.Format("Mon Jan 02 15:04:05 2006")
-			}
-			if accessStr != "" && modStr != "" {
-				g.Notify(d.Player, fmt.Sprintf("Accessed: %s    Modified: %s", accessStr, modStr))
-			} else if accessStr != "" {
-				g.Notify(d.Player, fmt.Sprintf("Accessed: %s", accessStr))
-			} else if modStr != "" {
-				g.Notify(d.Player, fmt.Sprintf("Modified: %s", modStr))
-			}
-		}
+		// 4. Timestamps — C prints the line unconditionally (ctime format)
+		g.Notify(d.Player, fmt.Sprintf("Accessed: %s    Modified: %s",
+			obj.LastAccess.Format("Mon Jan _2 15:04:05 2006"),
+			obj.LastMod.Format("Mon Jan _2 15:04:05 2006")))
 
 		// 5. Zone (always shown, even *NOTHING*)
 		g.Notify(d.Player, fmt.Sprintf("Zone: %s", g.unparseObject(d.Player, obj.Zone)))
@@ -2556,10 +2654,12 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 			g.Notify(d.Player, fmt.Sprintf("Parent: %s", g.unparseObject(d.Player, obj.Parent)))
 		}
 
-		// 7. Powers (only if any powers are set)
-		if pwrStr := powerDescription(obj); pwrStr != "" {
-			g.Notify(d.Player, pwrStr)
+		// 7. Powers — C always prints the line, empty or not
+		pwrStr := powerDescription(obj)
+		if pwrStr == "" {
+			pwrStr = "Powers:"
 		}
+		g.Notify(d.Player, pwrStr)
 	}
 
 	// Check per-player TRUNC_LENGTH for attribute display truncation
@@ -2570,10 +2670,17 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		}
 	}
 
-	// Show attributes with permission checks
+	// Show attributes with permission checks (skipped by examine/brief)
 	// Resolve the object's resolved owner for annotation comparison
 	objResolvedOwner := ResolveOwner(g, target)
-	for _, attr := range obj.Attrs {
+	attrs := obj.Attrs
+	if suppressAttrs {
+		attrs = nil
+	}
+	for _, attr := range attrs {
+		if attr.Number == 6 { // A_DESC — already shown via the view_atr block
+			continue
+		}
 		info := ParseAttrInfo(attr.Value)
 		def := g.LookupAttrDef(attr.Number)
 		if !CanReadAttr(g, d.Player, target, def, info.Flags, info.Owner) {
@@ -2600,10 +2707,12 @@ func (g *Game) ShowExamine(d *Descriptor, target gamedb.DBRef) {
 		if showAnnotation {
 			annotation = attrAnnotation(g, d.Player, target, objResolvedOwner, info, def)
 		}
+		// C view_atr: bold "Name [annot]:" prefix, no indentation
+		// attrAnnotation already includes its own brackets
 		if annotation != "" {
-			g.Notify(d.Player, fmt.Sprintf("  %s %s: %s", name, annotation, text))
+			g.Notify(d.Player, fmt.Sprintf("\x1b[1m%s %s:\x1b[0m %s", name, annotation, text))
 		} else {
-			g.Notify(d.Player, fmt.Sprintf("  %s: %s", name, text))
+			g.Notify(d.Player, fmt.Sprintf("\x1b[1m%s:\x1b[0m %s", name, text))
 		}
 	}
 
@@ -2824,67 +2933,26 @@ type flagEntry struct {
 	ListPerm int // flagPermPublic/Wizard/God
 }
 
-var flagLetters = []flagEntry{
-	// Matches C TinyMUSH gen_flags[] order exactly
-	{1, gamedb.Flag2Abode, 'A', "ABODE", flagPermPublic},
-	{1, gamedb.Flag2Blind, 'B', "BLIND", flagPermPublic},
-	{0, gamedb.FlagChownOK, 'C', "CHOWN_OK", flagPermPublic},
-	{0, gamedb.FlagDark, 'D', "DARK", flagPermPublic},
-	{1, gamedb.Flag2Floating, 'F', "FREE", flagPermPublic},
-	{0, gamedb.FlagGoing, 'G', "GOING", flagPermPublic},
-	{0, gamedb.FlagHaven, 'H', "HAVEN", flagPermPublic},
-	{0, gamedb.FlagInherit, 'I', "INHERIT", flagPermPublic},
-	{0, gamedb.FlagJumpOK, 'J', "JUMP_OK", flagPermPublic},
-	{1, gamedb.Flag2Key, 'K', "KEY", flagPermPublic},
-	{0, gamedb.FlagLinkOK, 'L', "LINK_OK", flagPermPublic},
-	{0, gamedb.FlagMonitor, 'M', "MONITOR", flagPermPublic},
-	{0, gamedb.FlagNoSpoof, 'N', "NOSPOOF", flagPermWizard},
-	{0, gamedb.FlagOpaque, 'O', "OPAQUE", flagPermPublic},
-	{0, gamedb.FlagQuiet, 'Q', "QUIET", flagPermPublic},
-	{0, gamedb.FlagSticky, 'S', "STICKY", flagPermPublic},
-	{0, gamedb.FlagTrace, 'T', "TRACE", flagPermPublic},
-	{1, gamedb.Flag2Unfindable, 'U', "UNFINDABLE", flagPermPublic},
-	{0, gamedb.FlagVisual, 'V', "VISUAL", flagPermPublic},
-	{0, gamedb.FlagWizard, 'W', "WIZARD", flagPermPublic},
-	{1, gamedb.Flag2Ansi, 'X', "ANSI", flagPermPublic},
-	{1, gamedb.Flag2ParentOK, 'Y', "PARENT_OK", flagPermPublic},
-	{0, gamedb.FlagRoyalty, 'Z', "ROYALTY", flagPermPublic},
-	{0, gamedb.FlagHearThru, 'a', "AUDIBLE", flagPermPublic},
-	{1, gamedb.Flag2Bounce, 'b', "BOUNCE", flagPermPublic},
-	{1, gamedb.Flag2Connected, 'c', "CONNECTED", flagPermPublic},
-	{0, gamedb.FlagDestroyOK, 'd', "DESTROY_OK", flagPermPublic},
-	{0, gamedb.FlagEnterOK, 'e', "ENTER_OK", flagPermPublic},
-	{1, gamedb.Flag2Fixed, 'f', "FIXED", flagPermPublic},
-	{1, gamedb.Flag2Uninspected, 'g', "UNINSPECTED", flagPermWizard},
-	{0, gamedb.FlagHalt, 'h', "HALTED", flagPermPublic},
-	{0, gamedb.FlagImmortal, 'i', "IMMORTAL", flagPermPublic},
-	{1, gamedb.Flag2Gagged, 'j', "GAGGED", flagPermPublic},
-	{1, gamedb.Flag2Light, 'l', "LIGHT", flagPermPublic},
-	{0, gamedb.FlagMyopic, 'm', "MYOPIC", flagPermPublic},
-	{1, gamedb.Flag2ZoneParent, 'o', "ZONE", flagPermPublic},
-	{0, gamedb.FlagPuppet, 'p', "PUPPET", flagPermPublic},
-	{0, gamedb.FlagTerse, 'q', "TERSE", flagPermPublic},
-	{0, gamedb.FlagRobot, 'r', "ROBOT", flagPermPublic},
-	{0, gamedb.FlagSafe, 's', "SAFE", flagPermPublic},
-	{0, gamedb.FlagSeeThru, 't', "TRANSPARENT", flagPermPublic},
-	{1, gamedb.Flag2Suspect, 'u', "SUSPECT", flagPermWizard},
-	{0, gamedb.FlagVerbose, 'v', "VERBOSE", flagPermPublic},
-	{1, gamedb.Flag2Staff, 'w', "STAFF", flagPermPublic},
-	{1, gamedb.Flag2Slave, 'x', "SLAVE", flagPermWizard},
-	{1, gamedb.Flag2ControlOK, 'z', "CONTROL_OK", flagPermPublic},
-	{1, gamedb.Flag2StopMatch, '!', "STOP", flagPermPublic},
-	{1, gamedb.Flag2HasCommands, '$', "COMMANDS", flagPermPublic},
-	{1, gamedb.Flag2NoBLeed, '-', "NOBLEED", flagPermPublic},
-	{1, gamedb.Flag2Watcher, '+', "WATCHER", flagPermPublic},
-	{1, gamedb.Flag2HasDaily, '*', "HAS_DAILY", flagPermGod},
-	{0, gamedb.FlagHasStartup, '=', "HAS_STARTUP", flagPermGod},
-	{1, gamedb.Flag2HasFwd, '&', "HAS_FORWARDLIST", flagPermGod},
-	{1, gamedb.Flag2HasListen, '@', "HAS_LISTEN", flagPermGod},
-	{1, gamedb.Flag2HTML, '~', "HTML", flagPermPublic},
-	{1, gamedb.Flag2HeadFlag, '?', "HEAD", flagPermPublic},
-	{1, gamedb.Flag2Vacation, '|', "VACATION", flagPermPublic},
-	// Flag word 2
-	{2, gamedb.Flag3Instance, '^', "INSTANCE", flagPermPublic},
+// flagLetters is derived from gamedb.FlagDefs — the single canonical flag
+// inventory (C gen_flags[] order). Letterless Go-internal flags are skipped.
+var flagLetters = buildFlagLetters()
+
+func buildFlagLetters() []flagEntry {
+	out := make([]flagEntry, 0, len(gamedb.FlagDefs))
+	for _, fd := range gamedb.FlagDefs {
+		if fd.Letter == 0 {
+			continue
+		}
+		lp := flagPermPublic
+		switch fd.ListPerm {
+		case gamedb.FlagPermWiz:
+			lp = flagPermWizard
+		case gamedb.FlagPermGod:
+			lp = flagPermGod
+		}
+		out = append(out, flagEntry{Word: fd.Word, Bit: fd.Bit, Letter: fd.Letter, Name: fd.Name, ListPerm: lp})
+	}
+	return out
 }
 
 // powerNameEntry maps power word/bit pairs to their TinyMUSH display name.
@@ -2937,6 +3005,19 @@ var powerNames = []powerNameEntry{
 }
 
 func flagString(obj *gamedb.Object) string {
+	// Mortal view — listperm-restricted flags hidden (C unparse_flags
+	// with a viewer that fails CA_WIZARD/CA_GOD).
+	return flagStringFor(nil, gamedb.Nothing, obj)
+}
+
+// flagStringFor renders the flag letters visible to the given viewer,
+// mirroring C's unparse_flags listperm filtering.
+func flagStringFor(g *Game, viewer gamedb.DBRef, obj *gamedb.Object) string {
+	wizView, godView := false, false
+	if g != nil && viewer != gamedb.Nothing {
+		godView = IsGod(g, viewer)
+		wizView = godView || Wizard(g, viewer)
+	}
 	var buf strings.Builder
 	switch obj.ObjType() {
 	case gamedb.TypeRoom:
@@ -2947,9 +3028,15 @@ func flagString(obj *gamedb.Object) string {
 		buf.WriteByte('P')
 	}
 	for _, fl := range flagLetters {
-		// C's decode_flags skips FLAG_INTERNAL flags in flags() output
-		if fl.ListPerm == flagPermGod {
-			continue
+		switch fl.ListPerm {
+		case flagPermWizard:
+			if !wizView {
+				continue
+			}
+		case flagPermGod:
+			if !godView {
+				continue
+			}
 		}
 		if fl.Word == 0 && obj.HasFlag(fl.Bit) {
 			buf.WriteByte(fl.Letter)
@@ -3034,7 +3121,7 @@ func (g *Game) unparseObject(player, target gamedb.DBRef) string {
 		return fmt.Sprintf("*ILLEGAL*(#%d)", target)
 	}
 	if obj.ObjType() == gamedb.TypeGarbage {
-		return fmt.Sprintf("*GARBAGE*(#%d%s)", target, flagString(obj))
+		return fmt.Sprintf("*GARBAGE*(#%d%s)", target, flagStringFor(g, player, obj))
 	}
 	// C TinyMUSH: MyopicExam(p,x) — VISUAL || (!Myopic(p) && (See_All(p) || same_owner || control_lock))
 	// When obey_myopic (look/contents), MYOPIC suppresses dbrefs. When !obey_myopic (examine), use Examinable.
@@ -3050,7 +3137,7 @@ func (g *Game) unparseObject(player, target gamedb.DBRef) string {
 		obj.HasFlag(gamedb.FlagLinkOK) || obj.HasFlag(gamedb.FlagDestroyOK) ||
 		obj.HasFlag2(gamedb.Flag2Abode)
 	if showFlags {
-		return fmt.Sprintf("%s(#%d%s)", obj.Name, target, flagString(obj))
+		return fmt.Sprintf("%s(#%d%s)", obj.Name, target, flagStringFor(g, player, obj))
 	}
 	return obj.Name
 }
@@ -3770,8 +3857,25 @@ func (g *Game) SetAttrByName(obj gamedb.DBRef, attrName string, value string, ex
 
 // CreateObject creates a new object in the database.
 func (g *Game) CreateObject(name string, objType gamedb.ObjectType, owner gamedb.DBRef) gamedb.DBRef {
-	ref := g.NextRef
-	g.NextRef++
+	// C: pop the first object from the freelist. If the head is not clean
+	// garbage, discard the remainder of the freelist and grow the db instead.
+	// #0 (Room Zero) can never be garbage, so a freelist head <= 0 also covers
+	// zero-value Game structs that never ran MakeFreelist.
+	ref := gamedb.Nothing
+	if g.Freelist > 0 {
+		head := g.Freelist
+		if obj, ok := g.DB.Objects[head]; ok && g.isCleanGarbage(head) {
+			g.Freelist = obj.Link
+			ref = head
+		} else {
+			log.Printf("Freelist damaged, bad object #%d", head)
+			g.Freelist = gamedb.Nothing
+		}
+	}
+	if ref == gamedb.Nothing {
+		ref = g.NextRef
+		g.NextRef++
+	}
 
 	// Apply default flags from config (C: player_flags, room_flags, etc.)
 	var defFlags [3]int
@@ -3788,18 +3892,21 @@ func (g *Game) CreateObject(name string, objType gamedb.ObjectType, owner gamedb
 		}
 	}
 
+	now := time.Now()
 	obj := &gamedb.Object{
-		DBRef:    ref,
-		Name:     name,
-		Location: gamedb.Nothing,
-		Zone:     gamedb.Nothing,
-		Contents: gamedb.Nothing,
-		Exits:    gamedb.Nothing,
-		Link:     gamedb.Nothing,
-		Next:     gamedb.Nothing,
-		Owner:    owner,
-		Parent:   gamedb.Nothing,
-		Flags:    [3]int{int(objType) | defFlags[0], defFlags[1], defFlags[2]},
+		DBRef:      ref,
+		Name:       name,
+		Location:   gamedb.Nothing,
+		Zone:       gamedb.Nothing,
+		Contents:   gamedb.Nothing,
+		Exits:      gamedb.Nothing,
+		Link:       gamedb.Nothing,
+		Next:       gamedb.Nothing,
+		Owner:      owner,
+		Parent:     gamedb.Nothing,
+		Flags:      [3]int{int(objType) | defFlags[0], defFlags[1], defFlags[2]},
+		LastAccess: now,
+		LastMod:    now,
 	}
 	g.DB.Objects[ref] = obj
 	g.PersistObject(obj)

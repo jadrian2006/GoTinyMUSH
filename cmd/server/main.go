@@ -421,6 +421,11 @@ func main() {
 	// Rebuild all content/exit chains from authoritative Location data
 	srv.Game.RepairAllChains()
 
+	// C TinyMUSH runs do_dbck at startup (game.c): build the garbage freelist
+	// (trimming clean garbage at the top of the db), then purge GOING objects.
+	srv.Game.MakeFreelist()
+	srv.Game.PurgeGoing()
+
 	// Run @startup actions
 	srv.Game.RunStartup()
 

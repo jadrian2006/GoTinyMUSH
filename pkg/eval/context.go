@@ -75,6 +75,8 @@ type LoopState struct {
 
 // GameState provides connection/game info to eval functions without importing server.
 type GameState interface {
+	// GodRef returns the dbref of the God player (conf god_dbref).
+	GodRef() gamedb.DBRef
 	// ConnectedPlayers returns all connected player dbrefs.
 	ConnectedPlayers() []gamedb.DBRef
 	// ConnectedPlayersVisible returns connected players visible to viewer.
@@ -329,6 +331,14 @@ type EvalContext struct {
 	// Loop/switch state
 	Loop LoopState
 
+	// TRACE flag support (C: Trace(player) eval tracing in exec())
+	TraceOn        bool
+	TraceTopDown   bool // C mudconf.trace_topdown (default true): outermost-first order
+	TraceLimit     int  // C mudconf.trace_limit (trace_output_limit conf)
+	traceDepth     int
+	traceLines     []string
+	traceDiscarded int
+
 	// Function call tracking
 	FuncNestLev int
 	FuncInvkCtr int
@@ -440,6 +450,7 @@ const (
 	FnPriv    = 0x0004 // Privileged function
 	FnNoregs  = 0x0008 // Don't pass registers
 	FnPres    = 0x0010 // Preserve registers across call
+	FnRawArg  = 0x0020 // C nargs == -1: the whole arglist is ONE argument, commas included
 )
 
 // Function access levels (matching C TinyMUSH CA_PUBLIC/CA_WIZARD/CA_GOD/CA_DISABLED)

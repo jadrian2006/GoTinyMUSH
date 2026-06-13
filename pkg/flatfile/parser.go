@@ -766,7 +766,33 @@ func (p *Parser) parseEOF() error {
 	if strings.TrimSpace(line) != "***END OF DUMP***" {
 		return fmt.Errorf("bad EOF marker: %q", line)
 	}
+	p.fillGarbageGaps()
 	return nil
+}
+
+// fillGarbageGaps materializes clean garbage objects for every dbref below the
+// +S size header that has no record in the flatfile. C TinyMUSH dumps skip
+// garbage objects entirely; on load, db_grow (db.c) initializes the gap slots
+// as TYPE_GARBAGE|GOING owned by God, which is what feeds the object freelist.
+func (p *Parser) fillGarbageGaps() {
+	for ref := gamedb.DBRef(0); ref < gamedb.DBRef(p.db.Size); ref++ {
+		if _, ok := p.db.Objects[ref]; ok {
+			continue
+		}
+		p.db.Objects[ref] = &gamedb.Object{
+			DBRef:    ref,
+			Name:     "",
+			Location: gamedb.Nothing,
+			Zone:     gamedb.Nothing,
+			Contents: gamedb.Nothing,
+			Exits:    gamedb.Nothing,
+			Link:     gamedb.Nothing,
+			Next:     gamedb.Nothing,
+			Owner:    gamedb.DBRef(1),
+			Parent:   gamedb.Nothing,
+			Flags:    [3]int{int(gamedb.TypeGarbage) | gamedb.FlagGoing},
+		}
+	}
 }
 
 // stripAttrInfoPrefix removes the "\x01owner:flags:value" prefix from a raw
